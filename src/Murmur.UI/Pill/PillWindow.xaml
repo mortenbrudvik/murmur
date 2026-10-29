@@ -1,0 +1,159 @@
+<Window x:Class="Murmur.UI.Pill.PillWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:pill="clr-namespace:Murmur.UI.Pill"
+        mc:Ignorable="po"
+        Title="Murmur recording indicator"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ShowActivated="False"
+        ResizeMode="NoResize"
+        Focusable="False"
+        SizeToContent="WidthAndHeight"
+        FontFamily="Segoe UI">
+
+  <Window.Resources>
+    <SolidColorBrush x:Key="PillBackgroundBrush" Color="#E0161820" po:Freeze="True" />
+    <SolidColorBrush x:Key="PillBorderBrush" Color="#1FFFFFFF" po:Freeze="True" />
+    <SolidColorBrush x:Key="PillRecordingBrush" Color="#FF5A5F" po:Freeze="True" />
+    <SolidColorBrush x:Key="PillRecordingHaloBrush" Color="#2EFF5A5F" po:Freeze="True" />
+    <SolidColorBrush x:Key="PillAccentBrush" Color="#8FB3FF" po:Freeze="True" />
+    <SolidColorBrush x:Key="PillTextBrush" Color="#DFE3EE" po:Freeze="True" />
+
+    <pill:BarHeightConverter x:Key="BarHeightConverter" />
+    <SineEase x:Key="PulseEasing" EasingMode="EaseInOut" po:Freeze="True" />
+
+    <!-- The three faces of the pill are all collapsed until the view model's Mode selects one. -->
+    <Style x:Key="ModeSection" TargetType="FrameworkElement">
+      <Setter Property="Visibility" Value="Collapsed" />
+    </Style>
+
+    <!-- Three dots that pulse in turn (1 s cycle, 0.15 s apart) for as long as they are visible. -->
+    <ControlTemplate x:Key="PulsingDotsTemplate" TargetType="Control">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Ellipse x:Name="Dot1" Width="4" Height="4" Opacity="0.25" Fill="{DynamicResource PillAccentBrush}" />
+        <Ellipse x:Name="Dot2" Width="4" Height="4" Opacity="0.25" Margin="3,0,0,0" Fill="{DynamicResource PillAccentBrush}" />
+        <Ellipse x:Name="Dot3" Width="4" Height="4" Opacity="0.25" Margin="3,0,0,0" Fill="{DynamicResource PillAccentBrush}" />
+      </StackPanel>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsVisible" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard Name="Pulse">
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Dot1" Storyboard.TargetProperty="Opacity"
+                                 From="0.25" To="1" Duration="0:0:0.5" AutoReverse="True" RepeatBehavior="Forever"
+                                 EasingFunction="{StaticResource PulseEasing}" />
+                <DoubleAnimation Storyboard.TargetName="Dot2" Storyboard.TargetProperty="Opacity"
+                                 From="0.25" To="1" Duration="0:0:0.5" BeginTime="0:0:0.15" AutoReverse="True" RepeatBehavior="Forever"
+                                 EasingFunction="{StaticResource PulseEasing}" />
+                <DoubleAnimation Storyboard.TargetName="Dot3" Storyboard.TargetProperty="Opacity"
+                                 From="0.25" To="1" Duration="0:0:0.5" BeginTime="0:0:0.3" AutoReverse="True" RepeatBehavior="Forever"
+                                 EasingFunction="{StaticResource PulseEasing}" />
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <RemoveStoryboard BeginStoryboardName="Pulse" />
+          </Trigger.ExitActions>
+        </Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate>
+  </Window.Resources>
+
+  <!-- The margin is transparent window area that the drop shadow is drawn into. The capsule is 30 DIPs high in every
+       mode, so CornerRadius 15 makes true semicircular ends (WPF scales a huge radius per axis into an ellipse). -->
+  <Border x:Name="Capsule"
+          Margin="{x:Static pill:PillWindow.ShadowMargin}"
+          Padding="12,6"
+          CornerRadius="15"
+          BorderThickness="1"
+          BorderBrush="{DynamicResource PillBorderBrush}"
+          Background="{DynamicResource PillBackgroundBrush}"
+          IsHitTestVisible="False">
+    <Border.Effect>
+      <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.45" Color="Black" />
+    </Border.Effect>
+
+    <!-- MinHeight keeps the capsule the same height in every mode, so it only changes width. -->
+    <Grid MinHeight="{x:Static pill:BarHeightConverter.MaxHeight}">
+
+      <!-- Listening: red dot and the level bars -->
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <StackPanel.Style>
+          <Style TargetType="StackPanel" BasedOn="{StaticResource ModeSection}">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Mode}" Value="Listening">
+                <Setter Property="Visibility" Value="Visible" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </StackPanel.Style>
+
+        <Grid Width="7" Height="7" Margin="0,0,8,0" VerticalAlignment="Center">
+          <Ellipse Margin="-3" Fill="{DynamicResource PillRecordingHaloBrush}" />
+          <Ellipse Fill="{DynamicResource PillRecordingBrush}" />
+        </Grid>
+
+        <!-- 2 px between bars: 1 px either side of each, pulled back in at the ends. -->
+        <ItemsControl ItemsSource="{Binding Bars}"
+                      Height="{x:Static pill:BarHeightConverter.MaxHeight}"
+                      Margin="-1,0"
+                      Focusable="False"
+                      IsTabStop="False">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Rectangle Width="2.5"
+                         Margin="1,0"
+                         RadiusX="1.25"
+                         RadiusY="1.25"
+                         VerticalAlignment="Center"
+                         Fill="{DynamicResource PillAccentBrush}"
+                         Height="{Binding Converter={StaticResource BarHeightConverter}}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <!-- Transcribing: three pulsing dots -->
+      <Control Template="{StaticResource PulsingDotsTemplate}" Focusable="False" IsTabStop="False">
+        <Control.Style>
+          <Style TargetType="Control" BasedOn="{StaticResource ModeSection}">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Mode}" Value="Transcribing">
+                <Setter Property="Visibility" Value="Visible" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Control.Style>
+      </Control>
+
+      <!-- Notice: a short message -->
+      <TextBlock Text="{Binding NoticeText}"
+                 FontSize="12"
+                 VerticalAlignment="Center"
+                 TextWrapping="NoWrap"
+                 Foreground="{DynamicResource PillTextBrush}">
+        <TextBlock.Style>
+          <Style TargetType="TextBlock" BasedOn="{StaticResource ModeSection}">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Mode}" Value="Notice">
+                <Setter Property="Visibility" Value="Visible" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </TextBlock.Style>
+      </TextBlock>
+
+    </Grid>
+  </Border>
+</Window>

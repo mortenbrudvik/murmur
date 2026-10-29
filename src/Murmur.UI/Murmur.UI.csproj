@@ -3,6 +3,8 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
+    <!-- Required by the LibraryImport source generator (Pill/PillNative.cs) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Resolved from this project file so it also works for "dotnet run" on the project, not only solution builds -->
     <WebAppDir>$(MSBuildThisFileDirectory)..\WebApp\</WebAppDir>
   </PropertyGroup>
