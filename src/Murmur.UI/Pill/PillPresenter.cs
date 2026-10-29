@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using Murmur.Core.Dictation;
@@ -19,6 +20,7 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     private readonly ILogger _logger = Log.ForContext<PillPresenter>();
 
     private DispatcherTimer? _noticeTimer;
+    private bool _shownBefore;
 
     // Work area (DIPs) of the monitor the pill was last shown on; reused while it stays visible.
     private Rect _workAreaDip;
@@ -80,6 +82,9 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 
         if (wasHidden)
         {
+            var stopwatch = _shownBefore ? null : Stopwatch.StartNew();
+            _shownBefore = true;
+
             // ShowActivated is false and the window is WS_EX_NOACTIVATE, so WPF shows it with SW_SHOWNOACTIVATE.
             // Calling ShowWindow directly would leave WPF thinking the window is collapsed, and it would never lay out or render.
             window.Show();
@@ -88,6 +93,9 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
             // content, which would stretch the capsule off-center. A fresh layout pass corrects it.
             window.InvalidateMeasure();
             window.UpdateLayout();
+
+            if (stopwatch is not null)
+                _logger.Debug("First pill Show took {Milliseconds:F1} ms", stopwatch.Elapsed.TotalMilliseconds);
         }
     }
 

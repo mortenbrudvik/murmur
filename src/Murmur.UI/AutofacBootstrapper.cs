@@ -1,6 +1,7 @@
 using Autofac;
 using MediatR.Extensions.Autofac.DependencyInjection;
 using MediatR.Extensions.Autofac.DependencyInjection.Builder;
+using Murmur.Core.Services;
 using Murmur.Interop;
 
 namespace Murmur.UI;
@@ -11,12 +12,12 @@ public class AutofacBootstrapper
     {
         var builder = new ContainerBuilder();
 
-        // Scan every assembly that contains MediatR handlers.
-        // Add the Murmur.Core assembly here (via a handler type) once Core has request handlers.
+        // Scan every assembly that contains MediatR requests, notifications and handlers.
         var configuration = MediatRConfigurationBuilder
             .Create(
                 typeof(AppModule).Assembly,
-                typeof(ApiBridge).Assembly
+                typeof(ApiBridge).Assembly,
+                typeof(MurmurPaths).Assembly
             )
             .WithAllOpenGenericHandlerTypesRegistered()
             .Build();

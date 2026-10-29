@@ -13,8 +13,17 @@ public partial class MainWindow : FluentWindow
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        var webView = (DataContext as MainViewModel)?.WebView;
-        webView?.CoreWebView2?.RemoveHostObjectFromScript("apibridge");
+        if (App.IsQuitting)
+        {
+            var webView = (DataContext as MainViewModel)?.WebView;
+            webView?.CoreWebView2?.RemoveHostObjectFromScript("apibridge");
+        }
+        else
+        {
+            // Closing only hides the window: Murmur keeps running in the tray, and the page keeps its state.
+            e.Cancel = true;
+            Hide();
+        }
 
         base.OnClosing(e);
     }

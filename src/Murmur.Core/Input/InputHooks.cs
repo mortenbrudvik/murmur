@@ -9,9 +9,10 @@ namespace Murmur.Core.Input;
 /// Global low-level keyboard hook (always on once installed) and mouse hook (on demand, only while the hotkey is held,
 /// so mouse movement is not routed through Murmur the rest of the time).
 /// <para>
-/// Install and use on the UI thread only: low-level hooks are called on the installing thread's message loop, and
-/// Windows silently removes a hook whose callback is too slow. The callbacks therefore only translate the event, call
-/// the handler and return; no I/O, no logging, and no exception is ever allowed to escape into native code.
+/// Install, use and dispose on one thread that runs a message loop (Murmur gives it a dedicated thread): low-level
+/// hooks are called on the installing thread's message loop, and Windows silently removes a hook whose callback is
+/// too slow. The callbacks therefore only translate the event, call the handler and return; no I/O, no logging, and
+/// no exception is ever allowed to escape into native code.
 /// </para>
 /// </summary>
 public sealed class InputHooks : IDisposable

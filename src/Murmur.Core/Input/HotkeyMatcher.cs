@@ -30,8 +30,8 @@ public readonly record struct MatchResult(HotkeySignal Signal, bool Swallow);
 /// <item>Esc while <see cref="DictationActive"/> → <see cref="HotkeySignal.Escape"/>, swallowed down and up.</item>
 /// <item>Injected input (such as Murmur's own Ctrl+V) is ignored entirely.</item>
 /// </list>
-/// Called from the keyboard hook on the UI thread; <see cref="Hotkey"/> and <see cref="DictationActive"/> may be set
-/// from any thread.
+/// Called from the keyboard hook's thread, while the controller reads and resets it from the UI thread: every member
+/// is thread-safe (state under a lock, <see cref="DictationActive"/> volatile).
 /// </summary>
 public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
 {

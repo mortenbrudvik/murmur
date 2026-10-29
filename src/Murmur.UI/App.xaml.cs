@@ -1,6 +1,15 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Interop;
 using Autofac;
+using Murmur.Common;
+using Murmur.Core.Dictation;
+using Murmur.Core.Input;
+using Murmur.Core.Insertion;
+using Murmur.Core.Services;
+using Murmur.Core.Speech;
+using Murmur.UI.Pill;
+using Murmur.UI.Tray;
 using Serilog;
 using Wpf.Ui.Appearance;
 
@@ -8,35 +17,28 @@ namespace Murmur.UI;
 
 public partial class App : Application
 {
+    private const string MinimizedArgument = "--minimized";
+
+    private readonly CancellationTokenSource _appCts = new();
+
     private IContainer? _container;
+    private SingleInstanceGuard? _guard;
+    private MainWindow? _mainWindow;
+    private InputHookHost? _inputHooks;
+    private TrayIconHost? _tray;
+
+    /// <summary>Set once Murmur is really exiting; until then closing the main window only hides it.</summary>
+    public static bool IsQuitting { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        var logPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Murmur", "Logs", "Murmur-.log");
-
-        Log.Logger = new LoggerConfiguration()
-#if DEBUG
-            .MinimumLevel.Debug()
-#else
-            .MinimumLevel.Information()
-#endif
-            .Enrich.FromLogContext()
-            .WriteTo.Debug(outputTemplate: "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
-            .WriteTo.File(
-                logPath,
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 31,
-                fileSizeLimitBytes: 50_000_000,
-                rollOnFileSizeLimit: true,
-                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
-            .CreateLogger();
-
+        // 1. Logging
+        ConfigureLogging();
         Log.Information("Murmur starting");
 
+        // 2. WebView2
         if (!IsWebView2RuntimeInstalled())
         {
             MessageBox.Show(
@@ -66,24 +68,169 @@ public partial class App : Application
             args.SetObserved();
         };
 
+        // 3. Single instance: a second launch shows the running instance's window and exits.
+        _guard = new SingleInstanceGuard();
+        if (!_guard.TryAcquire())
+        {
+            _guard.SignalExisting();
+            Shutdown();
+            return;
+        }
+
+        // 4. Murmur lives in the tray: windows opening and closing never end it, only Quit does.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        // 5. Container and API
         _container = AutofacBootstrapper.Bootstrap();
 
-        // Register API endpoints here: one MediatR request per IPC call, e.g.
+        // ── Task 14: register the API endpoints here, one MediatR request per IPC call ──────────────
         //   var registry = _container.Resolve<ApiRegistry>();
-        //   registry.Register<GetThingRequest>("thingService", "getThing");
+        //   registry.Register<GetHistoryRequest>("history", "get");
+        // ────────────────────────────────────────────────────────────────────────────────────────────
 
-        // The theme is fixed to dark and applied before the window is created to avoid a flicker.
+        // 6. The theme is fixed to dark and applied before any window is created to avoid a flicker.
         ApplicationThemeManager.Apply(ApplicationTheme.Dark);
 
-        var mainWindow = _container.Resolve<MainWindow>();
-        mainWindow.Show();
+        // Created before the pill and set explicitly: WPF makes the first window it sees the MainWindow, and that
+        // must never be the pill. Its WebView only starts when the window is first shown.
+        _mainWindow = _container.Resolve<MainWindow>();
+        MainWindow = _mainWindow;
+
+        // 7. The pill's window handle exists from the start, so its first Show is quick.
+        var pill = _container.Resolve<PillWindow>();
+        new WindowInteropHelper(pill).EnsureHandle();
+
+        // 8. Dictation. The controller is created here, on the UI thread, because it captures this thread's
+        // SynchronizationContext; hook signals reach it through the dispatcher.
+        var controller = _container.Resolve<DictationController>();
+        StartInputHooks(_container, controller);
+
+        // 9. Tray
+        _tray = _container.Resolve<TrayIconHost>();
+        _tray.OpenRequested += ShowMainWindow;
+        _tray.QuitRequested += Quit;
+        _tray.Show();
+
+        // 10. Speech engine: downloads the model if needed, loads it and warms it up in the background.
+        _container.Resolve<ISpeechEngine>().InitializeAsync(_appCts.Token).FireAndForget();
+
+        // 11. Start with Windows
+        ApplyStartupRegistration(_container);
+
+        // 12. Second launches
+        _guard.ListenForShowRequests(ShowMainWindow);
+
+        // 13. Started at sign-in, Murmur stays in the tray.
+        if (!e.Args.Contains(MinimizedArgument, StringComparer.OrdinalIgnoreCase))
+            ShowMainWindow();
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        // Sign-out or shutdown: WPF shuts the app down next, so the main window must really close.
+        IsQuitting = true;
+        base.OnSessionEnding(e);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        StopInputAndTray();
+
+        // Disposes the controller (releasing the microphone) and the rest; the speech engine is not container-owned.
         _container?.Dispose();
+        _guard?.Dispose();
+
+        Log.Information("Murmur stopped");
         Log.CloseAndFlush();
         base.OnExit(e);
+    }
+
+    private static void ConfigureLogging()
+    {
+        var logPath = Path.Combine(MurmurPaths.Default.LogsDirectory, "Murmur-.log");
+
+        Log.Logger = new LoggerConfiguration()
+#if DEBUG
+            .MinimumLevel.Debug()
+#else
+            .MinimumLevel.Information()
+#endif
+            .Enrich.FromLogContext()
+            .WriteTo.Debug(outputTemplate: "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
+            .WriteTo.File(
+                logPath,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 31,
+                fileSizeLimitBytes: 50_000_000,
+                rollOnFileSizeLimit: true,
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
+    }
+
+    private void StartInputHooks(IContainer container, DictationController controller)
+    {
+        var dispatcher = Dispatcher;
+        _inputHooks = new InputHookHost(
+            container.Resolve<HotkeyMatcher>(),
+            container.Resolve<HotkeyCaptureCoordinator>(),
+            container.Resolve<IKeyboardSender>(),
+            signal => dispatcher.BeginInvoke(() => controller.HandleSignal(signal)));
+
+        try
+        {
+            _inputHooks.Start();
+        }
+        catch (Exception ex)
+        {
+            // Murmur still runs (history, settings), but the hotkey cannot work.
+            Log.Error(ex, "Could not install the keyboard hook; dictation is unavailable");
+        }
+    }
+
+    private static void ApplyStartupRegistration(IContainer container)
+    {
+        try
+        {
+            var settings = container.Resolve<ISettingsService>().Load();
+            container.Resolve<IStartupRegistration>().Apply(settings.StartWithWindows);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not update the start-with-Windows entry");
+        }
+    }
+
+    private void ShowMainWindow()
+    {
+        if (IsQuitting || _mainWindow is null)
+            return;
+
+        _mainWindow.Show();
+        if (_mainWindow.WindowState == WindowState.Minimized)
+            _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.Activate();
+    }
+
+    private void Quit()
+    {
+        if (IsQuitting)
+            return;
+
+        Log.Information("Quit requested");
+        StopInputAndTray();
+
+        // The speech engine is deliberately not disposed: freeing the native model while a transcription may still be
+        // running can crash, and process exit frees the GPU memory.
+        Shutdown();
+    }
+
+    /// <summary>Stops taking hotkeys, removes the tray icon and cancels background work (the model download).</summary>
+    private void StopInputAndTray()
+    {
+        IsQuitting = true;
+        _inputHooks?.Dispose();
+        _tray?.Dispose();
+        _appCts.Cancel();
     }
 
     private static bool IsWebView2RuntimeInstalled()

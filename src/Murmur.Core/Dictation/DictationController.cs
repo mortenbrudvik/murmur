@@ -90,6 +90,8 @@ public sealed class DictationController : IDisposable
         _mediator = mediator;
         _time = time;
         _context = SynchronizationContext.Current;
+        if (_context is null)
+            _logger.Warning("Created without a SynchronizationContext: recorder events and ticks will run on other threads");
 
         _recorder.SamplesAvailable += OnSamplesAvailable;
         _recorder.CaptureFailed += OnCaptureFailed;
@@ -328,8 +330,7 @@ public sealed class DictationController : IDisposable
         InsertResult inserted;
         try
         {
-            // Off the UI thread: the low-level keyboard hook runs there, and clipboard retries could hold it past
-            // LowLevelHooksTimeout, after which Windows silently removes the hook.
+            // Off the UI thread: clipboard retries and the wait for modifiers to be released would freeze it.
             inserted = await Task.Run(() => _inserter.InsertAsync(text, ct));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
