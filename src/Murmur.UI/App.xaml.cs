@@ -2,12 +2,18 @@ using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using Autofac;
+using MediatR;
 using Murmur.Common;
 using Murmur.Core.Dictation;
+using Murmur.Core.Features.Engine;
+using Murmur.Core.Features.History;
+using Murmur.Core.Features.Settings;
+using Murmur.Core.Features.Vocabulary;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.Interop;
 using Murmur.UI.Pill;
 using Murmur.UI.Tray;
 using Serilog;
@@ -98,10 +104,17 @@ public partial class App : Application
         // 5. Container and API
         _container = AutofacBootstrapper.Bootstrap();
 
-        // ── Task 14: register the API endpoints here, one MediatR request per IPC call ──────────────
-        //   var registry = _container.Resolve<ApiRegistry>();
-        //   registry.Register<GetHistoryRequest>("history", "get");
-        // ────────────────────────────────────────────────────────────────────────────────────────────
+        var registry = _container.Resolve<ApiRegistry>();
+        registry.Register<GetHistoryRequest>("history", "get");
+        registry.Register<DeleteHistoryEntryRequest>("history", "delete");
+        registry.Register<ClearHistoryRequest>("history", "clear");
+        registry.Register<GetVocabularyRequest>("vocabulary", "get");
+        registry.Register<UpdateVocabularyRequest>("vocabulary", "update");
+        registry.Register<GetSettingsRequest>("settings", "get");
+        registry.Register<UpdateSettingsRequest>("settings", "update");
+        registry.Register<CaptureHotkeyRequest>("settings", "captureHotkey");
+        registry.Register<GetMicrophonesRequest>("settings", "getMicrophones");
+        registry.Register<GetEngineStatusRequest>("engine", "getStatus");
 
         // 6. The theme is fixed to dark and applied before any window is created to avoid a flicker.
         ApplicationThemeManager.Apply(ApplicationTheme.Dark);
@@ -126,8 +139,13 @@ public partial class App : Application
         _tray.QuitRequested += Quit;
         _tray.Show();
 
-        // 10. Speech engine: downloads the model if needed, loads it and warms it up in the background.
-        _container.Resolve<ISpeechEngine>().InitializeAsync(_appCts.Token).FireAndForget();
+        // 10. Speech engine: downloads the model if needed, loads it and warms it up in the background. Its status
+        // changes reach the main window as a notification; subscribed first, so even the Downloading and Loading
+        // statuses are reported.
+        var engine = _container.Resolve<ISpeechEngine>();
+        var mediator = _container.Resolve<IMediator>();
+        engine.StatusChanged += status => mediator.Publish(new EngineStatusChangedNotification(status)).FireAndForget();
+        engine.InitializeAsync(_appCts.Token).FireAndForget();
 
         // 11. Start with Windows
         ApplyStartupRegistration(_container);
