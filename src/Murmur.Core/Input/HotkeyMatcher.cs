@@ -78,6 +78,20 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
         }
     }
 
+    /// <summary>
+    /// Forgets that the hotkey (and a swallowed Esc) is held, without touching the tracked modifiers. Called after a
+    /// missed key release was recovered by polling, and before a hotkey capture starts, so the next press is not
+    /// mistaken for auto-repeat.
+    /// </summary>
+    public void ResetHeld()
+    {
+        lock (_gate)
+        {
+            _held = false;
+            _escapeHeld = false;
+        }
+    }
+
     public MatchResult OnKey(KeyInput input)
     {
         if (input.IsInjected)

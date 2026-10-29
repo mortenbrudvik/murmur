@@ -119,9 +119,10 @@ public sealed class InputHooks : IDisposable
             {
                 var message = (int)wParam;
                 var isDown = message is NativeMethods.WM_KEYDOWN or NativeMethods.WM_SYSKEYDOWN;
-                if (isDown || message is NativeMethods.WM_KEYUP or NativeMethods.WM_SYSKEYUP)
+                var data = (NativeMethods.KBDLLHOOKSTRUCT*)lParam;
+                if ((isDown || message is NativeMethods.WM_KEYUP or NativeMethods.WM_SYSKEYUP)
+                    && !IsAltGrFakeCtrl(data->vkCode, data->scanCode))
                 {
-                    var data = (NativeMethods.KBDLLHOOKSTRUCT*)lParam;
                     var injected = (data->flags & NativeMethods.LLKHF_INJECTED) != 0;
                     if (handler(new KeyInput((int)data->vkCode, isDown, injected)))
                         return 1;
@@ -154,6 +155,14 @@ public sealed class InputHooks : IDisposable
 
         return NativeMethods.CallNextHookEx(0, nCode, wParam, lParam);
     }
+
+    /// <summary>
+    /// On AltGr keyboard layouts (UK, Nordic, German, French, …) Windows precedes every Right Alt event with a
+    /// synthetic Left Ctrl event (scan code 0x21D, not flagged as injected). It is not a real key press, so it is
+    /// never forwarded to the handler: otherwise Right Alt could not be captured as a hotkey, and a Left Ctrl hotkey
+    /// would fire on every AltGr character. The event itself still goes down the hook chain.
+    /// </summary>
+    internal static bool IsAltGrFakeCtrl(uint vkCode, uint scanCode) => vkCode == 0xA2 && scanCode == 0x21D;
 
     private static bool IsButtonDownOrWheel(int message) => message is
         NativeMethods.WM_LBUTTONDOWN or NativeMethods.WM_RBUTTONDOWN or NativeMethods.WM_MBUTTONDOWN

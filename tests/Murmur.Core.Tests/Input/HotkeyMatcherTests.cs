@@ -360,6 +360,43 @@ public sealed class HotkeyMatcherTests
     }
 
     [Fact]
+    public void ResetHeld_AfterHotkeyDown_NextDownSignalsAgain()
+    {
+        var matcher = NewMatcher();
+        matcher.OnKey(Down(RightCtrl)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
+
+        matcher.ResetHeld();
+
+        matcher.IsHotkeyHeld.ShouldBeFalse();
+        matcher.OnKey(Down(RightCtrl)).ShouldBe(Result(HotkeySignal.HotkeyDown, false));
+    }
+
+    [Fact]
+    public void ResetHeld_AfterSwallowedEscape_NextEscapePassesThrough()
+    {
+        var matcher = NewMatcher();
+        matcher.DictationActive = true;
+        matcher.OnKey(Down(Escape)).ShouldBe(Result(HotkeySignal.Escape, true));
+        matcher.DictationActive = false;
+
+        matcher.ResetHeld();
+
+        matcher.OnKey(Down(Escape)).ShouldBe(Result(HotkeySignal.None, false));
+    }
+
+    [Fact]
+    public void ResetHeld_KeepsTrackedModifiers()
+    {
+        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(LeftShift));
+
+        matcher.ResetHeld();
+
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+    }
+
+    [Fact]
     public void HotkeyChanged_NewHotkeyMatches()
     {
         var matcher = NewMatcher();
