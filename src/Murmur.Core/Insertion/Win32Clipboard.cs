@@ -17,6 +17,11 @@ public sealed class Win32Clipboard : IClipboard
     private const uint CF_UNICODETEXT = 13;
     private const uint CF_ENHMETAFILE = 14;
     private const uint CF_OWNERDISPLAY = 0x80;
+    private const uint CF_DSPBITMAP = 0x82;
+    private const uint CF_DSPMETAFILEPICT = 0x83;
+    private const uint CF_DSPENHMETAFILE = 0x8E;
+    private const uint CF_PRIVATEFIRST = 0x200;
+    private const uint CF_PRIVATELAST = 0x2FF;
     private const uint CF_GDIOBJFIRST = 0x300;
     private const uint CF_GDIOBJLAST = 0x3FF;
 
@@ -33,9 +38,8 @@ public sealed class Win32Clipboard : IClipboard
     public uint SequenceNumber => NativeMethods.GetClipboardSequenceNumber();
 
     /// <summary>
-    /// Copies every HGLOBAL-backed format. Formats whose data is a GDI or other handle (bitmaps, metafiles, palettes,
-    /// owner-display, GDI objects) are skipped: Windows synthesizes CF_BITMAP from CF_DIB, which is copied. Murmur's
-    /// own exclusion markers are skipped too, since every write adds them anyway.
+    /// Copies every HGLOBAL-backed format, plus CF_ENHMETAFILE as its metafile bits (rebuilt by <see cref="Restore"/>),
+    /// so vector-only copies survive. See <see cref="IsSkippedFormat"/> for what is left out.
     /// </summary>
     public ClipboardSnapshot Capture()
     {
@@ -45,11 +49,15 @@ public sealed class Win32Clipboard : IClipboard
         uint format = 0;
         while ((format = NativeMethods.EnumClipboardFormats(format)) != 0)
         {
-            if (IsSkipped(format))
+            if (IsSkippedFormat(format))
                 continue;
 
             var handle = NativeMethods.GetClipboardData(format);
-            if (handle != 0 && ReadGlobal(handle) is { } data)
+            if (handle == 0)
+                continue;
+
+            var data = format == CF_ENHMETAFILE ? ReadEnhMetaFile(handle) : ReadGlobal(handle);
+            if (data is not null)
                 formats.Add(new ClipboardFormatData(format, data));
         }
 
@@ -71,7 +79,12 @@ public sealed class Win32Clipboard : IClipboard
 
         MarkExcludedFromHistory();
         foreach (var format in snapshot.Formats)
-            SetData(format.Format, format.Data);
+        {
+            if (format.Format == CF_ENHMETAFILE)
+                SetEnhMetaFile(format.Data);
+            else
+                SetData(format.Format, format.Data);
+        }
     }
 
     public void SetText(string text)
@@ -87,8 +100,21 @@ public sealed class Win32Clipboard : IClipboard
         SetData(CF_UNICODETEXT, data);
     }
 
-    private static bool IsSkipped(uint format) =>
-        format is CF_BITMAP or CF_METAFILEPICT or CF_PALETTE or CF_ENHMETAFILE or CF_OWNERDISPLAY
+    /// <summary>
+    /// Formats <see cref="Capture"/> leaves out:
+    /// <list type="bullet">
+    /// <item>Formats whose data is a GDI handle (CF_BITMAP, CF_PALETTE, the GDI-object range) or holds one
+    /// (CF_METAFILEPICT). Windows synthesizes CF_BITMAP from CF_DIB and CF_METAFILEPICT from CF_ENHMETAFILE,
+    /// and both of those are copied.</item>
+    /// <item>Owner-display and display formats (CF_OWNERDISPLAY, CF_DSPBITMAP, CF_DSPMETAFILEPICT, CF_DSPENHMETAFILE).</item>
+    /// <item>The private range, whose handles only mean something inside the owning process.</item>
+    /// <item>Murmur's own exclusion markers, which every write adds anyway.</item>
+    /// </list>
+    /// </summary>
+    internal static bool IsSkippedFormat(uint format) =>
+        format is CF_BITMAP or CF_METAFILEPICT or CF_PALETTE or CF_OWNERDISPLAY
+            or CF_DSPBITMAP or CF_DSPMETAFILEPICT or CF_DSPENHMETAFILE
+            or (>= CF_PRIVATEFIRST and <= CF_PRIVATELAST)
             or (>= CF_GDIOBJFIRST and <= CF_GDIOBJLAST)
         || format == ExcludeFromMonitoringFormat
         || format == CanIncludeInHistoryFormat
@@ -123,6 +149,36 @@ public sealed class Win32Clipboard : IClipboard
         finally
         {
             NativeMethods.GlobalUnlock(handle);
+        }
+    }
+
+    /// <returns>The metafile's bits, or null if they cannot be read.</returns>
+    private static unsafe byte[]? ReadEnhMetaFile(nint metafile)
+    {
+        var size = NativeMethods.GetEnhMetaFileBits(metafile, 0, null);
+        if (size == 0 || size > Array.MaxLength)
+            return null;
+
+        var bits = new byte[size];
+        fixed (byte* pointer = bits)
+            return NativeMethods.GetEnhMetaFileBits(metafile, size, pointer) == size ? bits : null;
+    }
+
+    /// <summary>Rebuilds an enhanced metafile from its bits and puts it on the clipboard, which then owns it.</summary>
+    private static unsafe void SetEnhMetaFile(ReadOnlySpan<byte> bits)
+    {
+        nint metafile;
+        fixed (byte* pointer = bits)
+            metafile = NativeMethods.SetEnhMetaFileBits((uint)bits.Length, pointer);
+
+        if (metafile == 0)
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Could not rebuild the enhanced metafile.");
+
+        if (NativeMethods.SetClipboardData(CF_ENHMETAFILE, metafile) == 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            NativeMethods.DeleteEnhMetaFile(metafile);
+            throw new Win32Exception(error);
         }
     }
 

@@ -182,6 +182,20 @@ internal static partial class NativeMethods
     [LibraryImport("kernel32.dll", SetLastError = true)]
     internal static partial nuint GlobalSize(nint hMem);
 
+    // ---- Enhanced metafiles (CF_ENHMETAFILE) ----
+
+    /// <param name="lpData">Null to get the size in bytes.</param>
+    /// <returns>The size of the metafile bits, or the number of bytes copied; 0 on failure.</returns>
+    [LibraryImport("gdi32.dll")]
+    internal static unsafe partial uint GetEnhMetaFileBits(nint hEMF, uint nSize, byte* lpData);
+
+    [LibraryImport("gdi32.dll", SetLastError = true)]
+    internal static unsafe partial nint SetEnhMetaFileBits(uint nSize, byte* pb);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool DeleteEnhMetaFile(nint hmf);
+
     // ---- Foreground window and process ----
 
     internal const int ERROR_ACCESS_DENIED = 5;
