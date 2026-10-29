@@ -134,6 +134,19 @@ public sealed class JsonStoresTests : IDisposable
     }
 
     [Fact]
+    public void Vocabulary_PartialFile_NormalizesNullLists()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(_paths.VocabularyFile, "{\"hintWords\":[\"x\"]}");
+
+        var loaded = new VocabularyService(_paths).Load();
+
+        loaded.HintWords.ShouldBe(["x"]);
+        loaded.Replacements.ShouldNotBeNull();
+        loaded.Replacements.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Paths_AreUnderRootWithSpecifiedNames()
     {
         _paths.SettingsFile.ShouldBe(Path.Combine(_root, "settings.json"));
