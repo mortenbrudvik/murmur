@@ -25,4 +25,18 @@ public sealed class TranscriptCleanerTests
     {
         _cleaner.Process(input).ShouldBe(expected);
     }
+
+    /// <summary>Whisper turns near-silence into a lone "." or "…"; text without a letter or digit is not speech.</summary>
+    [Theory]
+    [InlineData(".", "")]
+    [InlineData("…", "")]
+    [InlineData(" ?! ", "")]
+    [InlineData("[BLANK_AUDIO] .", "")]
+    [InlineData("Hi.", "Hi.")]
+    [InlineData("3.", "3.")]
+    [InlineData("¿Sí?", "¿Sí?")]
+    public void Process_TextWithoutLettersOrDigits_IsEmpty(string input, string expected)
+    {
+        _cleaner.Process(input).ShouldBe(expected);
+    }
 }

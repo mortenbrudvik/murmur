@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="MediatR" Version="12.*" />
     <PackageReference Include="NAudio" Version="2.*" />
+    <PackageReference Include="System.Windows.Extensions" Version="10.*" />
     <PackageReference Include="Whisper.net" Version="1.9.1" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
     <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.9.1" />
