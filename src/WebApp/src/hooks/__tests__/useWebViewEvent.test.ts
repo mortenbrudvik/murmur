@@ -12,7 +12,7 @@ vi.mock('../../interop/WebViewApiClient', () => ({
 describe('useWebViewEvent', () => {
   it('subscribes to event on mount and unsubscribes on unmount', () => {
     const unsub = vi.fn();
-    (apiClient.on as any).mockReturnValue(unsub);
+    vi.mocked(apiClient.on).mockReturnValue(unsub);
 
     const { unmount } = renderHook(() =>
       useWebViewEvent('test.event', vi.fn())

@@ -6,7 +6,7 @@ export function useWebViewEvent<T>(eventName: string, callback: (data: T) => voi
   useEffect(() => { callbackRef.current = callback; });
 
   useEffect(() => {
-    const unsubscribe = apiClient.on(eventName, (data: T) => callbackRef.current(data));
+    const unsubscribe = apiClient.on<T>(eventName, (data) => callbackRef.current(data));
     return unsubscribe;
   }, [eventName]);
 }
