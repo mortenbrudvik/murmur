@@ -50,6 +50,66 @@ public sealed class TrayIconHostTests
     }
 
     [Fact]
+    public void Show_TaskbarNotReady_DoesNotThrowAndRetriesUntilTheIconIsAdded()
+    {
+        var attempts = 0;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ =>
+            {
+                if (++attempts < 3)
+                    throw new InvalidOperationException("TryCreate failed.");
+            }, maxCreateAttempts: 10);
+
+            Should.NotThrow(host.Show);
+
+            StaHost.PumpUntil(() => attempts == 3, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+            attempts.ShouldBe(3); // no more attempts once the icon is in
+        });
+    }
+
+    [Fact]
+    public void Show_TaskbarNeverReady_StopsRetryingAfterTheLastAttempt()
+    {
+        var attempts = 0;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ =>
+            {
+                attempts++;
+                throw new InvalidOperationException("TryCreate failed.");
+            }, maxCreateAttempts: 4);
+
+            Should.NotThrow(host.Show);
+
+            StaHost.PumpUntil(() => attempts == 4, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+            attempts.ShouldBe(4);
+        });
+    }
+
+    [Fact]
+    public void Dispose_WhileRetrying_StopsRetrying()
+    {
+        var attempts = 0;
+        StaHost.Run(() =>
+        {
+            var host = NewHostWithCreator(_ =>
+            {
+                attempts++;
+                throw new InvalidOperationException("TryCreate failed.");
+            }, maxCreateAttempts: 10);
+            host.Show();
+
+            host.Dispose();
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+
+            attempts.ShouldBe(1);
+        });
+    }
+
+    [Fact]
     public void FormatToolTip_Ready_NamesTheHotkey()
     {
         TrayIconHost.FormatToolTip(new EngineStatus(EngineState.Ready, Model, "Cuda"), "Right Ctrl")
@@ -97,5 +157,12 @@ public sealed class TrayIconHostTests
         text.Length.ShouldBe(TrayIconHost.MaxToolTipLength);
         text.ShouldStartWith("Murmur — xxx");
         text.ShouldEndWith("…");
+    }
+
+    private static TrayIconHost NewHostWithCreator(Action<H.NotifyIcon.TaskbarIcon> create, int maxCreateAttempts)
+    {
+        var engine = Substitute.For<ISpeechEngine>();
+        engine.Status.Returns(new EngineStatus(EngineState.Loading, Model));
+        return new TrayIconHost(engine, Substitute.For<ISettingsService>(), create, TimeSpan.FromMilliseconds(20), maxCreateAttempts);
     }
 }

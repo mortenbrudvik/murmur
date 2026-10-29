@@ -1,7 +1,9 @@
 using System.IO;
+using System.IO.Packaging;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using H.NotifyIcon;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
@@ -15,8 +17,13 @@ namespace Murmur.UI.Tray;
 /// Murmur's icon in the notification area: its home while the main window is hidden. Left click or "Open Murmur"
 /// raises <see cref="OpenRequested"/>, "Quit" raises <see cref="QuitRequested"/>. The icon and tooltip follow the
 /// speech engine: a gradient dot when it is ready, a grey dot while it downloads, loads or has failed.
+/// <para>
+/// Adding the icon fails while Explorer's taskbar is not ready yet, which is likely right after sign-in, exactly when
+/// Murmur starts with Windows. That is never fatal: the icon is retried every few seconds for a while, and again
+/// whenever Explorer announces a new taskbar (H.NotifyIcon's own TaskbarCreated handling).
+/// </para>
 /// </summary>
-public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService settings) : IDisposable
+public sealed partial class TrayIconHost : IDisposable
 {
     /// <summary>The notification area's tooltip holds 128 characters, including the terminating null.</summary>
     internal const int MaxToolTipLength = 127;
@@ -25,22 +32,53 @@ public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService 
     private static readonly TimeSpan HotkeyRefreshInterval = TimeSpan.FromSeconds(2);
 
     // Assembly-qualified, so they resolve whichever assembly started the process.
-    private static readonly Uri ReadyIconUri = new("pack://application:,,,/Murmur.UI;component/Assets/tray-ready.ico", UriKind.Absolute);
-    private static readonly Uri BusyIconUri = new("pack://application:,,,/Murmur.UI;component/Assets/tray-busy.ico", UriKind.Absolute);
+    private const string ReadyIconUri = "pack://application:,,,/Murmur.UI;component/Assets/tray-ready.ico";
+    private const string BusyIconUri = "pack://application:,,,/Murmur.UI;component/Assets/tray-busy.ico";
+
+    private static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(3);
+    private const int DefaultMaxCreateAttempts = 10; // the first attempt and about 30 s of retries
 
     private readonly ILogger _logger = Log.ForContext<TrayIconHost>();
+    private readonly ISpeechEngine _engine;
+    private readonly ISettingsService _settings;
+    private readonly Action<TaskbarIcon> _create;
+    private readonly TimeSpan _retryInterval;
+    private readonly int _maxCreateAttempts;
 
     private TaskbarIcon? _icon;
+    private DispatcherTimer? _retryTimer;
+    private int _createAttempts;
     private bool? _showingReadyIcon;
     private string _hotkeyName = HotkeyDefinition.Default.DisplayName;
     private DateTime _hotkeyReadAt = DateTime.MinValue;
     private bool _disposed;
 
+    public TrayIconHost(ISpeechEngine engine, ISettingsService settings)
+        // Efficiency Mode (H.NotifyIcon's default) would run all of Murmur at idle priority, which delays the keyboard
+        // hook and slows transcription.
+        : this(engine, settings, static icon => icon.ForceCreate(enablesEfficiencyMode: false), DefaultRetryInterval, DefaultMaxCreateAttempts)
+    {
+    }
+
+    /// <summary>Test seam: lets tests make adding the icon fail, and retry quickly.</summary>
+    internal TrayIconHost(
+        ISpeechEngine engine, ISettingsService settings, Action<TaskbarIcon> create, TimeSpan retryInterval, int maxCreateAttempts)
+    {
+        _engine = engine;
+        _settings = settings;
+        _create = create;
+        _retryInterval = retryInterval;
+        _maxCreateAttempts = maxCreateAttempts;
+    }
+
     public event Action? OpenRequested;
 
     public event Action? QuitRequested;
 
-    /// <summary>Puts the icon in the notification area. Call once, on the UI thread.</summary>
+    /// <summary>
+    /// Puts the icon in the notification area. Call once, on the UI thread. Never fails because the taskbar is not
+    /// ready: the icon then appears as soon as a retry succeeds.
+    /// </summary>
     public void Show()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -61,12 +99,8 @@ public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService 
         _icon.TrayMouseMove += (_, _) => Update(rereadHotkey: false);
 
         Update(rereadHotkey: true);
-
-        // Efficiency Mode (the default) would run all of Murmur at idle priority, which delays the keyboard hook and
-        // slows transcription.
-        _icon.ForceCreate(enablesEfficiencyMode: false);
-
-        engine.StatusChanged += OnStatusChanged;
+        _engine.StatusChanged += OnStatusChanged;
+        TryCreate();
     }
 
     /// <summary>The tooltip currently shown, or null before <see cref="Show"/>.</summary>
@@ -78,7 +112,8 @@ public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService 
             return;
 
         _disposed = true;
-        engine.StatusChanged -= OnStatusChanged;
+        _retryTimer?.Stop();
+        _engine.StatusChanged -= OnStatusChanged;
         _icon?.Dispose();
     }
 
@@ -96,6 +131,52 @@ public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService 
         return text.Length <= MaxToolTipLength ? text : string.Concat(text.AsSpan(0, MaxToolTipLength - 1), "…");
     }
 
+    /// <summary>Adds the icon to the notification area; on failure, schedules the next attempt while any are left.</summary>
+    private void TryCreate()
+    {
+        if (_disposed || _icon is null)
+            return;
+
+        _createAttempts++;
+        try
+        {
+            _create(_icon);
+        }
+        catch (Exception ex)
+        {
+            if (_createAttempts < _maxCreateAttempts)
+            {
+                if (_createAttempts == 1)
+                    _logger.Warning(ex, "Could not add the tray icon (the taskbar may not be ready yet); retrying every {Interval}", _retryInterval);
+
+                _retryTimer ??= CreateRetryTimer();
+                _retryTimer.Start();
+            }
+            else
+            {
+                _logger.Warning(ex, "Could not add the tray icon after {Attempts} attempts; it appears when Explorer next announces the taskbar", _createAttempts);
+                _retryTimer?.Stop();
+            }
+
+            return;
+        }
+
+        _retryTimer?.Stop();
+        if (_createAttempts > 1)
+            _logger.Information("Tray icon added on attempt {Attempt}", _createAttempts);
+    }
+
+    private DispatcherTimer CreateRetryTimer()
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background, _icon!.Dispatcher) { Interval = _retryInterval };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            TryCreate();
+        };
+        return timer;
+    }
+
     /// <summary>Raised on whichever thread changed the status.</summary>
     private void OnStatusChanged(EngineStatus status) =>
         _icon?.Dispatcher.BeginInvoke(() => Update(rereadHotkey: true));
@@ -105,7 +186,7 @@ public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService 
         if (_disposed || _icon is null)
             return;
 
-        var status = engine.Status;
+        var status = _engine.Status;
         var ready = status.State == EngineState.Ready;
         if (ready && (rereadHotkey || DateTime.UtcNow - _hotkeyReadAt >= HotkeyRefreshInterval))
             _hotkeyName = ReadHotkeyName();
@@ -131,7 +212,7 @@ public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService 
         _hotkeyReadAt = DateTime.UtcNow;
         try
         {
-            return settings.Load().Hotkey.DisplayName;
+            return _settings.Load().Hotkey.DisplayName;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -141,8 +222,11 @@ public sealed partial class TrayIconHost(ISpeechEngine engine, ISettingsService 
     }
 
     /// <summary>Loads the frame that matches the notification area's icon size at the current DPI.</summary>
-    private static DrawingIcon LoadIcon(Uri uri)
+    private static DrawingIcon LoadIcon(string packUri)
     {
+        // Reading the scheme registers "pack:" with Uri; a running Application has done so already, tests have not.
+        _ = PackUriHelper.UriSchemePack;
+        var uri = new Uri(packUri, UriKind.Absolute);
         var resource = Application.GetResourceStream(uri)
             ?? throw new InvalidOperationException($"Missing tray icon resource {uri}.");
         using var stream = resource.Stream;

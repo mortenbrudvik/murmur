@@ -34,6 +34,21 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        try
+        {
+            Start(e.Args);
+        }
+        catch (Exception ex)
+        {
+            // OnStartup runs as a dispatcher operation, so an exception escaping it would be swallowed by the
+            // DispatcherUnhandledException handler and leave a process with no window, perhaps no tray icon, and the
+            // single-instance mutex held, so that every later launch would only signal it and exit.
+            FailStartup(ex);
+        }
+    }
+
+    private void Start(string[] args)
+    {
         // 1. Logging
         ConfigureLogging();
         Log.Information("Murmur starting");
@@ -121,8 +136,24 @@ public partial class App : Application
         _guard.ListenForShowRequests(ShowMainWindow);
 
         // 13. Started at sign-in, Murmur stays in the tray.
-        if (!e.Args.Contains(MinimizedArgument, StringComparer.OrdinalIgnoreCase))
+        if (!args.Contains(MinimizedArgument, StringComparer.OrdinalIgnoreCase))
             ShowMainWindow();
+    }
+
+    /// <summary>Leaves nothing behind (no global hooks, no tray icon, no claim on the single instance), says why, and exits.</summary>
+    private void FailStartup(Exception ex)
+    {
+        Log.Fatal(ex, "Murmur could not start");
+        StopInputAndTray();
+        _guard?.Dispose();
+
+        MessageBox.Show(
+            $"Murmur couldn't start: {ex.GetBaseException().Message}{Environment.NewLine}{Environment.NewLine}" +
+            $"Details are in the log in {MurmurPaths.Default.LogsDirectory}.",
+            "Murmur",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+        Shutdown(1);
     }
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
