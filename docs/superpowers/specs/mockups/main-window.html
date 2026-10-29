@@ -1,0 +1,136 @@
+<style>
+  .shot { position: relative; width: 100%; aspect-ratio: 16/11; overflow: hidden; font-family: Segoe UI, sans-serif;
+    background: radial-gradient(120% 90% at 20% 10%, #3a4a6b 0%, #1e2536 55%, #141824 100%); }
+  .app { position: absolute; inset: 6% 5% 9% 5%; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column;
+    background: #1c1f27; border: 1px solid rgba(255,255,255,.08); box-shadow: 0 10px 30px rgba(0,0,0,.5); color: #dfe3ee; font-size: 9.5px; }
+  .tb { height: 22px; flex: none; display: flex; align-items: center; padding: 0 8px; gap: 6px; background: #181a21;
+    border-bottom: 1px solid rgba(255,255,255,.05); }
+  .tb .ttl { font-weight: 600; font-size: 9.5px; letter-spacing: .02em; }
+  .tb .logo { width: 9px; height: 9px; border-radius: 50%; background: linear-gradient(135deg,#8fb3ff,#b59bff); }
+  .tb .sp { flex: 1; }
+  .tb .ctl { width: 14px; text-align: center; color: #7d859b; }
+  .row { display: flex; flex: 1; min-height: 0; }
+  .nav { width: 25%; padding: 8px 6px; background: #181a21; display: flex; flex-direction: column; gap: 2px; }
+  .nav div { padding: 5px 7px; border-radius: 5px; color: #9aa3b8; }
+  .nav .on { background: rgba(143,179,255,.12); color: #e9ecf5; }
+  .main { flex: 1; padding: 9px 11px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .h { font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .h .sp { flex: 1; }
+  .search { border: 1px solid rgba(255,255,255,.1); border-radius: 5px; padding: 3px 7px; color: #6f778c; background: #15171d; }
+  .item { border-radius: 6px; padding: 6px 8px; background: #22262f; display: flex; gap: 8px; align-items: flex-start; }
+  .item .txt { flex: 1; color: #d5dae6; line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .item .meta { color: #7d859b; font-size: 8.5px; white-space: nowrap; }
+  .item .cp { color: #8fb3ff; font-size: 8.5px; }
+  .day { color: #7d859b; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .gear { width: 16px; height: 16px; border-radius: 4px; background: rgba(255,255,255,.07); display: inline-flex;
+    align-items: center; justify-content: center; color: #b7bfd2; }
+  .status { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px; background: #20242d; color: #9aa3b8; }
+  .ok { width: 6px; height: 6px; border-radius: 50%; background: #3ecf8e; }
+  .kbd { border: 1px solid rgba(255,255,255,.18); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; color: #dfe3ee; font-size: 8.5px; }
+
+  /* option C: tray flyout */
+  .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 7%; background: rgba(18,20,27,.92);
+    border-top: 1px solid rgba(255,255,255,.06); display: flex; align-items: center; justify-content: flex-end; padding-right: 3%; gap: 7px; }
+  .tray-ic { width: 9px; height: 9px; border-radius: 2px; background: #59617a; }
+  .tray-ic.mm { border-radius: 50%; background: linear-gradient(135deg,#8fb3ff,#b59bff); box-shadow: 0 0 0 3px rgba(143,179,255,.25); }
+  .fly { position: absolute; right: 3%; bottom: 10%; width: 52%; border-radius: 9px; padding: 9px; display: flex; flex-direction: column; gap: 6px;
+    background: rgba(30,33,42,.97); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 10px 30px rgba(0,0,0,.55); color: #dfe3ee; font-size: 9.5px; }
+  .fly .item { padding: 5px 7px; }
+  .sel { display: flex; justify-content: space-between; align-items: center; padding: 4px 7px; border-radius: 5px; background: #22262f; color: #b7bfd2; }
+  .link { color: #8fb3ff; text-align: right; font-size: 9px; }
+  .drawer { position: absolute; top: 22px; right: 0; bottom: 0; width: 46%; background: #232731; border-left: 1px solid rgba(255,255,255,.08);
+    box-shadow: -8px 0 20px rgba(0,0,0,.35); padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .fld { display: flex; justify-content: space-between; align-items: center; color: #9aa3b8; }
+  .fld b { color: #dfe3ee; font-weight: 500; }
+  .chips { display: flex; flex-wrap: wrap; gap: 3px; }
+  .chip { padding: 1px 6px; border-radius: 999px; background: rgba(143,179,255,.14); color: #c6d6ff; font-size: 8.5px; }
+  .tog { width: 18px; height: 10px; border-radius: 999px; background: #8fb3ff; position: relative; }
+  .tog::after { content: ""; position: absolute; right: 1.5px; top: 1.5px; width: 7px; height: 7px; border-radius: 50%; background: #1c1f27; }
+  .dim { position: absolute; inset: 22px 46% 0 0; background: rgba(0,0,0,.35); }
+</style>
+
+<h2>Where should history and settings live?</h2>
+<p class="subtitle">You'll seldom open this. It's where you rescue a dictation and change the hotkey, microphone and vocabulary. The pill (A) is settled.</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="aspect-ratio:auto">
+      <div class="shot">
+        <div class="app">
+          <div class="tb"><span class="logo"></span><span class="ttl">Murmur</span><span class="sp"></span><span class="ctl">–</span><span class="ctl">▢</span><span class="ctl">✕</span></div>
+          <div class="row">
+            <div class="nav"><div class="on">History</div><div>Vocabulary</div><div>Settings</div></div>
+            <div class="main">
+              <div class="h">History<span class="sp"></span><span class="search">Search…</span></div>
+              <div class="day">Today</div>
+              <div class="item"><span class="txt">Yes WPF, but hybrid with an embedded web app. I have a 3090.</span><span class="meta">Claude · 19:12</span><span class="cp">Copy</span></div>
+              <div class="item"><span class="txt">Can you move the stand-up to Thursday morning instead?</span><span class="meta">Outlook · 17:40</span><span class="cp">Copy</span></div>
+              <div class="item"><span class="txt">Refactor the audio capture into its own service and add tests</span><span class="meta">VS Code · 15:02</span><span class="cp">Copy</span></div>
+              <div class="day">Yesterday</div>
+              <div class="item"><span class="txt">Thanks, that worked. Ship it.</span><span class="meta">Teams · 21:18</span><span class="cp">Copy</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · Classic sidebar</h3>
+      <p>A normal window with History, Vocabulary and Settings in a sidebar. It's familiar, and there's room to add Modes as a fourth page later.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="aspect-ratio:auto">
+      <div class="shot">
+        <div class="app">
+          <div class="tb"><span class="logo"></span><span class="ttl">Murmur</span><span class="sp"></span><span class="ctl">–</span><span class="ctl">▢</span><span class="ctl">✕</span></div>
+          <div class="row">
+            <div class="main">
+              <div class="h">History<span class="sp"></span><span class="search">Search…</span><span class="gear">⚙</span></div>
+              <div class="status"><span class="ok"></span>Ready · hold <span class="kbd">Right Ctrl</span> to talk</div>
+              <div class="item"><span class="txt">Yes WPF, but hybrid with an embedded web app…</span><span class="cp">Copy</span></div>
+              <div class="item"><span class="txt">Can you move the stand-up to Thursday…</span><span class="cp">Copy</span></div>
+              <div class="item"><span class="txt">Refactor the audio capture into its own…</span><span class="cp">Copy</span></div>
+            </div>
+          </div>
+          <div class="dim"></div>
+          <div class="drawer">
+            <div class="h">Settings</div>
+            <div class="fld">Hotkey <b><span class="kbd">Right Ctrl</span></b></div>
+            <div class="fld">Microphone <b>Shure MV7 ▾</b></div>
+            <div class="fld">Start with Windows <span class="tog"></span></div>
+            <div class="fld">Sound cues <span class="tog"></span></div>
+            <div class="fld" style="margin-top:3px">Vocabulary</div>
+            <div class="chips"><span class="chip">WebView2</span><span class="chip">Murmur</span><span class="chip">WPF</span><span class="chip">+ add</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · One page + drawer</h3>
+      <p>History fills the window, with a status line that shows Murmur is ready. The ⚙ button slides out a drawer holding every setting, vocabulary included. It's simpler, with less to navigate.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="aspect-ratio:auto">
+      <div class="shot">
+        <div class="fly">
+          <div class="h"><span class="logo" style="width:9px;height:9px;border-radius:50%;background:linear-gradient(135deg,#8fb3ff,#b59bff)"></span>Murmur<span class="sp"></span><span style="color:#3ecf8e;font-weight:400;font-size:9px">● Ready</span></div>
+          <div class="item"><span class="txt">Yes WPF, but hybrid with an embedded…</span><span class="cp">Copy</span></div>
+          <div class="item"><span class="txt">Can you move the stand-up to Thursday…</span><span class="cp">Copy</span></div>
+          <div class="item"><span class="txt">Refactor the audio capture into its…</span><span class="cp">Copy</span></div>
+          <div class="sel"><span>🎙 Shure MV7</span><span>▾</span></div>
+          <div class="link">Open Murmur →</div>
+        </div>
+        <div class="taskbar"><span class="tray-ic"></span><span class="tray-ic"></span><span class="tray-ic mm"></span><span style="color:#9aa3b8;font-size:9px;font-family:Segoe UI">19:14</span></div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · Tray flyout first</h3>
+      <p>Clicking the tray icon pops up a small panel, like Windows' own quick settings, with your last few dictations and the mic picker. "Open Murmur" leads to a full window (A or B) for everything else.</p>
+    </div>
+  </div>
+
+</div>
