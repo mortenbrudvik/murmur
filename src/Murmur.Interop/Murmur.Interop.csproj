@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <UseWpf>true</UseWpf>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MediatR" Version="12.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Murmur.Common\Murmur.Common.csproj" />
+    <ProjectReference Include="..\Murmur.WebView\Murmur.WebView.csproj" />
+    <ProjectReference Include="..\Murmur.Core\Murmur.Core.csproj" />
+  </ItemGroup>
+
+</Project>

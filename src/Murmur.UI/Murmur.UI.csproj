@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <!-- Resolved from this project file so it also works for "dotnet run" on the project, not only solution builds -->
+    <WebAppDir>$(MSBuildThisFileDirectory)..\WebApp\</WebAppDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" Version="9.*" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+    <PackageReference Include="MediatR" Version="12.*" />
+    <PackageReference Include="MediatR.Extensions.Autofac.DependencyInjection" Version="12.*" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
+    <PackageReference Include="Serilog.Sinks.Debug" Version="3.*" />
+    <PackageReference Include="WPF-UI" Version="4.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Murmur.Core\Murmur.Core.csproj" />
+    <ProjectReference Include="..\Murmur.Interop\Murmur.Interop.csproj" />
+    <ProjectReference Include="..\Murmur.WebView\Murmur.WebView.csproj" />
+  </ItemGroup>
+
+  <!-- Build frontend before .NET build -->
+  <Target Name="BuildFrontend" BeforeTargets="Build"
+          Condition="'$(SkipFrontendBuild)' != 'true'">
+    <Exec Command="npm ci &amp;&amp; npm run build"
+          WorkingDirectory="$(WebAppDir)"
+          ContinueOnError="false" />
+  </Target>
+
+  <!-- Copy frontend build output to output directory -->
+  <Target Name="CopyFrontend" AfterTargets="Build">
+    <ItemGroup>
+      <FrontendFiles Include="$(WebAppDir)dist\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FrontendFiles)"
+          DestinationFolder="$(TargetDir)Assets\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
