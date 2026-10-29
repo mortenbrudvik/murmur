@@ -73,4 +73,146 @@ internal static partial class NativeMethods
 
     [LibraryImport("user32.dll")]
     internal static partial short GetAsyncKeyState(int vKey);
+
+    // ---- Keyboard input (SendInput) ----
+
+    internal const uint INPUT_KEYBOARD = 1;
+    internal const uint KEYEVENTF_KEYUP = 0x0002;
+    internal const uint MAPVK_VK_TO_VSC = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct INPUT
+    {
+        public uint type;
+        public InputUnion u;
+    }
+
+    /// <summary>The INPUT union. <see cref="mi"/> is the largest member, so it fixes the struct's native size.</summary>
+    [StructLayout(LayoutKind.Explicit)]
+    internal struct InputUnion
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public nuint dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public nuint dwExtraInfo;
+    }
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static unsafe partial uint SendInput(uint cInputs, INPUT* pInputs, int cbSize);
+
+    [LibraryImport("user32.dll", EntryPoint = "MapVirtualKeyW")]
+    internal static partial uint MapVirtualKey(uint uCode, uint uMapType);
+
+    // ---- Clipboard ----
+
+    /// <param name="hWndNewOwner">0 associates the open clipboard with the calling thread instead of a window.</param>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool OpenClipboard(nint hWndNewOwner);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CloseClipboard();
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool EmptyClipboard();
+
+    /// <returns>The next format, or 0 when there are no more (last error 0) or on failure (last error set).</returns>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial uint EnumClipboardFormats(uint format);
+
+    [LibraryImport("user32.dll")]
+    internal static partial int CountClipboardFormats();
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial nint GetClipboardData(uint uFormat);
+
+    /// <remarks>On success the system owns <paramref name="hMem"/>; on failure the caller must free it.</remarks>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial nint SetClipboardData(uint uFormat, nint hMem);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool IsClipboardFormatAvailable(uint format);
+
+    [LibraryImport("user32.dll", EntryPoint = "RegisterClipboardFormatW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial uint RegisterClipboardFormat(string lpszFormat);
+
+    [LibraryImport("user32.dll")]
+    internal static partial uint GetClipboardSequenceNumber();
+
+    // ---- Global memory (clipboard data) ----
+
+    internal const uint GMEM_MOVEABLE = 0x0002;
+    internal const uint GMEM_ZEROINIT = 0x0040;
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    internal static partial nint GlobalAlloc(uint uFlags, nuint dwBytes);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    internal static partial nint GlobalFree(nint hMem);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    internal static partial nint GlobalLock(nint hMem);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GlobalUnlock(nint hMem);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    internal static partial nuint GlobalSize(nint hMem);
+
+    // ---- Foreground window and process ----
+
+    internal const int ERROR_ACCESS_DENIED = 5;
+    internal const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    internal const uint TOKEN_QUERY = 0x0008;
+    internal const int TokenElevation = 20;
+
+    [LibraryImport("user32.dll")]
+    internal static partial nint GetForegroundWindow();
+
+    [LibraryImport("user32.dll")]
+    internal static partial uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    internal static partial nint OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CloseHandle(nint hObject);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static unsafe partial bool QueryFullProcessImageName(nint hProcess, uint dwFlags, char* lpExeName, ref uint lpdwSize);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool OpenProcessToken(nint processHandle, uint desiredAccess, out nint tokenHandle);
+
+    /// <summary>GetTokenInformation for a single-DWORD class such as <see cref="TokenElevation"/> (TOKEN_ELEVATION).</summary>
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetTokenInformation(nint tokenHandle, int tokenInformationClass, out uint tokenInformation,
+        uint tokenInformationLength, out uint returnLength);
 }
