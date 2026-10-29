@@ -14,6 +14,16 @@ public interface IAudioRecorder
     event Action<float[]>? SamplesAvailable;
 
     /// <summary>
+    /// Raised when the microphone fails in the middle of a recording (for example it was unplugged or the
+    /// audio service restarted), with the underlying error. Raised on the capture/notification thread, not
+    /// while the recorder holds its internal lock, and at most once per recording. By the time it is raised
+    /// the recorder has already dropped the recording and released the device: the samples captured so far are
+    /// discarded, a later <see cref="Start"/> works, <see cref="Stop"/> returns an empty array and
+    /// <see cref="Cancel"/> is a no-op.
+    /// </summary>
+    event Action<Exception>? CaptureFailed;
+
+    /// <summary>
     /// Starts capturing from the given device, or from the Windows default capture device
     /// (<c>Role.Console</c>) when <paramref name="deviceId"/> is <see langword="null"/>.
     /// </summary>

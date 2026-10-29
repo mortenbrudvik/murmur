@@ -37,7 +37,10 @@ public sealed class AudioRecorderIntegrationTests(ITestOutputHelper output)
         samples.Length.ShouldBeInRange(32000 - 3200, 32000 + 3200);
     }
 
-    [Fact]
+    // Diagnostic, run on demand (for example `dotnet test --filter StartLatency` with the mic you care
+    // about). It hard-fails on slow microphones such as Bluetooth headsets by design, so it is explicit and
+    // stays out of the normal suite.
+    [Fact(Explicit = true)]
     public void StartLatency_Under150ms()
     {
         var recorder = new AudioRecorder();
