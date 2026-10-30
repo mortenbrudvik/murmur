@@ -115,7 +115,20 @@ public sealed class WhisperEngineTests : IDisposable
         var advice = new GpuAdvice(GpuAdviceState.InstallCuda, "NVIDIA GeForce RTX 3060");
         Statuses().First(s => s.State == EngineState.Downloading).Gpu.ShouldBe(advice);
         _engine.Status.Gpu.ShouldBe(advice);
-        _loader.Calls.Single().ShouldBe((PathOf(SpeechModelCatalog.LargeV3Turbo), true, (string?)null));
+    }
+
+    /// <summary>
+    /// CUDA is tried only where the locator found the runtime. It searches the process PATH first, so in production this
+    /// changes nothing; the Debug no-CUDA simulation hides the runtime from the locator, and Whisper.net must not find
+    /// it on PATH behind its back.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_SupportedGpuWithoutRuntime_NeverTriesCuda()
+    {
+        await _engine.InitializeAsync(Ct);
+
+        _cuda.Received(1).FindRuntimeDirectory();
+        _loader.Calls.Single().ShouldBe((PathOf(SpeechModelCatalog.LargeV3Turbo), false, (string?)null));
     }
 
     [Fact]

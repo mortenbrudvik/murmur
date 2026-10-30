@@ -8,9 +8,10 @@ using Whisper.net.LibraryLoader;
 namespace Murmur.Core.Speech;
 
 /// <summary>
-/// Loads models through Whisper.net: on CUDA when the GPU supports Murmur's CUDA build and the CUDA 13 runtime DLLs
-/// can be loaded (see <see cref="CudaRuntimeLoader"/>), otherwise Vulkan, otherwise the CPU. Warms each model up with a
-/// second of zeros, so the one-off cost of the first run is paid while loading rather than on the first dictation.
+/// Loads models through Whisper.net: on CUDA when the caller says it can be used (the GPU supports Murmur's CUDA build
+/// and the CUDA 13 runtime was found) and the runtime DLLs load (see <see cref="CudaRuntimeLoader"/>), otherwise Vulkan,
+/// otherwise the CPU. Warms each model up with a second of zeros, so the one-off cost of the first run is paid while
+/// loading rather than on the first dictation.
 /// </summary>
 public sealed class WhisperModelLoader : IWhisperModelLoader
 {
@@ -19,8 +20,9 @@ public sealed class WhisperModelLoader : IWhisperModelLoader
     private static readonly ILogger Logger = Log.ForContext<WhisperModelLoader>();
 
     /// <summary>
-    /// The runtimes Whisper.net tries, in order. CUDA only on a GPU Murmur's CUDA build has kernels for: elsewhere a
-    /// CUDA toolkit on PATH would still put Whisper on a CUDA backend that cannot run on the GPU.
+    /// The runtimes Whisper.net tries, in order. CUDA only when it can be used: on a GPU Murmur's CUDA build has kernels
+    /// for, with the runtime found. Otherwise a CUDA toolkit on PATH would still put Whisper on a CUDA backend, one that
+    /// cannot run on the GPU or that the runtime search was told not to see.
     /// </summary>
     public static RuntimeLibrary[] RuntimeOrder(bool canUseCuda) => canUseCuda
         ? [RuntimeLibrary.Cuda, RuntimeLibrary.Vulkan, RuntimeLibrary.Cpu]
@@ -53,10 +55,8 @@ public sealed class WhisperModelLoader : IWhisperModelLoader
         RuntimeOptions.RuntimeLibraryOrder = [.. RuntimeOrder(canUseCuda)];
 
         if (!canUseCuda)
-            Logger.Information("No GPU that Murmur's CUDA build supports; the speech engine will use Vulkan or the CPU");
-        else if (cudaRuntimeDirectory is null)
-            Logger.Information("No CUDA 13 runtime found; the speech engine will use Vulkan or the CPU");
-        else
+            Logger.Information("No GPU that Murmur's CUDA build supports, or no CUDA 13 runtime; the speech engine will use Vulkan or the CPU");
+        else if (cudaRuntimeDirectory is not null)
             // Before the factory loads the native library: without it the packaged (Store) build can never use CUDA.
             CudaRuntimeLoader.TryLoad(cudaRuntimeDirectory);
 

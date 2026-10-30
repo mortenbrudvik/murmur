@@ -10,8 +10,8 @@ namespace Murmur.Core.Speech;
 /// <summary>
 /// The speech engine: the chosen Whisper model (<see cref="ModelSelection"/>), downloaded by <see cref="IModelManager"/>
 /// and loaded by <see cref="IWhisperModelLoader"/>, on CUDA only when <see cref="GpuAdvisor.CanUseCuda"/> says the GPU
-/// supports Murmur's CUDA build. The status carries the download's details and the tip about CUDA
-/// (<see cref="GpuAdvice"/>).
+/// supports Murmur's CUDA build and <see cref="ICudaRuntimeLocator"/> found the CUDA 13 runtime. The status carries the
+/// download's details and the tip about CUDA (<see cref="GpuAdvice"/>).
 /// <para>
 /// Starting and switching models are operations that run one at a time on the thread pool. A switch cancels the
 /// running operation and waits for it to end before it touches any model file, because a download holds its .part file
@@ -522,18 +522,23 @@ public sealed class WhisperEngine(
         }
     }
 
-    /// <summary>The GPU and CUDA runtime facts, gathered once. Looks for the runtime only on a GPU that can use it.</summary>
+    /// <summary>
+    /// The GPU and CUDA runtime facts, gathered once. Looks for the runtime only on a GPU that can use it, and tries CUDA
+    /// only where the runtime was found: the locator searches the process PATH first, so this costs nothing in production,
+    /// and it keeps Whisper.net from finding a runtime on PATH that the locator was told not to see (the Debug build's
+    /// no-CUDA simulation).
+    /// </summary>
     private HardwareFacts Hardware()
     {
         if (_hardware is { } known)
             return known;
 
         var report = gpu.Report;
-        var canUseCuda = GpuAdvisor.CanUseCuda(report);
-        var runtimeDirectory = canUseCuda ? cuda.FindRuntimeDirectory() : null;
-        var facts = new HardwareFacts(report, canUseCuda, runtimeDirectory);
+        var supported = GpuAdvisor.CanUseCuda(report);
+        var runtimeDirectory = supported ? cuda.FindRuntimeDirectory() : null;
+        var facts = new HardwareFacts(report, supported && runtimeDirectory is not null, runtimeDirectory);
         _logger.Information("CUDA {CanUseCuda}, runtime {RuntimeDirectory}, advice {Advice}",
-            canUseCuda ? "supported" : "not supported", runtimeDirectory ?? "not found", facts.Advice.State);
+            supported ? "supported" : "not supported", runtimeDirectory ?? "not found", facts.Advice.State);
         return _hardware = facts;
     }
 
@@ -614,6 +619,7 @@ public sealed class WhisperEngine(
         public EngineStatus ReadyStatus => new(EngineState.Ready, Info.DisplayName, Model.Runtime, Gpu: Gpu);
     }
 
+    /// <param name="CanUseCuda">The GPU supports Murmur's CUDA build and the runtime is in <paramref name="RuntimeDirectory"/>.</param>
     private sealed record HardwareFacts(GpuReport Report, bool CanUseCuda, string? RuntimeDirectory)
     {
         /// <summary>The tip before a model is loaded.</summary>

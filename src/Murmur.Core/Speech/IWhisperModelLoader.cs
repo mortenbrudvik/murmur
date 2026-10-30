@@ -20,7 +20,10 @@ public interface IWhisperModelLoader
     /// runtime from <paramref name="cudaRuntimeDirectory"/> when <paramref name="canUseCuda"/>, loads the model and
     /// warms it up with a second of zeros.
     /// </summary>
-    /// <param name="canUseCuda">This PC has a GPU that Murmur's CUDA build supports; without one CUDA is never tried.</param>
+    /// <param name="canUseCuda">
+    /// This PC has a GPU that Murmur's CUDA build supports and the CUDA 13 runtime was found in
+    /// <paramref name="cudaRuntimeDirectory"/>. Otherwise CUDA is never tried, not even from a runtime on the process PATH.
+    /// </param>
     /// <param name="cudaRuntimeDirectory">Where the CUDA 13 runtime DLLs are; null when they were not found.</param>
     Task<ILoadedSpeechModel> LoadAsync(string modelPath, bool canUseCuda, string? cudaRuntimeDirectory, CancellationToken ct);
 }
