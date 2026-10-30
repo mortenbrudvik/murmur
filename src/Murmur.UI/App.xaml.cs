@@ -126,6 +126,8 @@ public partial class App : Application
         registry.Register<GetEngineStatusRequest>("engine", "getStatus");
         registry.Register<GetSetupStateRequest>("setup", "getState");
         registry.Register<UpdateSetupStateRequest>("setup", "update");
+        registry.Register<StartMicTestRequest>("setup", "startMicTest");
+        registry.Register<StopMicTestRequest>("setup", "stopMicTest");
         registry.Register<GetModelChoiceRequest>("models", "getChoice");
         registry.Register<SetModelChoiceRequest>("models", "setChoice");
         registry.Register<OpenLinkRequest>("app", "openLink");

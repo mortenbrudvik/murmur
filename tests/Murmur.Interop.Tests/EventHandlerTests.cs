@@ -1,5 +1,7 @@
 using Murmur.Core.Features.Engine;
+using Murmur.Common;
 using Murmur.Core.Features.History;
+using Murmur.Core.Features.Setup;
 using Murmur.Core.Models;
 using Murmur.Interop;
 using Murmur.Interop.Handlers;
@@ -32,5 +34,14 @@ public class EventHandlerTests
         await new EngineStatusEventHandler(_events).Handle(new EngineStatusChangedNotification(status), CancellationToken.None);
 
         _events.Received(1).Publish("engine.statusChanged", status);
+    }
+
+    [Fact]
+    public async Task MicLevelEventHandler_PublishesSetupMicLevelWithTheLevel()
+    {
+        await new MicLevelEventHandler(_events).Handle(new MicLevelNotification(0.5), CancellationToken.None);
+
+        // The page reads the level as { level }, so that is the shape that goes over the wire.
+        _events.Received(1).Publish("setup.micLevel", Arg.Is<object>(data => JsonUtils.Serialize(data) == "{\"level\":0.5}"));
     }
 }

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Murmur.Core.Audio;
 using Murmur.Core.Input;
 using Wpf.Ui.Controls;
 
@@ -6,18 +7,22 @@ namespace Murmur.UI;
 
 public partial class MainWindow : FluentWindow
 {
-    public MainWindow(MainViewModel viewModel, HotkeyCaptureCoordinator hotkeyCapture)
+    public MainWindow(MainViewModel viewModel, HotkeyCaptureCoordinator hotkeyCapture, MicrophoneLevelMonitor micTest)
     {
         DataContext = viewModel;
         InitializeComponent();
 
         // A hotkey capture started from the settings page must not outlive the window's focus: once the owner has
-        // clicked away (or the window hid), the keys pressed next are meant for another app.
+        // clicked away (or the window hid), the keys pressed next are meant for another app. Likewise a microphone
+        // test from the setup page must not keep the microphone open once nobody can see its meter.
         Deactivated += (_, _) => hotkeyCapture.Cancel();
         IsVisibleChanged += (_, e) =>
         {
             if (e.NewValue is false)
+            {
                 hotkeyCapture.Cancel();
+                micTest.Stop();
+            }
         };
     }
 

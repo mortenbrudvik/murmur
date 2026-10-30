@@ -1,5 +1,6 @@
 using System.Net.Http;
 using Autofac;
+using MediatR;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
 using Murmur.Core.Hardware;
@@ -66,6 +67,10 @@ public class AppModule : Module
         builder.RegisterType<HistoryStore>().As<IHistoryStore>().SingleInstance();
         builder.RegisterType<AudioArchive>().As<IAudioArchive>().SingleInstance();
         builder.RegisterType<AudioRecorder>().As<IAudioRecorder>().SingleInstance();
+        // The setup page's microphone test has a recorder of its own, so it never collides with a dictation. Owned by
+        // the container, which disposes it on exit and so stops a test that is still running.
+        builder.Register(c => new MicrophoneLevelMonitor(() => new AudioRecorder(), c.Resolve<IMediator>(), c.Resolve<TimeProvider>()))
+            .SingleInstance();
 
         builder.RegisterType<DiskSpace>().As<IDiskSpace>().SingleInstance();
         builder.RegisterType<ModelManager>().As<IModelManager>().SingleInstance();

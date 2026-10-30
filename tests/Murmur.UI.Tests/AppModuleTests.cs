@@ -1,5 +1,7 @@
 using Autofac;
+using Autofac.Core;
 using MediatR;
+using Murmur.Core.Audio;
 using Murmur.Core.Features.App;
 using Murmur.Core.Features.Models;
 using Murmur.Core.Features.Setup;
@@ -63,6 +65,24 @@ public sealed class AppModuleTests
         container.Resolve<IRequestHandler<SetModelChoiceRequest, ModelChoice>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<OpenLinkRequest>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<RestartAppRequest>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<StartMicTestRequest, MicTestResult>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<StopMicTestRequest>>().ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The level test has its own recorder, so it never collides with a dictation, and the container must dispose it:
+    /// quitting while the test runs would otherwise leave the microphone open until the process is gone.
+    /// </summary>
+    [Fact]
+    public void Bootstrap_GivesTheMicrophoneTestItsOwnRecorderAndDisposesIt()
+    {
+        using var container = AutofacBootstrapper.Bootstrap();
+
+        var monitor = container.Resolve<MicrophoneLevelMonitor>();
+
+        monitor.ShouldBeSameAs(container.Resolve<MicrophoneLevelMonitor>());
+        container.ComponentRegistry.RegistrationsFor(new TypedService(typeof(MicrophoneLevelMonitor)))
+            .Single().Ownership.ShouldBe(InstanceOwnership.OwnedByLifetimeScope);
     }
 
     /// <summary>App listens to the lifecycle's event while the handler calls it through the interface: one instance.</summary>
