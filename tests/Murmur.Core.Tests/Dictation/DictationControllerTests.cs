@@ -501,40 +501,283 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     [Fact]
-    public void ThePillShowsBeforeTheMicrophoneIsOpened()
+    public async Task HotkeyDown_OpensTheMicrophoneOffTheUiThread()
     {
-        Down();
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+
+        ui.Run(Down); // returns while the microphone is still opening
+
+        mic.WaitUntilOpening();
+        mic.StartContext.ShouldNotBeSameAs(ui);
+        mic.IsOpening.ShouldBeTrue();
+        _pill.Received(1).ShowListening();
+        _matcher.DictationActive.ShouldBeTrue(); // so the hook catches Esc and a combo key while it opens
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+
+        mic.Recordings.ShouldBe(1);
+        _cues.Received(1).PlayStart(); // its first audio
+    }
+
+    [Fact]
+    public async Task EscapeWhileTheMicrophoneOpens_ReleasesItOnceOpen()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+
+        ui.Run(() => Signal(HotkeySignal.Escape));
+
+        await AssertReleasedOnceOpenAsync(ui, mic);
+    }
+
+    [Fact]
+    public async Task ComboKeyWhileTheMicrophoneOpens_ReleasesItOnceOpen()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+
+        ui.Run(() => Signal(HotkeySignal.OtherInputWhileHeld));
+
+        await AssertReleasedOnceOpenAsync(ui, mic);
+    }
+
+    [Fact]
+    public async Task ReleaseWhileTheMicrophoneOpens_StopsAfterItOpens()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+        RaiseSamples(Speech); // the capture thread can deliver audio before Start has returned
+        ui.RunPending();
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        ui.RunPending();
+
+        ui.Run(Up);
+
+        _machine.State.ShouldBe(DictationState.Transcribing);
+        _recorder.DidNotReceive().Stop(); // the open holds the recorder: Stop would block the UI thread until it finished
+
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.CurrentWork, WaitLimit);
 
         Received.InOrder(() =>
         {
-            _pill.ShowListening();
             _recorder.Start(Arg.Any<string?>());
+            _recorder.Stop();
+            _cues.PlayStop();
         });
+        mic.ReleasedWhileOpening.ShouldBeFalse();
+        mic.Recordings.ShouldBe(0);
+        _recorder.DidNotReceive().Cancel();
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        _history.Received(1).Add("Hello world.", "Notepad", true);
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
     }
 
     [Fact]
-    public void SlowMicrophone_ATapReleasedWhileItOpensIsStillATap()
+    public async Task EscapeAfterAReleaseWhileTheMicrophoneOpens_ReleasesItOnceOpen()
     {
-        // Opening a Bluetooth headset blocks the UI thread for a second; the hook stamps the release meanwhile.
-        _recorder.When(r => r.Start(Arg.Any<string?>())).Do(_ => _time.Advance(TimeSpan.FromSeconds(1)));
-        var pressedAt = _time.GetUtcNow();
+        using var logs = new LogCapture();
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        ui.RunPending();
+        ui.Run(Up); // the stop waits for the open
 
-        _hotkeyDown = true;
-        Controller.HandleSignal(HotkeySignal.HotkeyDown, pressedAt);
-        _hotkeyDown = false;
-        Controller.HandleSignal(HotkeySignal.HotkeyUp, pressedAt + TimeSpan.FromMilliseconds(150));
+        ui.Run(() => Signal(HotkeySignal.Escape));
+        _recorder.DidNotReceive().Cancel();
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.CurrentWork, WaitLimit);
+
+        _recorder.Received(1).Cancel();
+        _recorder.DidNotReceive().Stop();
+        mic.Recordings.ShouldBe(0);
+        mic.ReleasedWhileOpening.ShouldBeFalse();
+        await _engine.DidNotReceiveWithAnyArgs().TranscribeAsync(default!, default!, Ct);
+        _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _machine.State.ShouldBe(DictationState.Idle);
+        logs.Outcomes.ShouldBe(["cancelled"]);
+    }
+
+    [Fact]
+    public async Task OpenFails_ShowsMicrophoneUnavailable()
+    {
+        using var logs = new LogCapture();
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        _chunksOnStart = [];
+        SynchronizationContext? contextDuringOpen = ui;
+        _recorder.When(r => r.Start(Arg.Any<string?>())).Do(_ =>
+        {
+            contextDuringOpen = SynchronizationContext.Current;
+            throw new AudioDeviceException("No microphone");
+        });
+
+        ui.Run(Down);
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+
+        contextDuringOpen.ShouldNotBeSameAs(ui);
+        Received.InOrder(() =>
+        {
+            _pill.ShowListening();
+            _pill.ShowNotice("Microphone unavailable"); // replaces the pill shown before the microphone was opened
+        });
+        _recorder.DidNotReceive().Cancel();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped(ui);
+        logs.Outcomes.ShouldBe(["failed"]);
+
+        ui.Run(Up);
+        _recorder.DidNotReceive().Stop();
+
+        ui.Run(Down);
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+        _recorder.Received(2).Start(Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task OpenFailsAfterARelease_ShowsMicrophoneUnavailable()
+    {
+        using var logs = new LogCapture();
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly(failure: new AudioDeviceException("No microphone"));
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        ui.RunPending();
+        ui.Run(Up); // the stop waits for the open
+
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.CurrentWork, WaitLimit);
+
+        _pill.Received(1).ShowNotice("Microphone unavailable");
+        _pill.DidNotReceive().ShowTranscribing();
+        _pill.DidNotReceive().Hide();
+        _recorder.DidNotReceive().Stop();
+        _recorder.DidNotReceive().Cancel();
+        _cues.DidNotReceive().PlayStop();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped(ui);
+        logs.Outcomes.ShouldBe(["failed"]);
+    }
+
+    [Fact]
+    public async Task QuickRepress_WhileTheFirstOpenIsStillRunning_StartsOnceAfterItOpens()
+    {
+        using var logs = new LogCapture();
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+
+        ui.Run(() => Signal(HotkeySignal.Escape));
+        ui.Run(Down); // pressed again before the first microphone has finished opening
+
+        _recorder.Received(1).Start(Arg.Any<string?>()); // the recorder takes one recording at a time
+        _pill.Received(2).ShowListening();
+
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+
+        Received.InOrder(() =>
+        {
+            _recorder.Start(Arg.Any<string?>());
+            _recorder.Cancel();
+            _recorder.Start(Arg.Any<string?>());
+            _cues.PlayStart(); // on the second microphone's audio: the first one's belongs to the cancelled press
+        });
+        mic.Recordings.ShouldBe(1);
+        mic.ReleasedWhileOpening.ShouldBeFalse();
+        logs.Events.ShouldNotContain(e => e.Exception != null);
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+        _matcher.DictationActive.ShouldBeTrue();
+
+        // The second recording is the live one: releasing the hotkey pastes it.
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        ui.RunPending();
+        ui.Run(Up);
+        await ui.RunUntilCompleteAsync(Controller.CurrentWork, WaitLimit);
+
+        _recorder.Received(1).Stop();
+        _recorder.Received(1).Cancel();
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        logs.Outcomes.ShouldBe(["cancelled", "pasted"]);
+    }
+
+    [Fact]
+    public async Task DisposeWhileTheMicrophoneOpens_ReleasesItOnceOpen()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+
+        ui.Run(Controller.Dispose);
+        _recorder.DidNotReceive().Cancel();
+        _matcher.DictationActive.ShouldBeFalse();
+
+        // Released from the thread pool: an exiting app stops running the UI thread's queue.
+        mic.Open();
+        mic.WaitUntilReleased();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+
+        _recorder.Received(1).Cancel();
+        _recorder.DidNotReceive().Stop();
+        mic.Recordings.ShouldBe(0);
+        mic.ReleasedWhileOpening.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task TapWhileTheMicrophoneOpens_RecordsHandsFreeOnceItOpens()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        ui.Run(Down);
+        mic.WaitUntilOpening();
+        _time.Advance(TimeSpan.FromMilliseconds(150));
+
+        ui.Run(Up);
 
         _machine.State.ShouldBe(DictationState.HandsFreeRecording);
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
         _recorder.DidNotReceive().Stop();
+        _recorder.DidNotReceive().Cancel();
+        mic.Recordings.ShouldBe(1);
+        _cues.Received(1).PlayStart();
+        _machine.State.ShouldBe(DictationState.HandsFreeRecording);
     }
 
     [Fact]
-    public void LateHotkeyUp_IsTimedByTheHookTimestamp()
+    public async Task LateHotkeyUp_IsTimedByTheHookTimestamp()
     {
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         ui.Run(Down);
-        ui.RunPending();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
         _time.Advance(TimeSpan.FromMilliseconds(150));
         ui.RunPending(); // the 100 ms tick: still held
 
@@ -891,12 +1134,15 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     [Fact]
-    public void RecorderEventsAndTicks_ArePostedToTheCreatingContext()
+    public async Task RecorderEventsAndTicks_ArePostedToTheCreatingContext()
     {
+        _chunksOnStart = [];
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
+        ui.Run(Down);
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
 
-        ui.Run(Down); // the fake recorder raises a chunk from inside Start, as the capture thread would
+        RaiseSamples(Speech); // as the capture thread would
         _pill.DidNotReceiveWithAnyArgs().PushLevel(default);
         _cues.DidNotReceive().PlayStart();
 
@@ -930,7 +1176,7 @@ public sealed class DictationControllerTests : IDisposable
         });
 
         ui.Run(Down);
-        ui.RunPending();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit); // and the chunk raised as it opened
         _time.Advance(TimeSpan.FromMilliseconds(800));
         ui.RunPending();
         ui.Run(Up);
@@ -1042,6 +1288,48 @@ public sealed class DictationControllerTests : IDisposable
         _keys.DidNotReceiveWithAnyArgs().IsKeyDown(default);
     }
 
+    /// <summary>As <see cref="AssertTimerStopped()"/>, running whatever the timer posted to <paramref name="ui"/>.</summary>
+    private void AssertTimerStopped(QueueSynchronizationContext ui)
+    {
+        _keys.ClearReceivedCalls();
+        _time.Advance(TimeSpan.FromSeconds(1));
+        ui.RunPending();
+        _keys.DidNotReceiveWithAnyArgs().IsKeyDown(default);
+    }
+
+    /// <summary>
+    /// Makes the microphone slow to open, like a Bluetooth headset: the first Start blocks the thread it runs on until
+    /// <see cref="SlowMicrophone.Open"/>, then delivers speech (or throws <paramref name="failure"/>).
+    /// </summary>
+    private SlowMicrophone OpenSlowly(Exception? failure = null)
+    {
+        _chunksOnStart = []; // the slow microphone raises its own audio once open
+        return new SlowMicrophone(_recorder, () => RaiseSamples(Speech), failure);
+    }
+
+    /// <summary>
+    /// After Esc or a combo key while the microphone opens: the dictation ends at once, and the microphone is cancelled
+    /// (not stopped) once its open has finished, never while it runs. The audio it delivered meanwhile is ignored.
+    /// </summary>
+    private async Task AssertReleasedOnceOpenAsync(QueueSynchronizationContext ui, SlowMicrophone mic)
+    {
+        _pill.Received(1).Hide();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        _recorder.DidNotReceive().Cancel(); // the open holds the recorder: Cancel would block the UI thread until it finished
+
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+
+        _recorder.Received(1).Cancel();
+        _recorder.DidNotReceive().Stop();
+        mic.Recordings.ShouldBe(0);
+        mic.ReleasedWhileOpening.ShouldBeFalse();
+        _cues.DidNotReceive().PlayStart();
+        _pill.DidNotReceiveWithAnyArgs().PushLevel(default);
+        AssertTimerStopped(ui);
+    }
+
     private static float[] Sine(int milliseconds, float amplitude, double frequencyHz = 440)
     {
         var samples = new float[16 * milliseconds];
@@ -1062,6 +1350,118 @@ public sealed class DictationControllerTests : IDisposable
         ];
 
         public void Emit(LogEvent logEvent) => _events.Enqueue(logEvent);
+    }
+
+    /// <summary>
+    /// Sends log events to a sink until disposed. Create the controller after it: the controller takes its logger from
+    /// <see cref="Log.Logger"/> when it is created.
+    /// </summary>
+    private sealed class LogCapture : IDisposable
+    {
+        private readonly ILogger _previous = Log.Logger;
+        private readonly CapturingSink _sink = new();
+
+        public LogCapture() =>
+            Log.Logger = new LoggerConfiguration().MinimumLevel.Verbose().WriteTo.Sink(_sink).CreateLogger();
+
+        /// <summary>The controller's events.</summary>
+        public LogEvent[] Events => _sink.Events;
+
+        /// <summary>The outcome of each dictation's log line, in order.</summary>
+        public string[] Outcomes =>
+        [
+            .. Events
+                .Where(e => e.Properties.ContainsKey("Outcome"))
+                .Select(e => (string)((ScalarValue)e.Properties["Outcome"]).Value!),
+        ];
+
+        public void Dispose() => Log.Logger = _previous;
+    }
+
+    /// <summary>
+    /// A fake microphone whose first open takes as long as the test wants: that Start blocks the thread it runs on until
+    /// <see cref="Open"/>. Like the real recorder it holds one recording at a time (a Start while recording throws), and it
+    /// notes a Stop or Cancel that arrives while a Start is still running, which the real one would block until the open
+    /// finished.
+    /// </summary>
+    private sealed class SlowMicrophone
+    {
+        private readonly ManualResetEventSlim _opening = new();
+        private readonly ManualResetEventSlim _open = new();
+        private readonly ManualResetEventSlim _released = new();
+        private readonly Action _deliverAudio;
+        private readonly Exception? _failure;
+        private int _starts;
+        private int _running;
+        private int _recordings;
+        private volatile bool _releasedWhileOpening;
+
+        /// <param name="deliverAudio">Raises the microphone's audio once it is open, on the thread that opened it.</param>
+        /// <param name="failure">Thrown by the first Start once it is let go, instead of opening.</param>
+        public SlowMicrophone(IAudioRecorder recorder, Action deliverAudio, Exception? failure)
+        {
+            _deliverAudio = deliverAudio;
+            _failure = failure;
+            recorder.When(r => r.Start(Arg.Any<string?>())).Do(_ => Start());
+            recorder.When(r => r.Stop()).Do(_ => End());
+            recorder.When(r => r.Cancel()).Do(_ => End());
+        }
+
+        /// <summary><see cref="SynchronizationContext.Current"/> inside the first Start.</summary>
+        public SynchronizationContext? StartContext { get; private set; }
+
+        /// <summary>A Start is still running.</summary>
+        public bool IsOpening => Volatile.Read(ref _running) > 0;
+
+        /// <summary>The recordings it holds: 1 while recording, 0 once stopped or cancelled.</summary>
+        public int Recordings => Volatile.Read(ref _recordings);
+
+        /// <summary>A Stop or Cancel arrived while a Start was still running.</summary>
+        public bool ReleasedWhileOpening => _releasedWhileOpening;
+
+        public void WaitUntilOpening() => _opening.Wait(WaitLimit).ShouldBeTrue("The microphone never started opening.");
+
+        public void WaitUntilReleased() => _released.Wait(WaitLimit).ShouldBeTrue("The microphone was never released.");
+
+        /// <summary>Lets the first Start finish.</summary>
+        public void Open() => _open.Set();
+
+        private void Start()
+        {
+            Interlocked.Increment(ref _running);
+            try
+            {
+                if (Interlocked.Increment(ref _starts) == 1)
+                {
+                    StartContext = SynchronizationContext.Current;
+                    _opening.Set();
+                    _open.Wait(WaitLimit);
+                    if (_failure is not null)
+                        throw _failure;
+                }
+
+                if (Interlocked.Increment(ref _recordings) > 1)
+                {
+                    Interlocked.Decrement(ref _recordings);
+                    throw new InvalidOperationException("A recording is already in progress.");
+                }
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _running);
+            }
+
+            _deliverAudio();
+        }
+
+        private void End()
+        {
+            if (IsOpening)
+                _releasedWhileOpening = true;
+
+            Interlocked.Exchange(ref _recordings, 0);
+            _released.Set();
+        }
     }
 
     /// <summary>
@@ -1103,17 +1503,18 @@ public sealed class DictationControllerTests : IDisposable
                 item.Callback(item.State);
         });
 
-        /// <summary>Pumps the queue until <paramref name="task"/> completes.</summary>
+        /// <summary>Runs what is queued, then pumps the queue until <paramref name="task"/> completes.</summary>
         public async Task RunUntilCompleteAsync(Task task, TimeSpan limit)
         {
             var stopwatch = Stopwatch.StartNew();
+            RunPending();
             while (!task.IsCompleted)
             {
                 if (stopwatch.Elapsed > limit)
                     throw new TimeoutException("The controller's work did not finish.");
 
-                RunPending();
                 await Task.Delay(5, TestContext.Current.CancellationToken);
+                RunPending();
             }
 
             await task;

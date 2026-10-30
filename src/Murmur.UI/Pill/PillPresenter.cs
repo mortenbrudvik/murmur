@@ -14,7 +14,9 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 {
     private static readonly TimeSpan NoticeDuration = TimeSpan.FromSeconds(1.5);
 
-    // Send keeps the pill instant even while the UI thread is busy; one priority for every call keeps them in order.
+    // Send runs each call ahead of lower-priority work already queued (hotkey signals, recorder chunks, rendering), but it
+    // cannot interrupt work that is running: the pill shows only once the UI thread is free (so the microphone opens off
+    // it). One priority for every call keeps them in order.
     private const DispatcherPriority CallPriority = DispatcherPriority.Send;
 
     private readonly ILogger _logger = Log.ForContext<PillPresenter>();
