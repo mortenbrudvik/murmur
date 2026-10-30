@@ -18,11 +18,13 @@ namespace Murmur.UI;
 /// </para>
 /// </summary>
 /// <param name="onSignal">
-/// Receives every signal other than <see cref="HotkeySignal.None"/>, on the hook thread. It must return at once, so
-/// it should only post the signal elsewhere.
+/// Receives every signal other than <see cref="HotkeySignal.None"/>, on the hook thread, with the time the hook saw it
+/// (from <paramref name="time"/>), so tap and hold are timed from the key events themselves, not from whenever the
+/// UI thread handles them. It must return at once, so it should only post the signal elsewhere.
 /// </param>
 public sealed partial class InputHookHost(
-    HotkeyMatcher matcher, HotkeyCaptureCoordinator coordinator, IKeyboardSender keyboard, Action<HotkeySignal> onSignal)
+    HotkeyMatcher matcher, HotkeyCaptureCoordinator coordinator, IKeyboardSender keyboard, TimeProvider time,
+    Action<HotkeySignal, DateTimeOffset> onSignal)
     : IDisposable
 {
     private const string ThreadName = "Murmur.InputHooks";
@@ -102,6 +104,8 @@ public sealed partial class InputHookHost(
 
     private bool Route(MatchResult result)
     {
+        var at = time.GetUtcNow();
+
         // The mouse hook is only installed while the hotkey is held, so mouse movement is not routed through Murmur
         // the rest of the time. Same thread as the keyboard hook, which is where it must be installed.
         _hooks?.SetMouseHookEnabled(matcher.IsHotkeyHeld);
@@ -115,7 +119,7 @@ public sealed partial class InputHookHost(
             ThreadPool.QueueUserWorkItem(static sender => sender.SendMaskKey(), keyboard, preferLocal: false);
         }
 
-        onSignal(result.Signal);
+        onSignal(result.Signal, at);
         return result.Swallow;
     }
 

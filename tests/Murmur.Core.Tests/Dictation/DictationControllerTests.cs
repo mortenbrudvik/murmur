@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using MediatR;
@@ -12,6 +13,9 @@ using Murmur.Core.Services;
 using Murmur.Core.Speech;
 using Murmur.Core.Text;
 using NSubstitute;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 using Shouldly;
 
 namespace Murmur.Core.Tests.Dictation;
@@ -275,7 +279,7 @@ public sealed class DictationControllerTests : IDisposable
     {
         Down();
 
-        Controller.HandleSignal(HotkeySignal.OtherInputWhileHeld);
+        Signal(HotkeySignal.OtherInputWhileHeld);
 
         _recorder.Received(1).Cancel();
         _recorder.DidNotReceive().Stop();
@@ -299,7 +303,7 @@ public sealed class DictationControllerTests : IDisposable
         _machine.State.ShouldBe(DictationState.Transcribing);
         _matcher.DictationActive.ShouldBeTrue(); // so the hook intercepts Esc
 
-        Controller.HandleSignal(HotkeySignal.Escape);
+        Signal(HotkeySignal.Escape);
 
         transcribeToken.IsCancellationRequested.ShouldBeTrue();
         _pill.Received(1).Hide();
@@ -323,7 +327,7 @@ public sealed class DictationControllerTests : IDisposable
         _engine.TranscribeAsync(Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(pending.Task);
         HoldAndRelease();
         var first = Controller.CurrentWork;
-        Controller.HandleSignal(HotkeySignal.Escape);
+        Signal(HotkeySignal.Escape);
         Down(); // a new recording starts while the first transcription is still running
         _pill.ClearReceivedCalls();
         _cues.ClearReceivedCalls();
@@ -345,7 +349,33 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task EscapeDuringInsert_DoesNotSaveTheLateResult()
+    public async Task EscapeBeforeThePasteIsSent_DiscardsTheDictation()
+    {
+        var insertStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _inserter.InsertAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(call =>
+        {
+            // Like the real inserter still waiting for a modifier to be released: cancelling stops it before Ctrl+V.
+            var ct = call.ArgAt<CancellationToken>(1);
+            var result = new TaskCompletionSource<InsertResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            ct.Register(() => result.TrySetCanceled(ct));
+            insertStarted.SetResult();
+            return result.Task;
+        });
+        HoldAndRelease();
+        await insertStarted.Task.WaitAsync(WaitLimit, Ct);
+
+        Signal(HotkeySignal.Escape);
+        await Finished();
+
+        _history.DidNotReceiveWithAnyArgs().Add(default!, default!, default);
+        _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!);
+        _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public async Task EscapeAfterThePasteIsSent_StillSavesTheEntry()
     {
         var pending = new TaskCompletionSource<InsertResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var insertStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -357,12 +387,81 @@ public sealed class DictationControllerTests : IDisposable
         HoldAndRelease();
         await insertStarted.Task.WaitAsync(WaitLimit, Ct);
 
-        Controller.HandleSignal(HotkeySignal.Escape);
-        pending.SetResult(new InsertResult(InsertOutcome.Pasted, "Notepad"));
+        Signal(HotkeySignal.Escape);
+        pending.SetResult(new InsertResult(InsertOutcome.Pasted, "Notepad")); // Ctrl+V was already sent
         await Finished();
 
-        _history.DidNotReceiveWithAnyArgs().Add(default!, default!, default);
+        _history.Received(1).Add("Hello world.", "Notepad", true); // the text is in the target app
+        await _mediator.Received(1).Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>());
+        _pill.Received(1).Hide(); // by the Esc; nothing touches the pill afterwards
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public async Task Paste_FinishesWithoutWaitingForTheClipboardRestore()
+    {
+        var clipboard = Substitute.For<IClipboard>();
+        clipboard.Capture().Returns(ClipboardSnapshot.Empty);
+        var foreground = Substitute.For<IForegroundInfo>();
+        foreground.Capture().Returns(new ForegroundTarget(1, "Notepad", false));
+        var keyboard = Substitute.For<IKeyboardSender>();
+        var inserter = new TextInserter(clipboard, foreground, keyboard, Substitute.For<IKeyStateProbe>(), _time);
+        _controller = Create(context: null, inserter: inserter);
+
+        HoldAndRelease();
+        await Finished(); // no fake time passes, so this cannot include the 500 ms restore
+
+        keyboard.Received(1).SendCtrlV();
+        clipboard.DidNotReceiveWithAnyArgs().Restore(default!);
+        _history.Received(1).Add("Hello world.", "Notepad", true);
         _pill.Received(1).Hide();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+
+        // A press straight after the paste starts a new recording.
+        Down();
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+        _recorder.Received(2).Start(Arg.Any<string?>());
+        _pill.Received(2).ShowListening();
+
+        _time.Advance(TimeSpan.FromMilliseconds(500));
+        await inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
+        clipboard.Received(1).Restore(ClipboardSnapshot.Empty);
+    }
+
+    [Fact]
+    public async Task EscapeWhileTheSavedEntryIsAnnounced_LeavesThePillAlone()
+    {
+        var publishStarted = PendingPublish(out var publish);
+        Tap();
+        _time.Advance(TimeSpan.FromMinutes(10)); // the hands-free limit: save without pasting
+        await publishStarted.WaitAsync(WaitLimit, Ct);
+
+        Signal(HotkeySignal.Escape);
+        publish.SetResult();
+        await Finished();
+
+        _history.Received(1).Add("Hello world.", "", false);
+        _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public async Task EscapeWhileThePastedEntryIsAnnounced_HidesThePillOnce()
+    {
+        var publishStarted = PendingPublish(out var publish);
+        HoldAndRelease();
+        await publishStarted.WaitAsync(WaitLimit, Ct);
+
+        Signal(HotkeySignal.Escape);
+        publish.SetResult();
+        await Finished();
+
+        _history.Received(1).Add("Hello world.", "Notepad", true);
+        _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
@@ -374,8 +473,11 @@ public sealed class DictationControllerTests : IDisposable
 
         Down();
 
-        _pill.Received(1).ShowNotice("Microphone unavailable");
-        _pill.DidNotReceive().ShowListening();
+        Received.InOrder(() =>
+        {
+            _pill.ShowListening();
+            _pill.ShowNotice("Microphone unavailable"); // replaces the pill shown before the microphone was opened
+        });
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
         AssertTimerStopped();
@@ -395,6 +497,54 @@ public sealed class DictationControllerTests : IDisposable
         Down();
 
         _recorder.Received(1).Start("mic-2");
+    }
+
+    [Fact]
+    public void ThePillShowsBeforeTheMicrophoneIsOpened()
+    {
+        Down();
+
+        Received.InOrder(() =>
+        {
+            _pill.ShowListening();
+            _recorder.Start(Arg.Any<string?>());
+        });
+    }
+
+    [Fact]
+    public void SlowMicrophone_ATapReleasedWhileItOpensIsStillATap()
+    {
+        // Opening a Bluetooth headset blocks the UI thread for a second; the hook stamps the release meanwhile.
+        _recorder.When(r => r.Start(Arg.Any<string?>())).Do(_ => _time.Advance(TimeSpan.FromSeconds(1)));
+        var pressedAt = _time.GetUtcNow();
+
+        _hotkeyDown = true;
+        Controller.HandleSignal(HotkeySignal.HotkeyDown, pressedAt);
+        _hotkeyDown = false;
+        Controller.HandleSignal(HotkeySignal.HotkeyUp, pressedAt + TimeSpan.FromMilliseconds(150));
+
+        _machine.State.ShouldBe(DictationState.HandsFreeRecording);
+        _recorder.DidNotReceive().Stop();
+    }
+
+    [Fact]
+    public void LateHotkeyUp_IsTimedByTheHookTimestamp()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        ui.Run(Down);
+        ui.RunPending();
+        _time.Advance(TimeSpan.FromMilliseconds(150));
+        ui.RunPending(); // the 100 ms tick: still held
+
+        _hotkeyDown = false;
+        var releasedAt = _time.GetUtcNow(); // the hook stamps the release (a tap)...
+        _time.Advance(TimeSpan.FromMilliseconds(400)); // ...but the UI thread is busy for another 400 ms
+        ui.Run(() => Controller.HandleSignal(HotkeySignal.HotkeyUp, releasedAt));
+        ui.RunPending(); // the ticks that queued up behind it
+
+        _machine.State.ShouldBe(DictationState.HandsFreeRecording);
+        _recorder.DidNotReceive().Stop();
     }
 
     [Fact]
@@ -483,11 +633,112 @@ public sealed class DictationControllerTests : IDisposable
         await Finished();
 
         await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!); // the text is in the target app already
         _pill.Received(1).Hide();
         _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
         await _mediator.DidNotReceiveWithAnyArgs().Publish(default(HistoryEntryAddedNotification)!, Ct);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ElevatedTarget_HistoryAddThrows_StillShowsCopied()
+    {
+        _inserter.InsertAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new InsertResult(InsertOutcome.LeftOnClipboard, "Task Manager"));
+        _history.Add(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>()).Returns(_ => throw new IOException("locked"));
+
+        HoldAndRelease();
+        await Finished();
+
+        _pill.Received(1).ShowNotice("Copied — press Ctrl+V");
+        _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!); // the inserter left it on the clipboard already
+    }
+
+    [Theory]
+    [InlineData(true, "Copied — press Ctrl+V")]
+    [InlineData(false, "Transcription failed")]
+    public async Task HandsFreeTimeLimit_HistoryAddThrows_FallsBackToTheClipboard(bool copyWorks, string notice)
+    {
+        _history.Add(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>()).Returns(_ => throw new IOException("locked"));
+        _inserter.TryCopy(Arg.Any<string>()).Returns(copyWorks);
+
+        Tap();
+        _time.Advance(TimeSpan.FromMinutes(10));
+        await Finished();
+
+        _inserter.Received(1).TryCopy("Hello world.");
+        _pill.Received(1).ShowNotice(notice);
+        _pill.DidNotReceive().ShowNotice("Saved to history");
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Theory]
+    [InlineData(true, "Copied — press Ctrl+V")]
+    [InlineData(false, "Transcription failed")]
+    public async Task InsertThrows_HistoryAddThrows_FallsBackToTheClipboard(bool copyWorks, string notice)
+    {
+        _inserter.InsertAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<InsertResult>(new Win32Exception(5, "Clipboard busy")));
+        _history.Add(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>()).Returns(_ => throw new IOException("locked"));
+        _inserter.TryCopy(Arg.Any<string>()).Returns(copyWorks);
+
+        HoldAndRelease();
+        await Finished();
+
+        _inserter.Received(1).TryCopy("Hello world.");
+        _pill.Received(1).ShowNotice(notice);
+        _pill.DidNotReceive().ShowNotice("Saved to history");
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public async Task TextIsTrimmedAfterTheVocabularyRules()
+    {
+        _vocabulary.Load().Returns(new Vocabulary([], [new ReplacementRule("um", "")]));
+        _engine.TranscribeAsync(Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new TranscriptionResult("Um hello there.", 0.01f));
+
+        HoldAndRelease();
+        await Finished();
+
+        await _inserter.Received(1).InsertAsync("hello there.", Arg.Any<CancellationToken>());
+        _history.Received(1).Add("hello there.", "Notepad", true);
+    }
+
+    [Fact]
+    public async Task EachDictation_LogsOneInformationLine_WithoutTheTranscript()
+    {
+        var sink = new CapturingSink();
+        var previous = Log.Logger;
+        Log.Logger = new LoggerConfiguration().MinimumLevel.Verbose().WriteTo.Sink(sink).CreateLogger();
+        try
+        {
+            _controller = Create(context: null); // takes its logger from Log.Logger
+
+            HoldAndRelease();
+            await Finished();
+            _chunksOnStart = [];
+            HoldAndRelease();
+            await Finished();
+        }
+        finally
+        {
+            Log.Logger = previous;
+        }
+
+        var lines = sink.Events
+            .Where(e => e.Properties.TryGetValue("Outcome", out _))
+            .ToArray();
+        lines.Select(e => e.Level).ShouldAllBe(level => level == LogEventLevel.Information);
+        lines.Select(e => ((ScalarValue)e.Properties["Outcome"]).Value).ShouldBe(["pasted", "silence"]);
+        ((ScalarValue)lines[0].Properties["Characters"]).Value.ShouldBe("Hello world.".Length);
+        ((ScalarValue)lines[0].Properties["TargetApp"]).Value.ShouldBe("Notepad");
+        ((ScalarValue)lines[0].Properties["RecordingMs"]).Value.ShouldBe(800L);
+        ((ScalarValue)lines[0].Properties["ReleaseToPasteMs"]).Value.ShouldNotBeNull();
+        ((ScalarValue)lines[1].Properties["SpeechDetected"]).Value.ShouldBe(false);
+        sink.Events.ShouldContain(e => e.MessageTemplate.Text.StartsWith("Microphone opened in"));
+        sink.Events.ShouldNotContain(e => e.RenderMessage(null).Contains("Hello world"));
     }
 
     [Fact]
@@ -589,7 +840,7 @@ public sealed class DictationControllerTests : IDisposable
         _matcher.OnKey(new KeyInput(vkLeftCtrl, true, false));
         _matcher.OnKey(new KeyInput(vkLeftAlt, true, false));
         _matcher.OnKey(new KeyInput(vkD, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
-        Controller.HandleSignal(HotkeySignal.HotkeyDown);
+        Signal(HotkeySignal.HotkeyDown);
 
         _time.Advance(TimeSpan.FromMilliseconds(800));
 
@@ -597,7 +848,7 @@ public sealed class DictationControllerTests : IDisposable
         _keys.DidNotReceive().IsKeyDown(vkD);
 
         _matcher.OnKey(new KeyInput(vkD, false, false)).Signal.ShouldBe(HotkeySignal.HotkeyUp);
-        Controller.HandleSignal(HotkeySignal.HotkeyUp);
+        Signal(HotkeySignal.HotkeyUp);
         await Finished();
 
         await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
@@ -672,7 +923,8 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     private DictationController Create(
-        SynchronizationContext? context, IEnumerable<ITranscriptPostProcessor>? postProcessors = null)
+        SynchronizationContext? context, IEnumerable<ITranscriptPostProcessor>? postProcessors = null,
+        ITextInserter? inserter = null)
     {
         var previous = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(context);
@@ -681,7 +933,8 @@ public sealed class DictationControllerTests : IDisposable
             return new DictationController(
                 _machine, _matcher, _recorder, _engine,
                 postProcessors ?? [new TranscriptCleaner(), new VocabularyReplacer(_vocabulary)],
-                _inserter, _history, _audioArchive, _pill, _cues, _settings, _vocabulary, _keys, _mediator, _time);
+                inserter ?? _inserter, _history, _audioArchive, _pill, _cues, _settings, _vocabulary, _keys, _mediator,
+                _time);
         }
         finally
         {
@@ -689,17 +942,37 @@ public sealed class DictationControllerTests : IDisposable
         }
     }
 
+    /// <summary>A signal delivered at once: the hook's timestamp is the current time.</summary>
+    private void Signal(HotkeySignal signal) => Controller.HandleSignal(signal, _time.GetUtcNow());
+
     /// <summary>Hotkey pressed: the key probe reports it down until <see cref="Up"/>.</summary>
     private void Down()
     {
         _hotkeyDown = true;
-        Controller.HandleSignal(HotkeySignal.HotkeyDown);
+        Signal(HotkeySignal.HotkeyDown);
     }
 
     private void Up()
     {
         _hotkeyDown = false;
-        Controller.HandleSignal(HotkeySignal.HotkeyUp);
+        Signal(HotkeySignal.HotkeyUp);
+    }
+
+    /// <summary>
+    /// Makes announcing a history entry wait for <paramref name="publish"/>; the returned task completes once the
+    /// announcement has started.
+    /// </summary>
+    private Task PendingPublish(out TaskCompletionSource publish)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _mediator.Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            started.TrySetResult();
+            return pending.Task;
+        });
+        publish = pending;
+        return started.Task;
     }
 
     /// <summary>Hold for 800 ms, then release: the controller stops and transcribes.</summary>
@@ -739,6 +1012,20 @@ public sealed class DictationControllerTests : IDisposable
         for (var i = 0; i < samples.Length; i++)
             samples[i] = (float)(amplitude * Math.Sin(2 * Math.PI * frequencyHz * i / 16_000));
         return samples;
+    }
+
+    private sealed class CapturingSink : ILogEventSink
+    {
+        private readonly ConcurrentQueue<LogEvent> _events = new();
+
+        /// <summary>The controller's events (the logger is global, so other test classes may log here too).</summary>
+        public LogEvent[] Events =>
+        [
+            .. _events.Where(e => e.Properties.TryGetValue(Constants.SourceContextPropertyName, out var source)
+                                  && source.ToString().Contains(nameof(DictationController))),
+        ];
+
+        public void Emit(LogEvent logEvent) => _events.Enqueue(logEvent);
     }
 
     /// <summary>

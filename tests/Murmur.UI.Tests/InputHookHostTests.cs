@@ -19,10 +19,16 @@ public sealed class InputHookHostTests
     private readonly HotkeyMatcher _matcher = new(HotkeyDefinition.Default);
     private readonly HotkeyCaptureCoordinator _coordinator = new(TimeProvider.System);
     private readonly IKeyboardSender _keyboard = Substitute.For<IKeyboardSender>();
+    private readonly ManualTime _time = new();
     private readonly ConcurrentQueue<HotkeySignal> _signals = new();
+    private readonly ConcurrentQueue<DateTimeOffset> _stamps = new();
     private readonly InputHookHost _host;
 
-    public InputHookHostTests() => _host = new InputHookHost(_matcher, _coordinator, _keyboard, _signals.Enqueue);
+    public InputHookHostTests() => _host = new InputHookHost(_matcher, _coordinator, _keyboard, _time, (signal, at) =>
+    {
+        _signals.Enqueue(signal);
+        _stamps.Enqueue(at);
+    });
 
     [Fact]
     public void OnKey_ModifierHotkeyDown_PostsHotkeyDownAndLetsKeyThrough()
@@ -30,6 +36,18 @@ public sealed class InputHookHostTests
         _host.OnKey(Down(VkRightCtrl)).ShouldBeFalse();
 
         _signals.ShouldBe([HotkeySignal.HotkeyDown]);
+    }
+
+    [Fact]
+    public void OnKey_StampsEachSignalWithTheTimeTheHookSawIt()
+    {
+        var pressedAt = _time.Now;
+        _host.OnKey(Down(VkRightCtrl));
+        _time.Now += TimeSpan.FromMilliseconds(150);
+        _host.OnKey(Up(VkRightCtrl));
+
+        _signals.ShouldBe([HotkeySignal.HotkeyDown, HotkeySignal.HotkeyUp]);
+        _stamps.ShouldBe([pressedAt, pressedAt + TimeSpan.FromMilliseconds(150)]);
     }
 
     [Fact]
@@ -136,4 +154,12 @@ public sealed class InputHookHostTests
     private static KeyInput Down(int vk) => new(vk, IsDown: true, IsInjected: false);
 
     private static KeyInput Up(int vk) => new(vk, IsDown: false, IsInjected: false);
+
+    /// <summary>A clock that only moves when the test moves it.</summary>
+    private sealed class ManualTime : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = new(2026, 10, 29, 10, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
 }

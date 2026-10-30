@@ -223,7 +223,8 @@ public partial class App : Application
             container.Resolve<HotkeyMatcher>(),
             container.Resolve<HotkeyCaptureCoordinator>(),
             container.Resolve<IKeyboardSender>(),
-            signal => dispatcher.BeginInvoke(() => controller.HandleSignal(signal)));
+            container.Resolve<TimeProvider>(),
+            (signal, at) => dispatcher.BeginInvoke(() => controller.HandleSignal(signal, at)));
 
         try
         {

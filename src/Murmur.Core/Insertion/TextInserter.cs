@@ -7,8 +7,9 @@ namespace Murmur.Core.Insertion;
 /// <summary>
 /// Pastes text through the clipboard: snapshot the owner's clipboard, put the text on it, send Ctrl+V once no
 /// modifier is held, then put the snapshot back after <see cref="RestoreDelay"/> unless something else has written
-/// the clipboard meanwhile. Into an elevated window, where Windows blocks injected input, the text is just left on
-/// the clipboard.
+/// the clipboard meanwhile. <see cref="InsertAsync"/> returns as soon as Ctrl+V is sent; the restore finishes in the
+/// background, still holding the gate, so the next insert (or copy) waits for it. Into an elevated window, where
+/// Windows blocks injected input, the text is just left on the clipboard.
 /// </summary>
 public sealed class TextInserter(IClipboard clipboard, IForegroundInfo foreground, IKeyboardSender keyboard,
     IKeyStateProbe keys, TimeProvider time) : ITextInserter
@@ -23,14 +24,19 @@ public sealed class TextInserter(IClipboard clipboard, IForegroundInfo foregroun
 
     private readonly ILogger _logger = Log.ForContext<TextInserter>();
 
-    // One insert at a time: a second insert must not snapshot the first one's text as "the owner's clipboard".
+    // One insert at a time, held until its restore is done: a second insert must not snapshot the first one's text as
+    // "the owner's clipboard".
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>The background restore of the last paste, or a completed task. It never faults.</summary>
+    internal Task PendingRestore { get; private set; } = Task.CompletedTask;
 
     public async Task<InsertResult> InsertAsync(string text, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(text);
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
+        var releaseGate = true;
         try
         {
             var target = foreground.Capture();
@@ -66,16 +72,58 @@ public sealed class TextInserter(IClipboard clipboard, IForegroundInfo foregroun
                 return new InsertResult(InsertOutcome.LeftOnClipboard, target.AppName);
             }
 
-            // The text is pasted, so cancellation no longer applies: the owner's clipboard always comes back.
+            _logger.Debug("Pasted {Length} characters into {App}", text.Length, target.AppName);
+
+            // The text is pasted, so cancellation no longer applies: the owner's clipboard always comes back. The
+            // restore takes over the gate and releases it when done.
+            PendingRestore = RestoreAfterDelayAsync(snapshot, sequence);
+            releaseGate = false;
+            return new InsertResult(InsertOutcome.Pasted, target.AppName);
+        }
+        finally
+        {
+            if (releaseGate)
+                _gate.Release();
+        }
+    }
+
+    public bool TryCopy(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        _gate.Wait();
+        try
+        {
+            clipboard.SetText(text);
+            _logger.Debug("Left {Length} characters on the clipboard", text.Length);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not put {Length} characters on the clipboard", text.Length);
+            return false;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>Waits <see cref="RestoreDelay"/>, puts the snapshot back if nothing else wrote the clipboard, then releases the gate.</summary>
+    private async Task RestoreAfterDelayAsync(ClipboardSnapshot snapshot, uint sequence)
+    {
+        try
+        {
             await Task.Delay(RestoreDelay, time, CancellationToken.None).ConfigureAwait(false);
 
             if (clipboard.SequenceNumber == sequence)
                 TryRestore(snapshot);
             else
                 _logger.Debug("Clipboard changed after the paste; not restoring the previous contents");
-
-            _logger.Debug("Pasted {Length} characters into {App}", text.Length, target.AppName);
-            return new InsertResult(InsertOutcome.Pasted, target.AppName);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not restore the previous clipboard contents");
         }
         finally
         {

@@ -45,34 +45,34 @@ public sealed class TextInserterTests
     }
 
     [Fact]
-    public async Task InsertAsync_PastesAndRestoresClipboardAfter500ms()
+    public async Task InsertAsync_ReturnsOnceThePasteIsSent_AndRestoresTheClipboard500msLater()
     {
-        var insert = _inserter.InsertAsync("hello", Ct);
-        _time.WaitForTimers(1); // the restore delay has started
+        // Completes without any time passing: the caller does not wait for the restore.
+        var result = await _inserter.InsertAsync("hello", Ct).WaitAsync(WaitLimit, Ct);
 
-        _clipboard.Text.ShouldBe("hello");
+        result.ShouldBe(new InsertResult(InsertOutcome.Pasted, "Notepad"));
         _keyboard.Received(1).SendCtrlV();
         ClipboardTextAtPaste.ShouldBe(["hello"]);
+        _clipboard.Text.ShouldBe("hello");
 
         _time.Advance(RestoreDelay - TimeSpan.FromMilliseconds(1));
-        insert.IsCompleted.ShouldBeFalse();
+        _inserter.PendingRestore.IsCompleted.ShouldBeFalse();
         _clipboard.Text.ShouldBe("hello");
 
         _time.Advance(TimeSpan.FromMilliseconds(1));
-        (await insert.WaitAsync(WaitLimit, Ct)).ShouldBe(new InsertResult(InsertOutcome.Pasted, "Notepad"));
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
         _clipboard.Text.ShouldBe("orig");
     }
 
     [Fact]
     public async Task InsertAsync_ClipboardChangedMeanwhile_DoesNotRestore()
     {
-        var insert = _inserter.InsertAsync("hello", Ct);
-        _time.WaitForTimers(1);
+        (await _inserter.InsertAsync("hello", Ct).WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
 
         _clipboard.CopyFromAnotherApp("newer");
         _time.Advance(RestoreDelay);
 
-        (await insert.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
         _clipboard.Text.ShouldBe("newer");
     }
 
@@ -103,16 +103,17 @@ public sealed class TextInserterTests
         {
             _time.WaitForTimers(poll); // poll `poll` saw a modifier down and is waiting 10 ms
             _keyboard.DidNotReceive().SendCtrlV();
+            insert.IsCompleted.ShouldBeFalse();
             _time.Advance(PollInterval);
         }
 
-        _time.WaitForTimers(4); // the paste was sent and the restore delay started
+        (await insert.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
         _keyboard.Received(1).SendCtrlV();
         pastedAfter.ShouldBe(TimeSpan.FromMilliseconds(30));
         ClipboardTextAtPaste.ShouldBe(["hello"]);
 
         _time.Advance(RestoreDelay);
-        (await insert.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
         _clipboard.Text.ShouldBe("orig");
     }
 
@@ -129,11 +130,11 @@ public sealed class TextInserterTests
             _time.Advance(PollInterval);
         }
 
-        _time.WaitForTimers(101);
+        (await insert.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
         _keyboard.Received(1).SendCtrlV();
 
         _time.Advance(RestoreDelay);
-        (await insert.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
         _clipboard.Text.ShouldBe("orig");
     }
 
@@ -143,19 +144,21 @@ public sealed class TextInserterTests
         var first = _inserter.InsertAsync("a", Ct);
         var second = _inserter.InsertAsync("b", Ct);
 
-        _time.WaitForTimers(1); // "a" pasted and waiting to restore; "b" queued behind it
+        // "a" is pasted and its caller has the result, but its restore still holds the gate, so "b" waits.
+        (await first.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
+        _time.WaitForTimers(1);
         ClipboardTextAtPaste.ShouldBe(["a"]);
         _clipboard.CapturedTexts.ShouldBe(["orig"]);
-
-        _time.Advance(RestoreDelay);
-        (await first.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
-
-        _time.WaitForTimers(2); // "b" pasted and waiting to restore
-        ClipboardTextAtPaste.ShouldBe(["a", "b"]);
-        _clipboard.CapturedTexts.ShouldBe(["orig", "orig"]); // the second snapshot was taken after the first restore
+        second.IsCompleted.ShouldBeFalse();
 
         _time.Advance(RestoreDelay);
         (await second.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
+        ClipboardTextAtPaste.ShouldBe(["a", "b"]);
+        _clipboard.CapturedTexts.ShouldBe(["orig", "orig"]); // the second snapshot was taken after the first restore
+
+        _time.WaitForTimers(2); // "b" is waiting to restore
+        _time.Advance(RestoreDelay);
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
         _clipboard.Text.ShouldBe("orig");
     }
 
@@ -195,30 +198,27 @@ public sealed class TextInserterTests
     public async Task InsertAsync_CancelledAfterPaste_StillRestoresClipboard()
     {
         using var cts = new CancellationTokenSource();
-        var insert = _inserter.InsertAsync("hello", cts.Token);
-        _time.WaitForTimers(1);
+        (await _inserter.InsertAsync("hello", cts.Token).WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
 
         await cts.CancelAsync();
-        insert.IsCompleted.ShouldBeFalse();
         _time.Advance(RestoreDelay);
 
-        (await insert.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
         _clipboard.Text.ShouldBe("orig");
     }
 
     [Fact]
     public async Task InsertAsync_CancelledWhileQueued_ThrowsWithoutTouchingClipboard()
     {
-        var first = _inserter.InsertAsync("a", Ct);
+        (await _inserter.InsertAsync("a", Ct).WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
         using var cts = new CancellationTokenSource();
-        var second = _inserter.InsertAsync("b", cts.Token);
-        _time.WaitForTimers(1);
+        var second = _inserter.InsertAsync("b", cts.Token); // queued behind the first one's restore
 
         await cts.CancelAsync();
         await Should.ThrowAsync<OperationCanceledException>(second.WaitAsync(WaitLimit, Ct));
 
         _time.Advance(RestoreDelay);
-        (await first.WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
         ClipboardTextAtPaste.ShouldBe(["a"]);
         _clipboard.CapturedTexts.ShouldBe(["orig"]);
         _clipboard.Text.ShouldBe("orig");
@@ -240,12 +240,24 @@ public sealed class TextInserterTests
     public async Task InsertAsync_RestoreFails_StillReportsPasted()
     {
         _clipboard.RestoreFailure = new Win32Exception(5);
-        var insert = _inserter.InsertAsync("hello", Ct);
-        _time.WaitForTimers(1);
+
+        (await _inserter.InsertAsync("hello", Ct).WaitAsync(WaitLimit, Ct))
+            .ShouldBe(new InsertResult(InsertOutcome.Pasted, "Notepad"));
+
+        _time.Advance(RestoreDelay);
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct);
+    }
+
+    [Fact]
+    public async Task InsertAsync_RestoreThrowsUnexpectedly_IsLoggedAndReleasesTheGate()
+    {
+        _clipboard.RestoreFailure = new InvalidOperationException("boom");
+        await _inserter.InsertAsync("a", Ct).WaitAsync(WaitLimit, Ct);
 
         _time.Advance(RestoreDelay);
 
-        (await insert.WaitAsync(WaitLimit, Ct)).ShouldBe(new InsertResult(InsertOutcome.Pasted, "Notepad"));
+        await _inserter.PendingRestore.WaitAsync(WaitLimit, Ct); // completes; it never faults
+        (await _inserter.InsertAsync("b", Ct).WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
     }
 
     [Fact]
@@ -261,11 +273,44 @@ public sealed class TextInserterTests
         _keyboard.DidNotReceive().SendCtrlV();
 
         // A failed insert releases the gate: the next one goes ahead.
-        var next = inserter.InsertAsync("again", Ct);
-        _time.WaitForTimers(1);
+        (await inserter.InsertAsync("again", Ct).WaitAsync(WaitLimit, Ct)).Outcome.ShouldBe(InsertOutcome.Pasted);
         _keyboard.Received(1).SendCtrlV();
+    }
+
+    [Fact]
+    public void TryCopy_PutsTheTextOnTheClipboard()
+    {
+        _inserter.TryCopy("keep me").ShouldBeTrue();
+
+        _clipboard.Text.ShouldBe("keep me");
+        _keyboard.DidNotReceive().SendCtrlV();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TryCopy_ClipboardFails_ReturnsFalse(bool unexpectedError)
+    {
+        var clipboard = Substitute.For<IClipboard>();
+        Exception failure = unexpectedError ? new InvalidOperationException("boom") : new Win32Exception(5);
+        clipboard.When(c => c.SetText(Arg.Any<string>())).Do(_ => throw failure);
+        var inserter = new TextInserter(clipboard, _foreground, _keyboard, _keys, _time);
+
+        inserter.TryCopy("keep me").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task TryCopy_WaitsForAPendingRestore()
+    {
+        await _inserter.InsertAsync("a", Ct).WaitAsync(WaitLimit, Ct);
+
+        var copy = Task.Run(() => _inserter.TryCopy("keep me"), Ct);
+        await Task.WhenAny(copy, Task.Delay(100, Ct));
+        copy.IsCompleted.ShouldBeFalse(); // the restore still holds the gate
+
         _time.Advance(RestoreDelay);
-        await next.WaitAsync(WaitLimit, Ct);
+        (await copy.WaitAsync(WaitLimit, Ct)).ShouldBeTrue();
+        _clipboard.Text.ShouldBe("keep me"); // written after the restore, so it stays
     }
 
     /// <summary>In-memory clipboard; like the real one, every write bumps <see cref="SequenceNumber"/>.</summary>
