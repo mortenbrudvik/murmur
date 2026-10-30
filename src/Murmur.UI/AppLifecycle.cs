@@ -4,8 +4,8 @@ using Serilog;
 namespace Murmur.UI;
 
 /// <summary>
-/// Carries the web UI's restart request to whoever owns the process. Nothing is subscribed yet, so for now a request
-/// is only logged.
+/// Carries the web UI's restart request to whoever owns the process: <see cref="App"/> subscribes, starts a new Murmur
+/// and quits this one.
 /// </summary>
 public sealed class AppLifecycle : IAppLifecycle
 {

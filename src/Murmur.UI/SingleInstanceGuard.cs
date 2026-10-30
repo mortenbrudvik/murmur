@@ -38,7 +38,14 @@ public sealed partial class SingleInstanceGuard : IDisposable
     /// Returns true when this is the only instance. Call it on the thread that will later dispose the guard: a mutex
     /// belongs to the thread that acquired it.
     /// </summary>
-    public bool TryAcquire()
+    public bool TryAcquire() => TryAcquire(TimeSpan.Zero);
+
+    /// <summary>
+    /// Like <see cref="TryAcquire()"/>, but waits up to <paramref name="wait"/> for the instance that owns the mutex to
+    /// let go of it. A restarted Murmur starts while the old one is still shutting down, and must not mistake it for a
+    /// second launch.
+    /// </summary>
+    public bool TryAcquire(TimeSpan wait)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -49,7 +56,7 @@ public sealed partial class SingleInstanceGuard : IDisposable
         _mutex ??= new Mutex(initiallyOwned: false, _mutexName);
         try
         {
-            _ownsMutex = _mutex.WaitOne(TimeSpan.Zero);
+            _ownsMutex = _mutex.WaitOne(wait);
         }
         catch (AbandonedMutexException)
         {

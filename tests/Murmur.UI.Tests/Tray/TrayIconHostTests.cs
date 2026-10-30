@@ -110,6 +110,60 @@ public sealed class TrayIconHostTests
     }
 
     [Fact]
+    public void ShowNotification_BeforeShow_DoesNothing()
+    {
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ => { }, maxCreateAttempts: 1);
+
+            Should.NotThrow(() => host.ShowNotification("Murmur is ready", "Hold Right Ctrl to talk."));
+        });
+    }
+
+    [Fact]
+    public void ShowNotification_AfterDispose_DoesNothing()
+    {
+        StaHost.Run(() =>
+        {
+            var host = NewHostWithCreator(_ => { }, maxCreateAttempts: 1);
+            host.Show();
+            host.Dispose();
+
+            Should.NotThrow(() => host.ShowNotification("Murmur is ready", "Hold Right Ctrl to talk."));
+        });
+    }
+
+    /// <summary>Right after sign-in the taskbar may not be ready; the icon is then still to be added.</summary>
+    [Fact]
+    public void ShowNotification_IconNotAddedYet_DoesNotThrow()
+    {
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ => throw new InvalidOperationException("TryCreate failed."), maxCreateAttempts: 1);
+            host.Show();
+
+            Should.NotThrow(() => host.ShowNotification("Murmur needs your attention", "boom"));
+        });
+    }
+
+    [Fact]
+    public void BalloonClick_AsksToOpenTheWindow()
+    {
+        StaHost.Run(() =>
+        {
+            H.NotifyIcon.TaskbarIcon? icon = null;
+            using var host = NewHostWithCreator(created => icon = created, maxCreateAttempts: 1);
+            var opened = 0;
+            host.OpenRequested += () => opened++;
+            host.Show();
+
+            icon.ShouldNotBeNull().RaiseEvent(new System.Windows.RoutedEventArgs(H.NotifyIcon.TaskbarIcon.TrayBalloonTipClickedEvent));
+
+            opened.ShouldBe(1);
+        });
+    }
+
+    [Fact]
     public void FormatToolTip_Ready_NamesTheHotkey()
     {
         TrayIconHost.FormatToolTip(new EngineStatus(EngineState.Ready, Model, "Cuda"), "Right Ctrl")

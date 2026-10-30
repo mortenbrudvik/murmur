@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
@@ -15,6 +16,7 @@ using Murmur.Core.Features.Vocabulary;
 using Murmur.Core.Hardware;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
+using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Setup;
 using Murmur.Core.Speech;
@@ -28,7 +30,11 @@ namespace Murmur.UI;
 
 public partial class App : Application
 {
-    private const string MinimizedArgument = "--minimized";
+    /// <summary>
+    /// How long a restarted Murmur waits for the instance that started it to let go of the single-instance mutex. That
+    /// one is only closing, but disposing the container can take a moment.
+    /// </summary>
+    private static readonly TimeSpan RestartWait = TimeSpan.FromSeconds(10);
 
     private readonly CancellationTokenSource _appCts = new();
 
@@ -63,6 +69,7 @@ public partial class App : Application
         // 1. Logging
         ConfigureLogging();
         Log.Information("Murmur starting");
+        var launch = LaunchArguments.Parse(args);
 
         // 2. WebView2
         if (!IsWebView2RuntimeInstalled())
@@ -94,10 +101,14 @@ public partial class App : Application
             args.SetObserved();
         };
 
-        // 3. Single instance: a second launch shows the running instance's window and exits.
+        // 3. Single instance: a second launch shows the running instance's window and exits. A restarted Murmur is
+        // started by the instance it replaces, which is still shutting down, so it waits for that one to let go.
         _guard = new SingleInstanceGuard();
-        if (!_guard.TryAcquire())
+        if (!_guard.TryAcquire(launch.Restarted ? RestartWait : TimeSpan.Zero))
         {
+            if (launch.Restarted)
+                Log.Warning("The Murmur that started this one did not exit within {Wait}", RestartWait);
+
             _guard.SignalExisting();
             Shutdown();
             return;
@@ -108,6 +119,9 @@ public partial class App : Application
 
         // 5. Container and API
         _container = AutofacBootstrapper.Bootstrap();
+
+        // Set once, here, before any window exists and so before any IPC can read or take it.
+        _container.Resolve<LaunchOptions>().OpenPage = launch.Page;
 
         // Decides how Murmur starts with Windows (see AppModule.RegisterStartup) and how it tells a sign-in start.
         var identity = _container.Resolve<IPackageIdentity>();
@@ -156,12 +170,23 @@ public partial class App : Application
         _tray.QuitRequested += Quit;
         _tray.Show();
 
+        // "Restart Murmur" is asked for by an IPC handler, on a pool thread.
+        _container.Resolve<AppLifecycle>().RestartRequested += () => Dispatcher.BeginInvoke(Restart);
+
         // 10. Speech engine: after the first-run decision, downloads the model if needed, loads it and warms it up in
         // the background. Its status changes reach the main window as a notification; subscribed first, so even the
         // Downloading and Loading statuses are reported.
         var engine = _container.Resolve<ISpeechEngine>();
         var mediator = _container.Resolve<IMediator>();
         engine.StatusChanged += status => mediator.Publish(new EngineStatusChangedNotification(status)).FireAndForget();
+
+        // Windows notifications through the tray icon, for what happens while the window is not in front: the model is
+        // ready after a download, the engine failed, the download has no internet. The notifier's state lives on the
+        // UI thread, where the icon is.
+        var notifier = new TrayNotifier();
+        var settings = _container.Resolve<ISettingsService>();
+        engine.StatusChanged += status => Dispatcher.BeginInvoke(() => NotifyTray(notifier, settings, status));
+
         StartSpeechAsync(engine, _container.Resolve<IGpuInfo>(), _container.Resolve<SetupCoordinator>()).FireAndForget();
 
         // 11. Start with Windows
@@ -171,7 +196,7 @@ public partial class App : Application
         _guard.ListenForShowRequests(ShowMainWindow);
 
         // 13. Started at sign-in, Murmur stays in the tray.
-        if (!IsSignInStart(args, identity))
+        if (!IsSignInStart(launch, identity))
             ShowMainWindow();
     }
 
@@ -200,12 +225,64 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// The Run key starts Murmur with <see cref="MinimizedArgument"/>. The Store package's startup task cannot pass
-    /// arguments, so a packaged start asks Windows how it was activated instead.
+    /// The Run key starts Murmur with <c>--minimized</c>. The Store package's startup task cannot pass arguments, so a
+    /// packaged start asks Windows how it was activated instead. A restart is never a sign-in start: the user just asked
+    /// for it and wants to see the window.
     /// </summary>
-    private static bool IsSignInStart(string[] args, IPackageIdentity identity) =>
-        args.Contains(MinimizedArgument, StringComparer.OrdinalIgnoreCase)
-        || (identity.IsPackaged && PackagedStartupRegistration.IsStartupActivation());
+    internal static bool IsSignInStart(LaunchArguments launch, IPackageIdentity identity) =>
+        !launch.Restarted
+        && (launch.Minimized || (identity.IsPackaged && PackagedStartupRegistration.IsStartupActivation()));
+
+    /// <summary>
+    /// Starts a new Murmur on Settings and quits this one. The new instance waits for this one to let go of the
+    /// single-instance mutex (<see cref="RestartWait"/>). If the new one cannot be started, this one keeps running.
+    /// </summary>
+    private void Restart()
+    {
+        if (IsQuitting)
+            return;
+
+        Log.Information("Restarting Murmur");
+        try
+        {
+            // Whether a child started this way keeps the MSIX package identity is checked in Task 11 of the first-run
+            // setup plan (packaged install); until then, no fallback.
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, LaunchArguments.RestartArguments) { UseShellExecute = false })?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Could not start a new Murmur; staying open");
+            return;
+        }
+
+        Quit();
+    }
+
+    /// <summary>Shows what <see cref="TrayNotifier"/> finds worth a notification. Runs on the UI thread.</summary>
+    private void NotifyTray(TrayNotifier notifier, ISettingsService settings, EngineStatus status)
+    {
+        if (IsQuitting)
+            return;
+
+        // Only a ready notice names the hotkey, so the file is not read for every download progress update.
+        var hotkeyName = status.State == EngineState.Ready ? ReadHotkeyName(settings) : HotkeyDefinition.Default.DisplayName;
+        var notice = notifier.OnStatus(status, _mainWindow?.IsActive == true, hotkeyName);
+        if (notice is not null)
+            _tray?.ShowNotification(notice.Title, notice.Message);
+    }
+
+    private static string ReadHotkeyName(ISettingsService settings)
+    {
+        try
+        {
+            return settings.Load().Hotkey.DisplayName;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(ex, "Could not read the hotkey for the tray notification");
+            return HotkeyDefinition.Default.DisplayName;
+        }
+    }
 
     /// <summary>Leaves nothing behind (no global hooks, no tray icon, no claim on the single instance), says why, and exits.</summary>
     private void FailStartup(Exception ex)

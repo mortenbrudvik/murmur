@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using H.NotifyIcon;
+using H.NotifyIcon.Core;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
@@ -96,11 +97,38 @@ public sealed partial class TrayIconHost : IDisposable
             ContextMenu = new ContextMenu { Items = { open, new Separator(), quit } },
         };
         _icon.TrayLeftMouseUp += (_, _) => OpenRequested?.Invoke();
+        _icon.TrayBalloonTipClicked += (_, _) => OpenRequested?.Invoke();
         _icon.TrayMouseMove += (_, _) => Update(rereadHotkey: false);
 
         Update(rereadHotkey: true);
         _engine.StatusChanged += OnStatusChanged;
         TryCreate();
+    }
+
+    /// <summary>
+    /// Shows a Windows notification (a balloon, which Windows 10 and 11 present as a toast) through the icon; clicking it
+    /// raises <see cref="OpenRequested"/>. Call on the UI thread. Does nothing, and says so in the debug log, while the
+    /// icon is not in the notification area (before <see cref="Show"/>, while the taskbar is not ready, after
+    /// <see cref="Dispose"/>). Never throws: a notification is not worth a crash.
+    /// </summary>
+    public void ShowNotification(string title, string message)
+    {
+        var icon = _icon;
+        if (_disposed || icon is not { IsCreated: true })
+        {
+            _logger.Debug("No tray icon to show the notification \"{Title}\" with", title);
+            return;
+        }
+
+        try
+        {
+            icon.ShowNotification(title, message, NotificationIcon.Info);
+            _logger.Information("Tray notification: {Title}", title);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning(ex, "Could not show the tray notification \"{Title}\"", title);
+        }
     }
 
     /// <summary>The tooltip currently shown, or null before <see cref="Show"/>.</summary>
