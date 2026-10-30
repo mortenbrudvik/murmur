@@ -156,19 +156,17 @@ public sealed class DictationController : IDisposable
         // One snapshot per signal, so the not-ready notice describes the state the decision was made on. Dictation needs
         // a loaded model, not a Ready status: while a switched-to model loads, the previous one keeps transcribing.
         var status = _engine.Status;
+        var ready = _engine.CanTranscribe;
         var action = signal switch
         {
-            HotkeySignal.HotkeyDown => _machine.OnHotkeyDown(at, _engine.CanTranscribe, _matcher.Hotkey.IsModifierOnly),
-            HotkeySignal.HotkeyUp => _machine.OnHotkeyUp(at),
+            HotkeySignal.HotkeyDown => _machine.OnHotkeyDown(at, ready, _matcher.Hotkey.IsModifierOnly),
+            HotkeySignal.HotkeyUp => _machine.OnHotkeyUp(at, ready),
             HotkeySignal.OtherInputWhileHeld => _machine.OnOtherInputWhileHeld(),
             HotkeySignal.Escape => _machine.OnEscape(),
             _ => DictationAction.None,
         };
 
-        if (action == DictationAction.NotifyNotReady)
-            _pill.ShowNotice(DescribeNotReady(status));
-        else
-            Execute(action, at);
+        Execute(action, at, status);
     }
 
     /// <summary>
@@ -213,10 +211,17 @@ public sealed class DictationController : IDisposable
     }
 
     /// <param name="at">When the event that led to <paramref name="action"/> happened.</param>
-    private void Execute(DictationAction action, DateTimeOffset at)
+    /// <param name="status">The engine's state when <paramref name="action"/> was decided, for the not-ready notice.</param>
+    private void Execute(DictationAction action, DateTimeOffset at, EngineStatus status)
     {
         switch (action)
         {
+            case DictationAction.NotifyNotReady:
+                // A combo press, or an armed press that turned out to be a dictation: nothing starts, and an armed press's
+                // tick stops.
+                _pill.ShowNotice(DescribeNotReady(status));
+                EndDictation();
+                break;
             case DictationAction.Arm:
                 Arm();
                 break;
@@ -426,8 +431,10 @@ public sealed class DictationController : IDisposable
         if (!physicallyDown && _matcher.IsHotkeyHeld)
             _matcher.ResetHeld();
 
+        // An armed press held past the arm delay is decided on the engine as it is now, like a signal.
         var now = _time.GetUtcNow();
-        Execute(_machine.OnTick(now, physicallyDown), now);
+        var status = _engine.Status;
+        Execute(_machine.OnTick(now, physicallyDown, _engine.CanTranscribe), now, status);
     }
 
     private void OnCaptureFailed(Exception error)

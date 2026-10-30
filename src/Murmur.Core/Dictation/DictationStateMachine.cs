@@ -26,6 +26,8 @@ public enum DictationAction
     StopAndPaste,
     StopAndSaveOnly,
     Cancel,
+
+    /// <summary>The press is a dictation but the engine cannot transcribe: say why. Nothing starts.</summary>
     NotifyNotReady,
 }
 
@@ -46,8 +48,9 @@ public sealed record DictationTimings(TimeSpan TapThreshold, TimeSpan StrayTapTi
 /// Pure, deterministic state machine for the dictation flow: hold the hotkey to talk, tap it for hands-free
 /// recording, tap again to stop, Esc to cancel. A lone-modifier hotkey arms first and starts recording only once it
 /// has been held for <see cref="DictationTimings.ArmDelay"/> or released as a tap; another key in between means it was
-/// part of a shortcut, and nothing starts. It performs no I/O and never reads the clock; callers pass the current time
-/// and execute the returned <see cref="DictationAction"/>. Not thread-safe: drive it from one thread.
+/// part of a shortcut, and nothing starts (whether the engine is ready is only asked once the press is a dictation). It
+/// performs no I/O and never reads the clock; callers pass the current time and execute the returned
+/// <see cref="DictationAction"/>. Not thread-safe: drive it from one thread.
 /// </summary>
 public sealed class DictationStateMachine(DictationTimings timings)
 {
@@ -72,6 +75,10 @@ public sealed class DictationStateMachine(DictationTimings timings)
     /// <summary>True once speech was reported during the current (or just finished) session.</summary>
     public bool SpeechSeen { get; private set; }
 
+    /// <param name="engineReady">
+    /// Whether the engine can transcribe. Only a combo or F-key press is decided on it here; an armed press is decided
+    /// when the arm resolves.
+    /// </param>
     /// <param name="modifierOnly">
     /// The hotkey is a lone modifier, which other apps' shortcuts also use, so it arms first. A combo or F-key hotkey is
     /// kept from other apps, so it starts at once.
@@ -81,7 +88,9 @@ public sealed class DictationStateMachine(DictationTimings timings)
         switch (State)
         {
             case DictationState.Idle:
-                if (!engineReady)
+                // A lone modifier arms whatever the engine's state: if the press turns out to be a shortcut, nothing at
+                // all may show, not even the not-ready notice.
+                if (!modifierOnly && !engineReady)
                     return DictationAction.NotifyNotReady;
 
                 PressedAt = now;
@@ -100,13 +109,14 @@ public sealed class DictationStateMachine(DictationTimings timings)
         }
     }
 
-    public DictationAction OnHotkeyUp(DateTimeOffset now)
+    /// <param name="engineReady">Whether the engine can transcribe; decides a tap that ends an armed press.</param>
+    public DictationAction OnHotkeyUp(DateTimeOffset now, bool engineReady)
     {
         switch (State)
         {
             case DictationState.Armed:
                 // Released within the arm delay, which is shorter than the tap threshold: a tap.
-                return Enter(DictationState.HandsFreeRecording, DictationAction.StartRecording);
+                return StartArmed(DictationState.HandsFreeRecording, engineReady);
 
             case DictationState.HoldRecording:
                 return ReleaseHold(now);
@@ -158,7 +168,8 @@ public sealed class DictationStateMachine(DictationTimings timings)
     /// Periodic poll. <paramref name="hotkeyPhysicallyDown"/> is the hotkey's real state, which lets the machine
     /// recover from a key-up event that was never delivered.
     /// </summary>
-    public DictationAction OnTick(DateTimeOffset now, bool hotkeyPhysicallyDown)
+    /// <param name="engineReady">Whether the engine can transcribe; decides an armed press held past the arm delay.</param>
+    public DictationAction OnTick(DateTimeOffset now, bool hotkeyPhysicallyDown, bool engineReady)
     {
         switch (State)
         {
@@ -169,7 +180,7 @@ public sealed class DictationStateMachine(DictationTimings timings)
                     return Enter(DictationState.Idle, DictationAction.None);
 
                 return now - PressedAt >= timings.ArmDelay
-                    ? Enter(DictationState.HoldRecording, DictationAction.StartRecording)
+                    ? StartArmed(DictationState.HoldRecording, engineReady)
                     : DictationAction.None;
 
             case DictationState.HoldRecording:
@@ -210,6 +221,15 @@ public sealed class DictationStateMachine(DictationTimings timings)
         Enter(DictationState.Idle, DictationAction.None);
         SpeechSeen = false;
     }
+
+    /// <summary>
+    /// An armed press turned out to be a dictation: it starts in <paramref name="recording"/>, or, when the engine cannot
+    /// transcribe, ends with the not-ready notice.
+    /// </summary>
+    private DictationAction StartArmed(DictationState recording, bool engineReady) =>
+        engineReady
+            ? Enter(recording, DictationAction.StartRecording)
+            : Enter(DictationState.Idle, DictationAction.NotifyNotReady);
 
     private DictationAction ReleaseHold(DateTimeOffset now) =>
         now - PressedAt < timings.TapThreshold

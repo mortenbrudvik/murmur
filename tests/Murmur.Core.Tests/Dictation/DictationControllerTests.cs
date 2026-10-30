@@ -970,7 +970,7 @@ public sealed class DictationControllerTests : IDisposable
         _engine.Status.Returns(new EngineStatus(state, "base", Download: download));
         _engine.CanTranscribe.Returns(false);
 
-        Down();
+        DownPastArmDelay();
 
         _pill.Received(1).ShowNotice(expected);
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
@@ -996,10 +996,112 @@ public sealed class DictationControllerTests : IDisposable
     {
         _engine.CanTranscribe.Returns(false);
 
-        Down();
+        DownPastArmDelay();
 
         _pill.Received(1).ShowNotice("Loading speech model…");
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
+    }
+
+    [Fact]
+    public void ShortcutWhileTheEngineIsNotReady_ShowsNothing()
+    {
+        _engine.Status.Returns(new EngineStatus(EngineState.Error, "base"));
+        _engine.CanTranscribe.Returns(false);
+
+        Down(); // Right Ctrl...
+        _time.Advance(ArmDelay - TimeSpan.FromMilliseconds(1));
+        Signal(HotkeySignal.OtherInputWhileHeld); // ...+C
+        Up();
+        _time.Advance(ArmDelay);
+
+        _pill.ReceivedCalls().ShouldBeEmpty();
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _cues.ReceivedCalls().ShouldBeEmpty();
+        _machine.State.ShouldBe(DictationState.Idle);
+        AssertTimerStopped();
+    }
+
+    [Fact]
+    public void ModifierHotkeyHeldPastArmDelayWhileNotReady_ShowsTheNotice()
+    {
+        _engine.Status.Returns(new EngineStatus(EngineState.Error, "base"));
+        _engine.CanTranscribe.Returns(false);
+
+        Down();
+        _time.Advance(ArmDelay - TimeSpan.FromMilliseconds(1));
+        _pill.ReceivedCalls().ShouldBeEmpty(); // it could still turn out to be a shortcut
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+
+        _pill.Received(1).ShowNotice("Speech engine unavailable — open Murmur");
+        _pill.DidNotReceive().ShowListening();
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _cues.ReceivedCalls().ShouldBeEmpty();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped();
+
+        Up(); // its release starts nothing either
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _pill.Received(1).ShowNotice(Arg.Any<string>());
+    }
+
+    [Fact]
+    public void ModifierHotkeyTapWhileNotReady_ShowsTheNotice()
+    {
+        _engine.Status.Returns(new EngineStatus(EngineState.Downloading, "base"));
+        _engine.CanTranscribe.Returns(false);
+        Down();
+
+        // The notice describes the engine when the tap is decided, not when the key went down.
+        _engine.Status.Returns(new EngineStatus(EngineState.Loading, "base"));
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+        Up();
+
+        _pill.Received(1).ShowNotice("Loading speech model…");
+        _pill.DidNotReceive().ShowListening();
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _cues.ReceivedCalls().ShouldBeEmpty();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped();
+    }
+
+    [Fact]
+    public void ModifierHotkey_EngineReadyByTheEndOfTheArmDelay_StartsRecording()
+    {
+        _engine.Status.Returns(new EngineStatus(EngineState.Loading, "base"));
+        _engine.CanTranscribe.Returns(false);
+        Down();
+
+        _engine.Status.Returns(new EngineStatus(EngineState.Ready, "base"));
+        _engine.CanTranscribe.Returns(true);
+        _time.Advance(ArmDelay);
+
+        _recorder.Received(1).Start(Arg.Any<string?>());
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+    }
+
+    [Fact]
+    public void ComboHotkeyWhileNotReady_ShowsTheNoticeAtOnce()
+    {
+        const int vkLeftCtrl = 0xA2, vkLeftAlt = 0xA4, vkD = 0x44;
+        _matcher.Hotkey = new HotkeyDefinition(vkD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+D");
+        _matcher.OnKey(new KeyInput(vkLeftCtrl, true, false));
+        _matcher.OnKey(new KeyInput(vkLeftAlt, true, false));
+        _matcher.OnKey(new KeyInput(vkD, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
+        _engine.Status.Returns(new EngineStatus(EngineState.Loading, "base"));
+        _engine.CanTranscribe.Returns(false);
+
+        Signal(HotkeySignal.HotkeyDown);
+
+        // A combo is swallowed, so it cannot be part of another app's shortcut: there is nothing to wait for.
+        _pill.Received(1).ShowNotice("Loading speech model…");
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped();
     }
 
     [Fact]
