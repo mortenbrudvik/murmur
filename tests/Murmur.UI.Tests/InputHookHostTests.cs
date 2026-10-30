@@ -15,6 +15,9 @@ public sealed class InputHookHostTests
     private const int VkEscape = 0x1B;
     private const int VkA = 0x41;
 
+    /// <summary>How long a thread that was told to end gets to finish unwinding, however busy the machine is.</summary>
+    private static readonly TimeSpan StopWait = TimeSpan.FromSeconds(2);
+
     private static readonly HotkeyDefinition RightAlt = new(VkRightAlt, HotkeyModifiers.None, "Right Alt");
 
     private readonly HotkeyMatcher _matcher = new(HotkeyDefinition.Default);
@@ -143,7 +146,7 @@ public sealed class InputHookHostTests
 
         _host.Dispose();
 
-        _host.IsRunning.ShouldBeFalse();
+        WaitUntil(() => !_host.IsRunning, StopWait).ShouldBeTrue("the hook thread should have ended");
     }
 
     /// <summary>
@@ -167,7 +170,7 @@ public sealed class InputHookHostTests
         // Start does not report a host that was disposed meanwhile as started.
         var failure = await Record.ExceptionAsync(() => start);
         failure.ShouldNotBeNull().ShouldBeAssignableTo<OperationCanceledException>();
-        host.IsRunning.ShouldBeFalse();
+        WaitUntil(() => !host.IsRunning, StopWait).ShouldBeTrue("the hook thread should have ended");
     }
 
     /// <summary>Guards the seam above: with the install let through, the host runs until it is disposed.</summary>
@@ -181,7 +184,7 @@ public sealed class InputHookHostTests
         host.IsRunning.ShouldBeTrue();
         host.Dispose();
 
-        host.IsRunning.ShouldBeFalse();
+        WaitUntil(() => !host.IsRunning, StopWait).ShouldBeTrue("the hook thread should have ended");
     }
 
     /// <summary>The caller (and the status the web app shows) gets the installation failure itself, not a wrapper around it.</summary>
@@ -194,7 +197,7 @@ public sealed class InputHookHostTests
         var failure = Should.Throw<Win32Exception>(host.Start);
 
         failure.NativeErrorCode.ShouldBe(5);
-        host.IsRunning.ShouldBeFalse();
+        WaitUntil(() => !host.IsRunning, StopWait).ShouldBeTrue("the hook thread should have ended");
     }
 
     [Fact]
@@ -202,6 +205,14 @@ public sealed class InputHookHostTests
     {
         Should.NotThrow(_host.Dispose);
     }
+
+    /// <summary>
+    /// Waits until <paramref name="condition"/> holds or <paramref name="timeout"/> passes; returns whether it held. The
+    /// hook thread is still unwinding (removing its hooks, leaving its method) for a moment after the call that ended it
+    /// returns: Start rethrows an install failure as soon as the thread reports it, and Dispose only waits for the thread
+    /// for a limited time. A thread that has stopped is therefore waited for, not asserted at once.
+    /// </summary>
+    private static bool WaitUntil(Func<bool> condition, TimeSpan timeout) => SpinWait.SpinUntil(condition, timeout);
 
     private static KeyInput Down(int vk) => new(vk, IsDown: true, IsInjected: false);
 
