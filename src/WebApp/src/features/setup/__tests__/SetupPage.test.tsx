@@ -706,23 +706,28 @@ describe("SetupPage", () => {
 
       view.rerender(<SetupPage state={tryItStep} engineStatus={ready} update={update} onDone={() => undefined} />);
 
-      expect(screen.getByRole("status")).toBe(region);
+      expect(screen.getAllByRole("status")[0]).toBe(region);
       expect(region.textContent).toBe("Click the box, hold Right Ctrl, say a sentence, and let go.");
       expect(region.contains(screen.getByRole("textbox", { name: "Practice dictation" }))).toBe(false);
     });
 
-    it("announces the first dictation in the same live region", async () => {
+    it("announces the first dictation in its own live region below the practice box, there before the dictation", async () => {
       renderPage({ state: tryItStep, engineStatus: ready });
       await act(async () => undefined);
-      const region = screen.getByRole("status");
-      expect(region.textContent).toBe("Click the box, hold Right Ctrl, say a sentence, and let go.");
+      const [instruction, success] = screen.getAllByRole("status");
+      expect(success.getAttribute("aria-live")).toBe("polite");
+      expect(success.textContent).toBe("");
+      const box = screen.getByRole("textbox", { name: "Practice dictation" });
+      const hint = paragraph("Tap Right Ctrl once for hands-free; tap again to finish. Esc cancels. Change the key in Settings.");
+      // As in the mockup: the box, the success line, then the hands-free hint. Nothing above the box moves.
+      expect(box.compareDocumentPosition(success) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(success.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
       push("history.added", entry);
 
-      expect(screen.getByRole("status")).toBe(region);
-      expect(region.textContent).toBe(
-        "Click the box, hold Right Ctrl, say a sentence, and let go.✓ That's it — Murmur types wherever your cursor is.",
-      );
+      expect(screen.getAllByRole("status")[1]).toBe(success);
+      expect(success.textContent).toBe("✓ That's it — Murmur types wherever your cursor is.");
+      expect(instruction.textContent).toBe("Click the box, hold Right Ctrl, say a sentence, and let go.");
     });
 
     it("says where Murmur lives afterwards", () => {

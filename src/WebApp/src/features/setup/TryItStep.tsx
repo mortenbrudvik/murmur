@@ -27,7 +27,7 @@ export default function TryItStep({ engineStatus, onDone, saveError }: Props) {
       <h1 className="setup-title" tabIndex={-1}>
         Try it
       </h1>
-      {/* One region for the whole step, outside the branches below, so that it stays in the page when the model becomes ready. */}
+      {/* Outside the branches below, so that it stays in the page when the model becomes ready. */}
       <div className="setup-live" role="status" aria-live="polite">
         {ready ? (
           <p className="setup-muted">
@@ -36,11 +36,15 @@ export default function TryItStep({ engineStatus, onDone, saveError }: Props) {
         ) : (
           <p className="setup-muted">Waiting for the speech model…</p>
         )}
-        {ready && dictated && <p className="setup-ok">✓ That's it — Murmur types wherever your cursor is.</p>}
       </div>
       {ready ? (
         <>
           <textarea className="text-input setup-practice" aria-label="Practice dictation" rows={3} />
+          {/* Below the box, as in the mockup, so the box stays put when the first dictation lands. Its own region, there
+              (empty) from the start, so the line is announced when it appears. */}
+          <div className="setup-live" role="status" aria-live="polite">
+            {dictated && <p className="setup-ok">✓ That's it — Murmur types wherever your cursor is.</p>}
+          </div>
           <p className="setup-muted setup-small">
             Tap <kbd className="setup-key">{hotkey}</kbd> once for hands-free; tap again to finish. Esc cancels. Change the key in Settings.
           </p>
