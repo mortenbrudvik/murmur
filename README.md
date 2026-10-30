@@ -29,11 +29,12 @@ On the Microsoft Store it is called **Murmur Voice Typing**:
 - Windows 10 version 2004 (build 19041) or later, x64
 - A microphone
 - The Microsoft Edge WebView2 Runtime (part of Windows 11 and current Windows 10)
-- About 1.6 GB of disk space for the speech model, which Murmur downloads from
-  [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) on first start
-- For the fastest transcription: an NVIDIA GPU with the
-  [CUDA 13 toolkit](https://developer.nvidia.com/cuda-downloads) installed. Without it Murmur uses your
-  graphics card through Vulkan, or the processor, which is slower.
+- Disk space for the speech model: about 1.6 GB, or 488 MB on PCs without a capable graphics card.
+  Murmur downloads it from [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) on first start.
+- For the fastest transcription: an NVIDIA RTX 30-series or newer GPU with the
+  [CUDA 13 toolkit](https://developer.nvidia.com/cuda-downloads) installed; Murmur finds the toolkit by
+  itself and says when installing it would help. Without it Murmur uses your graphics card through
+  Vulkan, or the processor, which is slower.
 
 English only. Murmur cannot type into apps that run as administrator, because Windows keeps the
 hotkey and the paste from reaching them.

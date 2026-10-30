@@ -134,11 +134,12 @@ prompt to.
   - **Cannot dictate into apps running as administrator.** While an elevated window has focus,
     Windows (UIPI) keeps the hotkey from reaching Murmur and blocks the paste; if focus moves to
     one mid-dictation, the text is left on the clipboard and in the history instead.
-  - **Best speed needs an NVIDIA GPU with the CUDA 13 toolkit installed** (Murmur looks for the
-    CUDA 13 runtime on PATH). Without it Murmur uses Vulkan or the CPU, which is slower; on Vulkan
-    the first dictation after starting can take many seconds while the GPU code is prepared.
-  - **First run downloads a speech model of about 1.6 GB** from huggingface.co (Hugging Face).
-    Dictation is unavailable until it has finished; the main window shows the progress.
+  - **Best speed needs an NVIDIA GPU with the CUDA 13 toolkit installed**. Without it Murmur uses
+    Vulkan or the CPU, which is slower; on Vulkan the first dictation after starting can take many
+    seconds while the GPU code is prepared.
+  - **First run shows a short setup and downloads a speech model of about 1.6 GB** (488 MB on PCs
+    without a capable graphics card) from huggingface.co; it resumes if interrupted. Dictation is
+    available once it has finished.
   - **English only.**
   - **A microphone is required.** Windows asks for permission the first time.
   - **Everything runs locally**: speech recognition, history, settings.
