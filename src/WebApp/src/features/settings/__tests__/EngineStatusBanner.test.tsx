@@ -21,7 +21,7 @@ const largeDownload: DownloadProgress = {
   retries: 0,
   reconnecting: false,
 };
-const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null, switching: false };
 
 describe("EngineStatusBanner", () => {
   describe("while a model switch downloads and the old model stays ready", () => {
@@ -122,6 +122,13 @@ describe("EngineStatusBanner", () => {
     render(<EngineStatusBanner status={{ ...ready, state: "loading", runtime: null }} />);
 
     expect(screen.getByRole("status").textContent).toBe("Loading model…");
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("says which model it is switching to while the next model loads", () => {
+    render(<EngineStatusBanner status={{ ...ready, state: "loading", runtime: null, modelName: "Whisper small (English)", switching: true }} />);
+
+    expect(screen.getByRole("status").textContent).toBe("Switching to Whisper small (English)…");
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 

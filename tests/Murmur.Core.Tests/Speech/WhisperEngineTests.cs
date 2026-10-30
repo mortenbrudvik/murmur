@@ -96,6 +96,16 @@ public sealed class WhisperEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeAsync_FirstLoad_IsNotSwitching()
+    {
+        await _engine.InitializeAsync(Ct);
+
+        var statuses = Statuses();
+        statuses.ShouldContain(s => s.State == EngineState.Loading);
+        statuses.ShouldAllBe(s => !s.Switching);
+    }
+
+    [Fact]
     public async Task InitializeAsync_UnsupportedGpu_LoadsWithoutCudaAndNeverSearches()
     {
         _report = Gtx1080;
@@ -408,6 +418,50 @@ public sealed class WhisperEngineTests : IDisposable
         Index("delete:LargeV3Turbo").ShouldBeGreaterThan(Index("load:ggml-small.en.bin"));
         _stored.SpeechModel.ShouldBe(SpeechModelId.SmallEn);
         (await _engine.TranscribeAsync(Speech(), "", Ct)).Text.ShouldBe("from ggml-small.en.bin");
+    }
+
+    [Fact]
+    public async Task SwitchModelAsync_WhileTheNextModelLoads_CanTranscribeAndReportsSwitching()
+    {
+        await ReadyOnLargeAsync();
+        _loader.LoadGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var switching = _engine.SwitchModelAsync(SpeechModelId.SmallEn);
+        await WaitUntilAsync(() => _loader.LoadCount == 2, "the new model to start loading");
+
+        _engine.CanTranscribe.ShouldBeTrue();
+        _engine.Status.State.ShouldBe(EngineState.Loading);
+        _engine.Status.ModelName.ShouldBe(Small);
+        _engine.Status.Switching.ShouldBeTrue();
+        var last = Statuses()[^1];
+        last.State.ShouldBe(EngineState.Loading);
+        last.Switching.ShouldBeTrue();
+        (await _engine.TranscribeAsync(Speech(), "", Ct).WaitAsync(Patience, Ct)).Text.ShouldBe("from ggml-large-v3-turbo.bin");
+
+        _loader.LoadGate.SetResult();
+        await switching.WaitAsync(Patience, Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.Switching.ShouldBeFalse();
+        Statuses().Where(s => s.State != EngineState.Loading).ShouldAllBe(s => !s.Switching);
+        (await _engine.TranscribeAsync(Speech(), "", Ct)).Text.ShouldBe("from ggml-small.en.bin");
+    }
+
+    [Fact]
+    public void CanTranscribe_BeforeAnyModelIsLoaded_IsFalse()
+    {
+        _engine.CanTranscribe.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task CanTranscribe_AfterTheEngineIsDisposed_IsFalse()
+    {
+        await ReadyOnLargeAsync();
+        _engine.CanTranscribe.ShouldBeTrue();
+
+        _engine.Dispose();
+
+        _engine.CanTranscribe.ShouldBeFalse();
     }
 
     [Fact]
@@ -851,18 +905,24 @@ public sealed class WhisperEngineTests : IDisposable
                 return _models[index];
         }
 
-        public Task<ILoadedSpeechModel> LoadAsync(string modelPath, bool canUseCuda, string? cudaRuntimeDirectory, CancellationToken ct)
+        /// <summary>When set, a load waits for it (after it is counted in <see cref="Calls"/>), like a slow model load.</summary>
+        public TaskCompletionSource? LoadGate { get; set; }
+
+        public async Task<ILoadedSpeechModel> LoadAsync(string modelPath, bool canUseCuda, string? cudaRuntimeDirectory, CancellationToken ct)
         {
             log($"load:{Path.GetFileName(modelPath)}");
             lock (_lock)
                 _calls.Add((modelPath, canUseCuda, cudaRuntimeDirectory));
+            if (LoadGate is { } gate)
+                await gate.Task.WaitAsync(ct);
+
             if (Failure is { } failure)
-                return Task.FromException<ILoadedSpeechModel>(failure);
+                throw failure;
 
             var model = new FakeLoadedModel(modelPath, Runtime);
             lock (_lock)
                 _models.Add(model);
-            return Task.FromResult<ILoadedSpeechModel>(model);
+            return model;
         }
     }
 

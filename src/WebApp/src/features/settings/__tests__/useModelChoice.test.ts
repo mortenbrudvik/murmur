@@ -21,7 +21,7 @@ const large: ModelChoice = {
 };
 const small: ModelChoice = { ...large, selected: "smallEn" };
 
-const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null, switching: false };
 
 function pushStatus(status: EngineStatus) {
   const calls = vi.mocked(apiClient.on).mock.calls.filter(([name]) => name === "engine.statusChanged");

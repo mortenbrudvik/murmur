@@ -28,7 +28,7 @@ const download: DownloadProgress = {
   retries: 0,
   reconnecting: false,
 };
-const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null, switching: false };
 
 const setupDone: SetupState = { showSetup: false, step: "speechModel", cudaTipDismissed: false, openPage: null };
 const firstRun: SetupState = { ...setupDone, showSetup: true };

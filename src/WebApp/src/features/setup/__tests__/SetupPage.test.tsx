@@ -48,7 +48,7 @@ const download: DownloadProgress = {
   retries: 0,
   reconnecting: false,
 };
-const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Vulkan", error: null, download: null, gpu: null };
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Vulkan", error: null, download: null, gpu: null, switching: false };
 const downloading: EngineStatus = { ...ready, state: "downloading", runtime: null, download };
 const loading: EngineStatus = { ...ready, state: "loading", runtime: null };
 const installCuda: GpuAdvice = { state: "installCuda", gpuName: "NVIDIA GeForce RTX 3060" };

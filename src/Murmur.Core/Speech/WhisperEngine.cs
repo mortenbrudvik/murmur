@@ -73,6 +73,8 @@ public sealed class WhisperEngine(
 
     public EngineStatus Status => Volatile.Read(ref _status);
 
+    public bool CanTranscribe => !IsDisposed && Volatile.Read(ref _loaded) is not null;
+
     public event Action<EngineStatus>? StatusChanged;
 
     private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
@@ -376,7 +378,8 @@ public sealed class WhisperEngine(
             var path = await EnsureModelAsync(target, download => from.ReadyStatus with { Download = download }, whileVerifying: null, ct)
                 .ConfigureAwait(false);
 
-            SetStatus(new EngineStatus(EngineState.Loading, target.DisplayName, Gpu: from.Gpu));
+            // Loading, but the previous model keeps transcribing until the swap (CanTranscribe), so say it is a switch.
+            SetStatus(new EngineStatus(EngineState.Loading, target.DisplayName, Gpu: from.Gpu, Switching: true));
             next = await LoadAsync(target, path, hardware, ct).ConfigureAwait(false);
             if (!await TrySwapInAsync(next, ct).ConfigureAwait(false))
                 return;

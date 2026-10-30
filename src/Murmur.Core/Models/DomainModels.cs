@@ -128,13 +128,18 @@ public enum EngineState
 /// switch keeps the current one <see cref="EngineState.Ready"/>.
 /// </param>
 /// <param name="Gpu">The tip about CUDA for this PC; null until the engine has looked at the GPU.</param>
+/// <param name="Switching">
+/// True only on the <see cref="EngineState.Loading"/> status of a model switch, where <see cref="ModelName"/> is the
+/// model being loaded and the previous one still transcribes; false for a first load.
+/// </param>
 public sealed record EngineStatus(
     EngineState State,
     string ModelName,
     string? Runtime = null,
     string? Error = null,
     DownloadProgress? Download = null,
-    GpuAdvice? Gpu = null);
+    GpuAdvice? Gpu = null,
+    bool Switching = false);
 
 public sealed record TranscriptionResult(string Text, float MaxNoSpeechProbability);
 

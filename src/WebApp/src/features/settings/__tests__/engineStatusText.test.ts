@@ -3,7 +3,7 @@ import { describeEngineStatus, describeModelSwitch } from "../engineStatusText";
 import type { DownloadProgress, EngineStatus } from "../../../types/domain";
 
 function status(overrides: Partial<EngineStatus>): EngineStatus {
-  return { state: "loading", modelName: "Whisper large-v3-turbo", runtime: null, error: null, download: null, gpu: null, ...overrides };
+  return { state: "loading", modelName: "Whisper large-v3-turbo", runtime: null, error: null, download: null, gpu: null, switching: false, ...overrides };
 }
 
 function download(overrides: Partial<DownloadProgress>): DownloadProgress {
@@ -51,6 +51,12 @@ describe("describeEngineStatus", () => {
     for (const state of ["loading", "notStarted"] as const) {
       expect(describeEngineStatus(status({ state }))).toEqual({ text: "Loading model…", tone: "info", progress: null });
     }
+  });
+
+  it("says which model it is switching to while the next model loads, with no progress bar", () => {
+    expect(
+      describeEngineStatus(status({ state: "loading", modelName: "Whisper small (English)", switching: true })),
+    ).toEqual({ text: "Switching to Whisper small (English)…", tone: "info", progress: null });
   });
 
   it("names the runtime when ready, in capitals where it is an acronym", () => {

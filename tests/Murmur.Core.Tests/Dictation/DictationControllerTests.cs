@@ -55,6 +55,7 @@ public sealed class DictationControllerTests : IDisposable
     public DictationControllerTests()
     {
         _engine.Status.Returns(new EngineStatus(EngineState.Ready, "base"));
+        _engine.CanTranscribe.Returns(true);
         _settings.Load().Returns(MurmurSettings.Default);
         _vocabulary.Load().Returns(Vocabulary.Empty);
         _keys.IsKeyDown(RightCtrl).Returns(_ => _hotkeyDown);
@@ -578,17 +579,52 @@ public sealed class DictationControllerTests : IDisposable
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
-    [Fact]
-    public void EngineNotReady_ShowsLoadingNotice()
+    [Theory]
+    [InlineData(EngineState.Loading, null, null, "Loading speech model…")]
+    [InlineData(EngineState.NotStarted, null, null, "Loading speech model…")]
+    [InlineData(EngineState.Downloading, 380L, 1000L, "Downloading speech model… 38%")]
+    [InlineData(EngineState.Downloading, 0L, 1000L, "Downloading speech model… 0%")]
+    [InlineData(EngineState.Downloading, 380L, 0L, "Downloading speech model…")]
+    [InlineData(EngineState.Downloading, null, null, "Downloading speech model…")]
+    [InlineData(EngineState.Error, null, null, "Speech engine unavailable — open Murmur")]
+    public void EngineNotReady_ShowsTheStateNotice(EngineState state, long? bytesReceived, long? totalBytes, string expected)
     {
-        _engine.Status.Returns(new EngineStatus(EngineState.Loading, "base"));
+        var download = bytesReceived is { } received
+            ? new DownloadProgress("Whisper large-v3-turbo", received, totalBytes ?? 0, 0, null, 0)
+            : null;
+        _engine.Status.Returns(new EngineStatus(state, "base", Download: download));
+        _engine.CanTranscribe.Returns(false);
 
         Down();
 
-        _pill.Received(1).ShowNotice("Loading model…");
+        _pill.Received(1).ShowNotice(expected);
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SwitchLoadingWithAModelLoaded_StillDictates()
+    {
+        _engine.Status.Returns(new EngineStatus(EngineState.Loading, "small", Switching: true));
+        _engine.CanTranscribe.Returns(true);
+
+        HoldAndRelease();
+        await Finished();
+
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+    }
+
+    [Fact]
+    public void ReadyStatusWithoutALoadedModel_DoesNotDictate()
+    {
+        _engine.CanTranscribe.Returns(false);
+
+        Down();
+
+        _pill.Received(1).ShowNotice("Loading speech model…");
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
     }
 
     [Fact]

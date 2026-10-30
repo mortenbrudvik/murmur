@@ -44,7 +44,9 @@ export function describeEngineStatus(status: EngineStatus): EngineStatusView {
     case "error":
       return { text: status.error || "The speech model could not be loaded.", tone: "error", progress: null };
     default:
-      // loading and notStarted: from the user's side the model is on its way.
+      // loading and notStarted: from the user's side the model is on its way. A switch loads the next model while the
+      // previous one still dictates.
+      if (status.switching) return { text: `Switching to ${status.modelName}…`, tone: "info", progress: null };
       return { text: "Loading model…", tone: "info", progress: null };
   }
 }

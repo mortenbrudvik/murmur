@@ -6,6 +6,12 @@ public interface ISpeechEngine
 {
     EngineStatus Status { get; }
 
+    /// <summary>
+    /// True while a model is loaded and the engine is not disposed, which includes the load of a switched-to model: the
+    /// previous one keeps transcribing then, though <see cref="Status"/> is not Ready.
+    /// </summary>
+    bool CanTranscribe { get; }
+
     /// <summary>Raised on whichever thread changed the status, one change at a time and in order.</summary>
     event Action<EngineStatus>? StatusChanged;
 

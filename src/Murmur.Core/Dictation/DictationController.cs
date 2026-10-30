@@ -23,7 +23,9 @@ namespace Murmur.Core.Dictation;
 /// </summary>
 public sealed class DictationController : IDisposable
 {
-    private const string LoadingModelNotice = "Loading model…";
+    private const string LoadingModelNotice = "Loading speech model…";
+    private const string DownloadingModelNotice = "Downloading speech model…";
+    private const string EngineUnavailableNotice = "Speech engine unavailable — open Murmur";
     private const string CopiedNotice = "Copied — press Ctrl+V";
     private const string SavedNotice = "Saved to history";
     private const string MicrophoneUnavailableNotice = "Microphone unavailable";
@@ -119,15 +121,36 @@ public sealed class DictationController : IDisposable
         if (_disposed)
             return;
 
-        Execute(signal switch
+        // One snapshot per signal, so the not-ready notice describes the state the decision was made on. Dictation needs
+        // a loaded model, not a Ready status: while a switched-to model loads, the previous one keeps transcribing.
+        var status = _engine.Status;
+        var action = signal switch
         {
-            HotkeySignal.HotkeyDown => _machine.OnHotkeyDown(at, _engine.Status.State == EngineState.Ready),
+            HotkeySignal.HotkeyDown => _machine.OnHotkeyDown(at, _engine.CanTranscribe),
             HotkeySignal.HotkeyUp => _machine.OnHotkeyUp(at),
             HotkeySignal.OtherInputWhileHeld => _machine.OnOtherInputWhileHeld(),
             HotkeySignal.Escape => _machine.OnEscape(),
             _ => DictationAction.None,
-        }, at);
+        };
+
+        if (action == DictationAction.NotifyNotReady)
+            _pill.ShowNotice(DescribeNotReady(status));
+        else
+            Execute(action, at);
     }
+
+    /// <summary>
+    /// Why the hotkey does nothing, from the engine's state. The pill is click-through, so the text can only say what is
+    /// going on, or send the user to Murmur's window for a failure.
+    /// </summary>
+    private static string DescribeNotReady(EngineStatus status) => status.State switch
+    {
+        EngineState.Downloading when status.Download is { TotalBytes: > 0 } download =>
+            $"{DownloadingModelNotice} {Math.Clamp(download.BytesReceived * 100 / download.TotalBytes, 0, 100)}%",
+        EngineState.Downloading => DownloadingModelNotice,
+        EngineState.Error => EngineUnavailableNotice,
+        _ => LoadingModelNotice,
+    };
 
     /// <summary>Releases the microphone and drops any dictation in progress. Call on the UI thread.</summary>
     public void Dispose()
@@ -158,9 +181,6 @@ public sealed class DictationController : IDisposable
             case DictationAction.Cancel:
                 Abandon();
                 _pill.Hide();
-                break;
-            case DictationAction.NotifyNotReady:
-                _pill.ShowNotice(LoadingModelNotice);
                 break;
         }
     }

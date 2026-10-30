@@ -115,6 +115,7 @@ public class RequestJsonContractTests
         json.ShouldContain("\"modelName\":\"Whisper large-v3-turbo\"");
         json.ShouldContain("\"download\":null");
         json.ShouldContain("\"gpu\":null");
+        json.ShouldContain("\"switching\":false");
     }
 
     [Fact]

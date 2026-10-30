@@ -32,7 +32,7 @@ const stored: MurmurSettings = {
 const usb: MicrophoneInfo = { id: "usb", name: "USB Mic", isDefault: true };
 const headset: MicrophoneInfo = { id: "headset", name: "Headset", isDefault: false };
 
-const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null, switching: false };
 
 function engine(overrides: Partial<EngineStatus>): EngineStatus {
   return { ...ready, ...overrides };

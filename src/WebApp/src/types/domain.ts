@@ -76,6 +76,8 @@ export interface EngineStatus {
   download: DownloadProgress | null;
   /** The tip about CUDA; null until the engine has looked at the graphics card. */
   gpu: GpuAdvice | null;
+  /** True only on the loading status of a model switch: `modelName` is the model being loaded, and the previous one still dictates. */
+  switching: boolean;
 }
 
 export type Page = "history" | "vocabulary" | "settings";
