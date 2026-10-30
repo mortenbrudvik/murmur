@@ -23,7 +23,7 @@ namespace Murmur.UI.Tray;
 /// Adding the icon fails while Explorer's taskbar is not ready yet, which is likely right after sign-in, exactly when
 /// Murmur starts with Windows. That is never fatal: the icon is retried every few seconds for a while, and again
 /// whenever Explorer announces a new taskbar (H.NotifyIcon's own TaskbarCreated handling). A notification asked for
-/// meanwhile waits for the icon.
+/// meanwhile waits for the icon, however it arrives: by a retry, or by H.NotifyIcon adding it by itself.
 /// </para>
 /// </summary>
 public sealed partial class TrayIconHost : IDisposable
@@ -46,13 +46,14 @@ public sealed partial class TrayIconHost : IDisposable
     private readonly ISettingsService _settings;
     private readonly InputStatus _input;
     private readonly Action<TaskbarIcon> _create;
-    private readonly Func<TaskbarIcon, string, string, bool> _show;
+    private readonly Action<TaskbarIcon, string, string> _show;
+    private readonly Func<TaskbarIcon, bool> _isCreated;
     private readonly TimeSpan _retryInterval;
     private readonly int _maxCreateAttempts;
 
     private TaskbarIcon? _icon;
     private bool _iconAdded;
-    private (string Title, string Message)? _pendingNotice;
+    private Notice? _pendingNotice;
     private DispatcherTimer? _retryTimer;
     private int _createAttempts;
     private bool? _showingReadyIcon;
@@ -68,18 +69,20 @@ public sealed partial class TrayIconHost : IDisposable
     }
 
     /// <summary>
-    /// Test seam: lets tests make adding the icon fail, retry quickly and keep notifications off the screen
-    /// (<paramref name="show"/> shows one and says whether it could; null shows the real balloon).
+    /// Test seam: lets tests make adding the icon fail, retry quickly, say whether the icon exists without one being
+    /// added (<paramref name="isCreated"/>; null asks the icon) and keep notifications off the screen
+    /// (<paramref name="show"/>; null shows the real balloon).
     /// </summary>
     internal TrayIconHost(
         ISpeechEngine engine, ISettingsService settings, InputStatus input, Action<TaskbarIcon> create, TimeSpan retryInterval,
-        int maxCreateAttempts, Func<TaskbarIcon, string, string, bool>? show = null)
+        int maxCreateAttempts, Action<TaskbarIcon, string, string>? show = null, Func<TaskbarIcon, bool>? isCreated = null)
     {
         _engine = engine;
         _settings = settings;
         _input = input;
         _create = create;
         _show = show ?? ShowBalloon;
+        _isCreated = isCreated ?? IsCreated;
         _retryInterval = retryInterval;
         _maxCreateAttempts = maxCreateAttempts;
     }
@@ -120,11 +123,17 @@ public sealed partial class TrayIconHost : IDisposable
     /// <summary>
     /// Shows a Windows notification (a balloon, which Windows 10 and 11 present as a toast) through the icon; clicking it
     /// raises <see cref="OpenRequested"/>. Call on the UI thread. While the icon is not in the notification area yet
-    /// (before <see cref="Show"/>, or while the taskbar is not ready) the notification waits and is shown right after the
-    /// icon is added; only the newest one waits. Does nothing after <see cref="Dispose"/>. Never throws: a notification
-    /// is not worth a crash.
+    /// (before <see cref="Show"/>, or while the taskbar is not ready) the notification waits and is shown as soon as the
+    /// icon is there: right after a retry adds it, or at the next <see cref="Refresh"/> or status change when
+    /// H.NotifyIcon added it by itself. Only one waits, the newest, so a notification shown at once also drops an older
+    /// one that was waiting. Does nothing after <see cref="Dispose"/>. Never throws: a notification is not worth a crash.
     /// </summary>
-    public void ShowNotification(string title, string message)
+    /// <param name="persistent">
+    /// The notification is about a condition that lasts (the hotkey cannot work). While it waits for the icon it is not
+    /// displaced by a later notification that is not persistent: that one is dropped, because it would only replace
+    /// this one on the screen a moment after it appeared, and its news is in the window and the tooltip as well.
+    /// </param>
+    public void ShowNotification(string title, string message, bool persistent = false)
     {
         if (_disposed)
         {
@@ -132,51 +141,54 @@ public sealed partial class TrayIconHost : IDisposable
             return;
         }
 
-        if (!TryShow(title, message))
+        if (_pendingNotice is { Persistent: true } && !persistent)
         {
-            _pendingNotice = (title, message);
-            _logger.Debug("The tray icon is not there yet; the notification \"{Title}\" waits for it", title);
+            _logger.Debug("The notification \"{Title}\" is dropped: a notice about a lasting problem is still to be shown", title);
+            FlushPendingNotice();
+            return;
         }
+
+        _pendingNotice = new Notice(title, message, persistent);
+        FlushPendingNotice();
+        if (_pendingNotice is not null)
+            _logger.Debug("The tray icon is not there yet; the notification \"{Title}\" waits for it", title);
     }
 
     /// <summary>
-    /// Re-reads the engine status and the hook state into the icon and tooltip, for when the hook state changes. Call on
-    /// the UI thread. (Hovering the icon refreshes the tooltip as well.)
+    /// Re-reads the engine status and the hook state into the icon and tooltip, for when the hook state changes, and
+    /// shows a waiting notification if the icon has appeared. Call on the UI thread. (Hovering the icon and every
+    /// engine status change do the same.)
     /// </summary>
     public void Refresh() => Update(rereadHotkey: false);
 
-    /// <summary>
-    /// Shows the notification if the icon is in the notification area. Returns false if it is not, and so the
-    /// notification is still to be shown; one that fails to show is logged and counts as shown.
-    /// </summary>
-    private bool TryShow(string title, string message)
-    {
-        if (_icon is not { } icon || !_iconAdded)
-            return false;
+    /// <summary>The icon is in the notification area: a retry added it, or H.NotifyIcon did when Explorer's taskbar came up.</summary>
+    private bool IconIsThere => _icon is { } icon && (_iconAdded || _isCreated(icon));
 
+    /// <summary>
+    /// Shows the waiting notification if the icon is there. One that fails to show is logged and not kept: it would
+    /// only fail again.
+    /// </summary>
+    private void FlushPendingNotice()
+    {
+        if (_pendingNotice is not { } notice || !IconIsThere)
+            return;
+
+        _pendingNotice = null;
         try
         {
-            if (!_show(icon, title, message))
-                return false;
-
-            _logger.Information("Tray notification: {Title}", title);
+            _show(_icon!, notice.Title, notice.Message);
+            _logger.Information("Tray notification: {Title}", notice.Title);
         }
         catch (Exception ex)
         {
-            _logger.Warning(ex, "Could not show the tray notification \"{Title}\"", title);
+            _logger.Warning(ex, "Could not show the tray notification \"{Title}\"", notice.Title);
         }
-
-        return true;
     }
 
-    private static bool ShowBalloon(TaskbarIcon icon, string title, string message)
-    {
-        if (!icon.IsCreated)
-            return false;
+    private static bool IsCreated(TaskbarIcon icon) => icon.IsCreated;
 
+    private static void ShowBalloon(TaskbarIcon icon, string title, string message) =>
         icon.ShowNotification(title, message, NotificationIcon.Info);
-        return true;
-    }
 
     /// <summary>The tooltip currently shown, or null before <see cref="Show"/>.</summary>
     internal string? ToolTipText => _icon?.ToolTipText;
@@ -265,18 +277,7 @@ public sealed partial class TrayIconHost : IDisposable
         if (_createAttempts > 1)
             _logger.Information("Tray icon added on attempt {Attempt}", _createAttempts);
 
-        ShowPendingNotice();
-    }
-
-    /// <summary>Shows the notification that was asked for before the icon was added, once.</summary>
-    private void ShowPendingNotice()
-    {
-        if (_pendingNotice is not var (title, message))
-            return;
-
-        _pendingNotice = null;
-        if (!TryShow(title, message))
-            _pendingNotice = (title, message);
+        FlushPendingNotice();
     }
 
     private DispatcherTimer CreateRetryTimer()
@@ -298,6 +299,8 @@ public sealed partial class TrayIconHost : IDisposable
     {
         if (_disposed || _icon is null)
             return;
+
+        FlushPendingNotice();
 
         var status = _engine.Status;
         if (status.State == EngineState.Ready && (rereadHotkey || DateTime.UtcNow - _hotkeyReadAt >= HotkeyRefreshInterval))
@@ -348,6 +351,9 @@ public sealed partial class TrayIconHost : IDisposable
     }
 
     private const int SM_CXSMICON = 49;
+
+    /// <summary>A notification that waits for the icon.</summary>
+    private readonly record struct Notice(string Title, string Message, bool Persistent);
 
     [LibraryImport("user32.dll")]
     private static partial int GetSystemMetrics(int nIndex);

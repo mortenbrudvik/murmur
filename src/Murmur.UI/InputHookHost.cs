@@ -17,8 +17,9 @@ namespace Murmur.UI;
 /// (opening a Bluetooth microphone, WebView2 work, a garbage collection); this thread only ever runs the callbacks.
 /// </para>
 /// <para>
-/// Not sealed, with <see cref="Start"/> and <see cref="Dispose"/> virtual, only so that <see cref="InputHookStarter"/>
-/// can be tested without installing a real hook.
+/// Not sealed, with <see cref="Start"/>, <see cref="Dispose"/> and <see cref="Install"/> virtual, only so that
+/// <see cref="InputHookStarter"/> and the race between a slow install and a Dispose can be tested without installing
+/// a real hook.
 /// </para>
 /// </summary>
 /// <param name="onSignal">
@@ -42,10 +43,15 @@ public partial class InputHookHost(
 
     // Created, used and disposed on the hook thread only.
     private InputHooks? _hooks;
-    private bool _disposed;
+
+    // Written by Dispose on the caller's thread, read by the hook thread (see Run).
+    private volatile bool _disposed;
 
     /// <summary>True while the hook thread (and so its message loop) is running.</summary>
     internal bool IsRunning => _thread?.IsAlive == true;
+
+    /// <summary>True once <see cref="Dispose"/> was called.</summary>
+    internal bool IsDisposed => _disposed;
 
     /// <summary>Starts the hook thread and waits until the keyboard hook is installed.</summary>
     /// <exception cref="Win32Exception">The keyboard hook could not be installed.</exception>
@@ -65,7 +71,18 @@ public partial class InputHookHost(
         };
         _thread.Start();
 
-        if (!started.Task.Wait(StartTimeout))
+        bool completed;
+        try
+        {
+            completed = started.Task.Wait(StartTimeout);
+        }
+        catch (AggregateException)
+        {
+            // Wait wraps a failure in an AggregateException; GetResult below rethrows the failure itself.
+            completed = true;
+        }
+
+        if (!completed)
             throw new TimeoutException("The input hook thread did not start in time.");
 
         // Rethrows the installation failure, if any, on the caller's thread.
@@ -83,6 +100,8 @@ public partial class InputHookHost(
         if (thread is null || !thread.IsAlive)
             return;
 
+        // If the thread has not got as far as its message queue yet, this fails; Run then sees _disposed (set above)
+        // once its hooks are installed and ends itself.
         if (!Native.PostThreadMessage(_threadId, Native.WM_QUIT, 0, 0))
         {
             _logger.Warning("Could not stop the input hook thread (Win32 error {Error})", Marshal.GetLastPInvokeError());
@@ -127,6 +146,9 @@ public partial class InputHookHost(
         return result.Swallow;
     }
 
+    /// <summary>Installs the keyboard hook on the hook thread. Virtual for the same reason as <see cref="Start"/>.</summary>
+    protected virtual void Install(InputHooks hooks) => hooks.Install();
+
     private void Run(TaskCompletionSource started)
     {
         _threadId = Native.GetCurrentThreadId();
@@ -139,11 +161,21 @@ public partial class InputHookHost(
         hooks.MouseHandler = OnMouse;
         try
         {
-            hooks.Install();
+            Install(hooks);
         }
         catch (Exception ex)
         {
             started.SetException(ex);
+            return;
+        }
+
+        // Disposed while the hook was being installed (a start that timed out and was given up on, or a Dispose that
+        // came before this thread could receive its WM_QUIT): do not keep the hook, or it would run beside the next
+        // host's. Leaving here removes it, through the using above.
+        if (_disposed)
+        {
+            _logger.Information("The input hook host was disposed while its hooks were being installed; removing them");
+            started.TrySetCanceled();
             return;
         }
 

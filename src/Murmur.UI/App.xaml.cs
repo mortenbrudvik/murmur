@@ -393,7 +393,8 @@ public partial class App : Application
         input.HookInstalled = false;
 
         _tray?.Refresh();
-        _tray?.ShowNotification(TrayNotifier.HotkeyUnavailable.Title, TrayNotifier.HotkeyUnavailable.Message);
+        // Persistent: the hotkey stays off for the whole run, so no later notice may push this one out.
+        _tray?.ShowNotification(TrayNotifier.HotkeyUnavailable.Title, TrayNotifier.HotkeyUnavailable.Message, persistent: true);
         mediator.Publish(new InputStatusChangedNotification(input)).FireAndForget();
     }
 

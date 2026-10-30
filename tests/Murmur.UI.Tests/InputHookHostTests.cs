@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Collections.Concurrent;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
@@ -145,6 +146,57 @@ public sealed class InputHookHostTests
         _host.IsRunning.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// A start that timed out is given up on and its host disposed, but its thread may still be installing the hook; a
+    /// Dispose that came before the thread could take its WM_QUIT would then leave a hook running beside the retry's.
+    /// The thread has to notice the Dispose when the install ends and remove the hook itself. The install is held up
+    /// here (and installs nothing), so the order is the same every time.
+    /// </summary>
+    [Fact]
+    public async Task Start_DisposedWhileTheHooksAreBeingInstalled_DoesNotKeepThem()
+    {
+        using var host = new SlowInstallHost(_matcher, _coordinator, _keyboard, _time);
+        var start = Task.Run(host.Start, TestContext.Current.CancellationToken);
+        host.Installing.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ShouldBeTrue();
+
+        var dispose = Task.Run(host.Dispose, TestContext.Current.CancellationToken);
+        SpinWait.SpinUntil(() => host.IsDisposed, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+        host.Installed.Set();
+        await dispose;
+
+        // Start does not report a host that was disposed meanwhile as started.
+        var failure = await Record.ExceptionAsync(() => start);
+        failure.ShouldNotBeNull().ShouldBeAssignableTo<OperationCanceledException>();
+        host.IsRunning.ShouldBeFalse();
+    }
+
+    /// <summary>Guards the seam above: with the install let through, the host runs until it is disposed.</summary>
+    [Fact]
+    public void StartThenDispose_WithAnInstallThatSucceeds_RunsAndEndsTheHookThread()
+    {
+        using var host = new SlowInstallHost(_matcher, _coordinator, _keyboard, _time);
+        host.Installed.Set();
+
+        host.Start();
+        host.IsRunning.ShouldBeTrue();
+        host.Dispose();
+
+        host.IsRunning.ShouldBeFalse();
+    }
+
+    /// <summary>The caller (and the status the web app shows) gets the installation failure itself, not a wrapper around it.</summary>
+    [Fact]
+    public void Start_TheInstallFails_ThrowsTheFailureItself()
+    {
+        using var host = new SlowInstallHost(_matcher, _coordinator, _keyboard, _time) { InstallFailure = new Win32Exception(5) };
+        host.Installed.Set();
+
+        var failure = Should.Throw<Win32Exception>(host.Start);
+
+        failure.NativeErrorCode.ShouldBe(5);
+        host.IsRunning.ShouldBeFalse();
+    }
+
     [Fact]
     public void Dispose_NeverStarted_DoesNotThrow()
     {
@@ -154,6 +206,26 @@ public sealed class InputHookHostTests
     private static KeyInput Down(int vk) => new(vk, IsDown: true, IsInjected: false);
 
     private static KeyInput Up(int vk) => new(vk, IsDown: false, IsInjected: false);
+
+    /// <summary>A host whose install waits for the test and installs nothing, so no real hook is involved.</summary>
+    private sealed class SlowInstallHost(HotkeyMatcher matcher, HotkeyCaptureCoordinator coordinator, IKeyboardSender keyboard, TimeProvider time)
+        : InputHookHost(matcher, coordinator, keyboard, time, static (_, _) => { })
+    {
+        public ManualResetEventSlim Installing { get; } = new(false);
+
+        public ManualResetEventSlim Installed { get; } = new(false);
+
+        /// <summary>Thrown by the install, like the Win32Exception of a hook that Windows refuses.</summary>
+        public Exception? InstallFailure { get; init; }
+
+        protected override void Install(InputHooks hooks)
+        {
+            Installing.Set();
+            Installed.Wait(TimeSpan.FromSeconds(10));
+            if (InstallFailure is not null)
+                throw InstallFailure;
+        }
+    }
 
     /// <summary>A clock that only moves when the test moves it.</summary>
     private sealed class ManualTime : TimeProvider

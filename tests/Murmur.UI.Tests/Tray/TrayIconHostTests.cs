@@ -153,7 +153,6 @@ public sealed class TrayIconHostTests
                 show: (_, title, message) =>
                 {
                     shown.Add((title, message));
-                    return true;
                 });
             host.Show();
 
@@ -185,7 +184,6 @@ public sealed class TrayIconHostTests
                 show: (_, title, _) =>
                 {
                     shown.Add(title);
-                    return true;
                 });
             host.Show();
 
@@ -210,7 +208,6 @@ public sealed class TrayIconHostTests
                 show: (_, title, _) =>
                 {
                     shown.Add(title);
-                    return true;
                 });
             host.Show();
 
@@ -233,7 +230,6 @@ public sealed class TrayIconHostTests
                 show: (_, _, _) =>
                 {
                     shown++;
-                    return true;
                 });
             host.Show();
 
@@ -261,7 +257,6 @@ public sealed class TrayIconHostTests
                 show: (_, _, _) =>
                 {
                     shown++;
-                    return true;
                 });
             host.Show();
             host.ShowNotification("Murmur needs your attention", "boom");
@@ -294,6 +289,104 @@ public sealed class TrayIconHostTests
             StaHost.Pump(TimeSpan.FromMilliseconds(100));
 
             attempts.ShouldBe(1);
+        });
+    }
+
+    /// <summary>
+    /// After the retries run out, the icon still appears when Explorer announces the taskbar: H.NotifyIcon adds it, not a
+    /// retry. A waiting notice is then shown at the next update, and notices after that at once instead of waiting forever.
+    /// </summary>
+    [Fact]
+    public void ShowNotification_IconAppearsWithoutARetryAddingIt_IsShownOnTheNextUpdate()
+    {
+        var shown = new List<string>();
+        var exists = false;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(
+                _ => throw new InvalidOperationException("TryCreate failed."),
+                maxCreateAttempts: 1,
+                show: (_, title, _) => shown.Add(title),
+                isCreated: _ => exists);
+            host.Show();
+            host.ShowNotification("Murmur can't use the hotkey", "Restart Murmur to try again.", persistent: true);
+            shown.ShouldBeEmpty();
+
+            exists = true;
+            host.Refresh();
+
+            shown.ShouldBe(["Murmur can't use the hotkey"]);
+
+            host.ShowNotification("Murmur is ready", "Hold Right Ctrl to talk.");
+
+            shown.ShouldBe(["Murmur can't use the hotkey", "Murmur is ready"]);
+        });
+    }
+
+    [Fact]
+    public void ShowNotification_ShownAtOnce_DropsAnOlderWaitingOne()
+    {
+        var shown = new List<string>();
+        var exists = false;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(
+                _ => throw new InvalidOperationException("TryCreate failed."),
+                maxCreateAttempts: 1,
+                show: (_, title, _) => shown.Add(title),
+                isCreated: _ => exists);
+            host.Show();
+            host.ShowNotification("old", "one");
+
+            exists = true; // the icon is there, but nothing has looked yet
+            host.ShowNotification("new", "two");
+            host.Refresh();
+
+            shown.ShouldBe(["new"]);
+        });
+    }
+
+    /// <summary>The hotkey stays off for the whole run, so a later notice does not push its notice out while the icon is missing.</summary>
+    [Fact]
+    public void ShowNotification_ALastingNoticeIsWaiting_IsShownFirstAndNotDisplacedByALaterOne()
+    {
+        var shown = new List<string>();
+        var attempts = 0;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(
+                _ =>
+                {
+                    if (++attempts < 2)
+                        throw new InvalidOperationException("TryCreate failed.");
+                },
+                maxCreateAttempts: 10,
+                show: (_, title, _) => shown.Add(title));
+            host.Show();
+
+            host.ShowNotification("Murmur can't use the hotkey", "Restart Murmur to try again.", persistent: true);
+            host.ShowNotification("Murmur needs your attention", "boom");
+
+            StaHost.PumpUntil(() => shown.Count > 0, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+            shown.ShouldBe(["Murmur can't use the hotkey"]);
+        });
+    }
+
+    /// <summary>Only a notice that is still waiting is protected: once it was shown, the notices after it are ordinary again.</summary>
+    [Fact]
+    public void ShowNotification_ALastingNoticeWasShown_LaterOnesAreShownToo()
+    {
+        var shown = new List<string>();
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ => { }, maxCreateAttempts: 1, show: (_, title, _) => shown.Add(title));
+            host.Show();
+
+            host.ShowNotification("Murmur can't use the hotkey", "Restart Murmur to try again.", persistent: true);
+            host.ShowNotification("Murmur needs your attention", "boom");
+
+            shown.ShouldBe(["Murmur can't use the hotkey", "Murmur needs your attention"]);
         });
     }
 
@@ -437,12 +530,13 @@ public sealed class TrayIconHostTests
     }
 
     private static TrayIconHost NewHostWithCreator(
-        Action<H.NotifyIcon.TaskbarIcon> create, int maxCreateAttempts, Func<H.NotifyIcon.TaskbarIcon, string, string, bool>? show = null)
+        Action<H.NotifyIcon.TaskbarIcon> create, int maxCreateAttempts, Action<H.NotifyIcon.TaskbarIcon, string, string>? show = null,
+        Func<H.NotifyIcon.TaskbarIcon, bool>? isCreated = null)
     {
         var engine = Substitute.For<ISpeechEngine>();
         engine.Status.Returns(new EngineStatus(EngineState.Loading, Model));
         // Without a show seam a notice would be a real balloon, which a test must never put on the owner's screen.
-        show ??= static (_, _, _) => true;
-        return new TrayIconHost(engine, Substitute.For<ISettingsService>(), new InputStatus(), create, TimeSpan.FromMilliseconds(20), maxCreateAttempts, show);
+        show ??= static (_, _, _) => { };
+        return new TrayIconHost(engine, Substitute.For<ISettingsService>(), new InputStatus(), create, TimeSpan.FromMilliseconds(20), maxCreateAttempts, show, isCreated);
     }
 }
