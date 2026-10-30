@@ -1,8 +1,10 @@
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 
 namespace Murmur.Core.Services;
 
-public sealed class SettingsService(MurmurPaths paths) : ISettingsService
+/// <param name="layout">Renames a saved symbol-key hotkey after the current layout when the settings are loaded.</param>
+public sealed class SettingsService(MurmurPaths paths, IKeyboardLayout layout) : ISettingsService
 {
     private readonly JsonFileStore<MurmurSettings> _store = new(paths.SettingsFile, MurmurSettings.Default);
     private readonly Lock _updateLock = new();
@@ -12,9 +14,14 @@ public sealed class SettingsService(MurmurPaths paths) : ISettingsService
         var settings = _store.Load();
 
         // A hand-edited or stale hotkey must never leave the app without a usable trigger.
-        return settings.Hotkey is { IsValid: true }
-            ? settings
-            : settings with { Hotkey = HotkeyDefinition.Default };
+        if (settings.Hotkey is not { IsValid: true } hotkey)
+            return settings with { Hotkey = HotkeyDefinition.Default };
+
+        // The saved name was made on the layout in use when the key was captured, which may have changed since (or the
+        // name predates layout-aware names). The key code is what counts; the name is only for show.
+        return KeyNames.IsLayoutDependent(hotkey.VirtualKey)
+            ? settings with { Hotkey = hotkey with { DisplayName = KeyNames.Describe(hotkey.VirtualKey, hotkey.Modifiers, layout) } }
+            : settings;
     }
 
     public void Save(MurmurSettings settings)

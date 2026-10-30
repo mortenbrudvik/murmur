@@ -99,6 +99,18 @@ public sealed class AppModuleTests
         container.Resolve<LaunchOptions>().ShouldBeSameAs(container.Resolve<LaunchOptions>());
     }
 
+    /// <summary>Settings and the hotkey capture both name symbol keys after the layout; each needs the one Win32 reader.</summary>
+    [Fact]
+    public void Bootstrap_GivesSettingsAndHotkeyCaptureTheWin32KeyboardLayout()
+    {
+        using var container = AutofacBootstrapper.Bootstrap();
+
+        container.Resolve<IKeyboardLayout>().ShouldBeOfType<Win32KeyboardLayout>();
+        container.Resolve<IKeyboardLayout>().ShouldBeSameAs(container.Resolve<IKeyboardLayout>());
+        container.Resolve<ISettingsService>().ShouldBeOfType<SettingsService>();
+        container.Resolve<HotkeyCaptureCoordinator>().ShouldNotBeNull();
+    }
+
     /// <summary>App writes the hook's outcome; the tray and the web app's request handler read it: one instance.</summary>
     [Fact]
     public void Bootstrap_SharesOneInputStatusThatStartsOutInstalled()

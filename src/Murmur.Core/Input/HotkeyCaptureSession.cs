@@ -14,7 +14,8 @@ namespace Murmur.Core.Input;
 /// </list>
 /// Injected input is ignored. Not thread-safe.
 /// </summary>
-public sealed class HotkeyCaptureSession
+/// <param name="layout">Names a symbol key after the character the current layout puts on it.</param>
+public sealed class HotkeyCaptureSession(IKeyboardLayout layout)
 {
     private const int VkEscape = 0x1B;
 
@@ -53,7 +54,7 @@ public sealed class HotkeyCaptureSession
 
         _soloModifier = 0;
         var mods = _modifiers.Current();
-        var candidate = new HotkeyDefinition(vk, mods, KeyNames.Describe(vk, mods));
+        var candidate = new HotkeyDefinition(vk, mods, KeyNames.Describe(vk, mods, layout));
         if (candidate.IsReservedShortcut)
             Complete(null);
         else if (candidate.IsValid)
@@ -74,7 +75,7 @@ public sealed class HotkeyCaptureSession
 
         _modifiers.Set(vk, false);
         if (vk == _soloModifier)
-            Complete(new HotkeyDefinition(vk, HotkeyModifiers.None, KeyNames.For(vk)));
+            Complete(new HotkeyDefinition(vk, HotkeyModifiers.None, KeyNames.For(vk, layout)));
     }
 
     private void Complete(HotkeyDefinition? result)

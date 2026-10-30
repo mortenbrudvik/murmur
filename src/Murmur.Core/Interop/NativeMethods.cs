@@ -122,6 +122,19 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", EntryPoint = "MapVirtualKeyW")]
     internal static partial uint MapVirtualKey(uint uCode, uint uMapType);
 
+    // ---- Keyboard layout ----
+
+    /// <summary><see cref="MapVirtualKeyEx"/> map type: a virtual-key code to the character it types.</summary>
+    internal const uint MAPVK_VK_TO_CHAR = 2;
+
+    /// <returns>The input locale identifier (HKL) of <paramref name="idThread"/>, or of the calling thread when it is 0.</returns>
+    [LibraryImport("user32.dll")]
+    internal static partial nint GetKeyboardLayout(uint idThread);
+
+    /// <returns>The character, with the top bit set for a dead key; 0 when the layout has none.</returns>
+    [LibraryImport("user32.dll", EntryPoint = "MapVirtualKeyExW")]
+    internal static partial uint MapVirtualKeyEx(uint uCode, uint uMapType, nint dwhkl);
+
     // ---- Clipboard ----
 
     /// <param name="hWndNewOwner">0 associates the open clipboard with the calling thread instead of a window.</param>

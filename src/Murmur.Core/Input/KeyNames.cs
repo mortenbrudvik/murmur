@@ -4,7 +4,11 @@ using Murmur.Core.Models;
 
 namespace Murmur.Core.Input;
 
-/// <summary>Human-readable names for virtual-key codes, as shown in Settings and stored in <see cref="HotkeyDefinition.DisplayName"/>.</summary>
+/// <summary>
+/// Human-readable names for virtual-key codes, as shown in Settings and stored in <see cref="HotkeyDefinition.DisplayName"/>.
+/// Every name is English except those of the symbol (OEM) keys: their virtual-key codes do not follow the layout the way
+/// letters and digits do, so they are named after the character the current layout puts on them.
+/// </summary>
 public static class KeyNames
 {
     private static readonly Dictionary<int, string> Named = new()
@@ -55,6 +59,7 @@ public static class KeyNames
         [0xB1] = "Previous Track",
         [0xB2] = "Stop Media",
         [0xB3] = "Play/Pause",
+        // The US names of the symbol keys, for a layout that cannot name them.
         [0xBA] = ";",
         [0xBB] = "=",
         [0xBC] = ",",
@@ -69,8 +74,15 @@ public static class KeyNames
         [0xE2] = "<",
     };
 
-    public static string For(int vk)
+    /// <summary>The OEM symbol keys, 0xBA-0xC0, 0xDB-0xDF and 0xE2: the ones whose character depends on the layout.</summary>
+    public static bool IsLayoutDependent(int vk) => vk is >= 0xBA and <= 0xC0 or >= 0xDB and <= 0xDF or 0xE2;
+
+    public static string For(int vk, IKeyboardLayout layout)
     {
+        // A dead key shows its accent ("¨"). A layout that gives nothing printable falls back to the US name.
+        if (IsLayoutDependent(vk) && layout.CharacterFor(vk) is { } character && !char.IsControl(character) && !char.IsWhiteSpace(character))
+            return char.ToUpperInvariant(character).ToString();
+
         if (Named.TryGetValue(vk, out var name))
             return name;
 
@@ -84,7 +96,7 @@ public static class KeyNames
     }
 
     /// <summary>The modifiers (in the order Ctrl, Alt, Shift, Win) followed by the key, joined with '+'.</summary>
-    public static string Describe(int vk, HotkeyModifiers mods)
+    public static string Describe(int vk, HotkeyModifiers mods, IKeyboardLayout layout)
     {
         var text = new StringBuilder();
 
@@ -97,6 +109,6 @@ public static class KeyNames
         if (mods.HasFlag(HotkeyModifiers.Win))
             text.Append("Win+");
 
-        return text.Append(For(vk)).ToString();
+        return text.Append(For(vk, layout)).ToString();
     }
 }

@@ -94,6 +94,7 @@ public class AppModule : Module
         builder.RegisterType<Win32ForegroundInfo>().As<IForegroundInfo>().SingleInstance();
         builder.RegisterType<Win32KeyboardSender>().As<IKeyboardSender>().SingleInstance();
         builder.RegisterType<Win32KeyStateProbe>().As<IKeyStateProbe>().SingleInstance();
+        builder.RegisterType<Win32KeyboardLayout>().As<IKeyboardLayout>().SingleInstance();
         builder.RegisterType<TextInserter>().As<ITextInserter>().SingleInstance();
     }
 

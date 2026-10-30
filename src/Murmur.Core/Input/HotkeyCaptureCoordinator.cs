@@ -8,7 +8,8 @@ namespace Murmur.Core.Input;
 /// nor trigger dictation. <see cref="CaptureAsync"/> may be called from any thread; <see cref="TryHandle"/> is called
 /// from the keyboard hook.
 /// </summary>
-public sealed class HotkeyCaptureCoordinator(TimeProvider time)
+/// <param name="layout">Names a captured symbol key after the character the current layout puts on it.</param>
+public sealed class HotkeyCaptureCoordinator(TimeProvider time, IKeyboardLayout layout)
 {
     private readonly Lock _gate = new();
     private PendingCapture? _active;
@@ -22,7 +23,7 @@ public sealed class HotkeyCaptureCoordinator(TimeProvider time)
         // Created first: an invalid timeout must throw before the capture starts swallowing keys.
         using var timeoutCts = new CancellationTokenSource(timeout, time);
 
-        var capture = new PendingCapture();
+        var capture = new PendingCapture(layout);
         lock (_gate)
         {
             _active?.Completion.TrySetResult(null);
@@ -95,9 +96,9 @@ public sealed class HotkeyCaptureCoordinator(TimeProvider time)
         }
     }
 
-    private sealed class PendingCapture
+    private sealed class PendingCapture(IKeyboardLayout layout)
     {
-        public HotkeyCaptureSession Session { get; } = new();
+        public HotkeyCaptureSession Session { get; } = new(layout);
 
         // Continuations run asynchronously so completing a capture never runs caller code inside the keyboard hook.
         public TaskCompletionSource<HotkeyDefinition?> Completion { get; } =

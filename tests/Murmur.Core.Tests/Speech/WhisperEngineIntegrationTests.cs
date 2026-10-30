@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Speech.AudioFormat;
 using System.Speech.Synthesis;
 using Murmur.Core.Hardware;
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
@@ -28,7 +29,7 @@ public sealed class WhisperEngineFixture : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         var paths = MurmurPaths.Default;
-        var settings = new SettingsService(paths);
+        var settings = new SettingsService(paths, new Win32KeyboardLayout());
         var models = new ModelManager(paths, _http, TimeProvider.System, new DiskSpace());
         var gpu = new GpuInfo(paths);
         Engine = new WhisperEngine(models, new ModelSelection(settings, gpu, models), gpu, new CudaRuntimeLocator(paths),

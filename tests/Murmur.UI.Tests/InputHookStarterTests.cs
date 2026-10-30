@@ -102,7 +102,7 @@ public sealed class InputHookStarterTests
     private sealed class RecordingHost(string name, List<string> log, Exception? failure)
         : InputHookHost(
             new HotkeyMatcher(HotkeyDefinition.Default),
-            new HotkeyCaptureCoordinator(TimeProvider.System),
+            new HotkeyCaptureCoordinator(TimeProvider.System, Substitute.For<IKeyboardLayout>()),
             Substitute.For<IKeyboardSender>(),
             TimeProvider.System,
             static (_, _) => { })

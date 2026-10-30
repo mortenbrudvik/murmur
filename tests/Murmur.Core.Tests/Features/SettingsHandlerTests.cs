@@ -167,7 +167,7 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task CaptureHotkey_ReturnsCapturedDefinition()
     {
-        var coordinator = new HotkeyCaptureCoordinator(_time);
+        var coordinator = new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>());
         var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous), coordinator);
 
         // Handle runs synchronously up to its first real wait, so the capture is already active here.
@@ -187,7 +187,7 @@ public sealed class SettingsHandlerTests
         var matcher = new HotkeyMatcher(HotkeyDefinition.Default);
         matcher.OnKey(new KeyInput(RightCtrl, IsDown: true, IsInjected: false));
         matcher.IsHotkeyHeld.ShouldBeTrue();
-        var handler = new CaptureHotkeyHandler(matcher, new HotkeyCaptureCoordinator(_time));
+        var handler = new CaptureHotkeyHandler(matcher, new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
 
         var pending = handler.Handle(new CaptureHotkeyRequest(), CancellationToken.None);
 
@@ -199,7 +199,7 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task CaptureHotkey_NothingPressedWithinTenSeconds_ReturnsNull()
     {
-        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous), new HotkeyCaptureCoordinator(_time));
+        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous), new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
 
         var pending = handler.Handle(new CaptureHotkeyRequest(), CancellationToken.None);
         _time.Advance(TimeSpan.FromSeconds(9));
