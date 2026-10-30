@@ -65,7 +65,8 @@ public class AppModule : Module
         builder.RegisterType<AudioArchive>().As<IAudioArchive>().SingleInstance();
         builder.RegisterType<AudioRecorder>().As<IAudioRecorder>().SingleInstance();
 
-        builder.RegisterType<ModelManager>().SingleInstance();
+        builder.RegisterType<DiskSpace>().As<IDiskSpace>().SingleInstance();
+        builder.RegisterType<ModelManager>().As<IModelManager>().SingleInstance();
         // Never disposed by the container: disposing the native Whisper factory while a transcription may still be
         // running can crash the process, and process exit frees the GPU memory anyway.
         builder.RegisterType<WhisperEngine>().As<ISpeechEngine>().SingleInstance().ExternallyOwned();

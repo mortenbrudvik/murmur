@@ -1,0 +1,24 @@
+using Murmur.Core.Models;
+
+namespace Murmur.Core.Speech;
+
+/// <summary>Finds, downloads and verifies the Whisper model files.</summary>
+public interface IModelManager
+{
+    string PathFor(SpeechModelInfo model);
+
+    /// <summary>True when the model file exists with the catalog size. Reads no file content, so it says nothing about integrity.</summary>
+    bool HasExpectedFile(SpeechModelInfo model);
+
+    /// <summary>
+    /// Returns the path of a verified model file, resuming, retrying and downloading as needed. Transient network
+    /// failures are retried without end (progress reports them); cancelling keeps the partial download for the next start.
+    /// </summary>
+    /// <exception cref="HttpRequestException">The server answered with an error that retrying will not fix.</exception>
+    /// <exception cref="InsufficientDiskSpaceException">The drive cannot hold the rest of the download.</exception>
+    /// <exception cref="ModelVerificationException">Two downloads in a row did not match the pinned SHA-256.</exception>
+    Task<string> EnsureModelAsync(SpeechModelInfo model, IProgress<DownloadProgress> progress, CancellationToken ct);
+
+    /// <summary>Removes the model file, its partial download and its verification entry. A missing file is not an error.</summary>
+    void Delete(SpeechModelInfo model);
+}

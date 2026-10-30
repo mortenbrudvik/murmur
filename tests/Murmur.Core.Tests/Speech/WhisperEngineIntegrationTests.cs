@@ -23,7 +23,7 @@ public sealed class WhisperEngineFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        Engine = new WhisperEngine(new ModelManager(MurmurPaths.Default, _http));
+        Engine = new WhisperEngine(new ModelManager(MurmurPaths.Default, _http, TimeProvider.System, new DiskSpace()));
         var stopwatch = Stopwatch.StartNew();
         await Engine.InitializeAsync(CancellationToken.None);
         InitializeElapsed = stopwatch.Elapsed;
@@ -131,7 +131,7 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
     public async Task Transcribe_BeforeInitialize_Throws()
     {
         using var http = new HttpClient();
-        using var engine = new WhisperEngine(new ModelManager(MurmurPaths.Default, http));
+        using var engine = new WhisperEngine(new ModelManager(MurmurPaths.Default, http, TimeProvider.System, new DiskSpace()));
 
         engine.Status.State.ShouldBe(EngineState.NotStarted);
         await Should.ThrowAsync<InvalidOperationException>(
@@ -167,7 +167,7 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
     }
 }
 
-/// <summary>Status transitions of <see cref="WhisperEngine"/> with a fake network, so no real model is involved.</summary>
+/// <summary>Status transitions of <see cref="WhisperEngine"/> with a fake model manager, so no real model is involved.</summary>
 public sealed class WhisperEngineStatusTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-engine-" + Guid.NewGuid().ToString("N"));
@@ -178,13 +178,14 @@ public sealed class WhisperEngineStatusTests : IDisposable
             Directory.Delete(_root, recursive: true);
     }
 
-    private WhisperEngine CreateEngine(Func<CancellationToken, HttpResponseMessage> respond) =>
-        new(new ModelManager(new MurmurPaths(_root), new HttpClient(new FakeHandler(respond))));
+    private static WhisperEngine CreateEngine(Func<IProgress<DownloadProgress>, CancellationToken, Task<string>> ensure) =>
+        new(new FakeModelManager(ensure));
 
     [Fact]
     public async Task Initialize_DownloadFails_EndsInErrorAndDoesNotThrow()
     {
-        using var engine = CreateEngine(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var engine = CreateEngine((_, _) =>
+            throw new HttpRequestException("Response status code does not indicate success: 404 (Not Found).", null, HttpStatusCode.NotFound));
         var states = Record(engine);
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
@@ -202,11 +203,16 @@ public sealed class WhisperEngineStatusTests : IDisposable
     {
         var body = new byte[2000];
         Random.Shared.NextBytes(body);
-        using var engine = CreateEngine(_ =>
+        using var engine = CreateEngine(async (progress, ct) =>
         {
-            var content = new StreamContent(new TrickleStream(body));
-            content.Headers.ContentLength = body.Length;
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+            // One report per byte, like a slow connection, so every read is a progress report.
+            for (var received = 1; received <= body.Length; received++)
+                progress.Report(new DownloadProgress("Whisper large-v3-turbo", received, body.Length, 0, null, 0));
+
+            Directory.CreateDirectory(_root);
+            var path = Path.Combine(_root, "corrupt.bin");
+            await File.WriteAllBytesAsync(path, body, ct);
+            return path;
         });
         var states = Record(engine);
 
@@ -220,15 +226,15 @@ public sealed class WhisperEngineStatusTests : IDisposable
         downloads.Count.ShouldBeLessThanOrEqualTo(101);
         states.Select(s => s.State).Distinct().ShouldBe([EngineState.Downloading, EngineState.Loading, EngineState.Error]);
         engine.Status.Error.ShouldNotBeNull().ShouldContain("load the speech model");
+        engine.Status.Error.ShouldContain(Path.Combine(Path.GetTempPath(), "ggml-large-v3-turbo.bin"));
     }
 
     [Fact]
     public async Task Initialize_Cancelled_DoesNotThrowAndLeavesNotStarted()
     {
-        using var engine = CreateEngine(ct =>
+        using var engine = CreateEngine(async (_, ct) =>
         {
-            ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(30));
-            ct.ThrowIfCancellationRequested();
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
             throw new InvalidOperationException("not cancelled");
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
@@ -246,16 +252,18 @@ public sealed class WhisperEngineStatusTests : IDisposable
         return states;
     }
 
-    private sealed class FakeHandler(Func<CancellationToken, HttpResponseMessage> respond) : HttpMessageHandler
+    /// <summary>Has no model on disk, and hands the download over to <c>ensure</c>.</summary>
+    private sealed class FakeModelManager(Func<IProgress<DownloadProgress>, CancellationToken, Task<string>> ensure) : IModelManager
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.Run(() => respond(cancellationToken), CancellationToken.None);
-    }
+        public string PathFor(SpeechModelInfo model) => Path.Combine(Path.GetTempPath(), model.FileName);
 
-    /// <summary>Hands out one byte per read, like a slow connection, so every read is a progress report.</summary>
-    private sealed class TrickleStream(byte[] data) : MemoryStream(data)
-    {
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-            base.ReadAsync(buffer[..Math.Min(1, buffer.Length)], cancellationToken);
+        public bool HasExpectedFile(SpeechModelInfo model) => false;
+
+        public Task<string> EnsureModelAsync(SpeechModelInfo model, IProgress<DownloadProgress> progress, CancellationToken ct) =>
+            ensure(progress, ct);
+
+        public void Delete(SpeechModelInfo model)
+        {
+        }
     }
 }

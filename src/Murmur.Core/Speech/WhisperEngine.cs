@@ -14,7 +14,7 @@ namespace Murmur.Core.Speech;
 /// model up with a second of zeros, so the one-off cost of the first run is paid before it reports Ready rather than
 /// on the first dictation.
 /// </summary>
-public sealed class WhisperEngine(ModelManager models) : ISpeechEngine, IDisposable
+public sealed class WhisperEngine(IModelManager models) : ISpeechEngine, IDisposable
 {
     public const string ModelName = "Whisper large-v3-turbo";
 
@@ -22,6 +22,8 @@ public sealed class WhisperEngine(ModelManager models) : ISpeechEngine, IDisposa
 
     /// <summary>Far below any real microphone's noise floor (about -70 dBFS), so only a dead input falls under it.</summary>
     private const float DigitalSilenceDbfs = -80f;
+
+    private static readonly SpeechModelInfo Model = SpeechModelCatalog.LargeV3Turbo;
 
     private readonly ILogger _logger = Log.ForContext<WhisperEngine>();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
@@ -120,7 +122,7 @@ public sealed class WhisperEngine(ModelManager models) : ISpeechEngine, IDisposa
             var hint = ex switch
             {
                 HttpRequestException => " Check the internet connection and restart Murmur.",
-                _ when loading => $" If the model file is damaged, delete {models.ModelPath} and restart Murmur to download it again.",
+                _ when loading => $" If the model file is damaged, delete {models.PathFor(Model)} and restart Murmur to download it again.",
                 _ => ""
             };
             SetStatus(new EngineStatus(EngineState.Error, ModelName, Error: $"Could not {step}: {ex.Message}{hint}"));
@@ -129,17 +131,18 @@ public sealed class WhisperEngine(ModelManager models) : ISpeechEngine, IDisposa
 
     private async Task<string> EnsureModelAsync(CancellationToken ct)
     {
-        if (models.IsModelPresent)
-            return models.ModelPath;
-
         _lastReportedPercent = 0;
-        SetStatus(new EngineStatus(EngineState.Downloading, ModelName, DownloadProgress: 0));
-        return await models.EnsureModelAsync(new InlineProgress(ReportDownloadProgress), ct).ConfigureAwait(false);
+        if (!models.HasExpectedFile(Model))
+            SetStatus(new EngineStatus(EngineState.Downloading, ModelName, DownloadProgress: 0));
+
+        // Also verifies a model file that is already there, which reports nothing while it hashes it once.
+        return await models.EnsureModelAsync(Model, new InlineProgress(ReportDownloadProgress), ct).ConfigureAwait(false);
     }
 
     /// <summary>Raises the status only when the whole percent changes: a 1.6 GB download makes thousands of reads.</summary>
-    private void ReportDownloadProgress(double fraction)
+    private void ReportDownloadProgress(DownloadProgress progress)
     {
+        var fraction = progress.TotalBytes > 0 ? Math.Min((double)progress.BytesReceived / progress.TotalBytes, 1.0) : 0;
         var percent = (int)(fraction * 100);
         if (percent == _lastReportedPercent)
             return;
@@ -200,8 +203,8 @@ public sealed class WhisperEngine(ModelManager models) : ISpeechEngine, IDisposa
     }
 
     /// <summary>Unlike <see cref="Progress{T}"/> it runs inline, so reports cannot arrive out of order.</summary>
-    private sealed class InlineProgress(Action<double> report) : IProgress<double>
+    private sealed class InlineProgress(Action<DownloadProgress> report) : IProgress<DownloadProgress>
     {
-        public void Report(double value) => report(value);
+        public void Report(DownloadProgress value) => report(value);
     }
 }
