@@ -161,8 +161,62 @@
   flex: 1 1 100%;
 }
 
-.settings-engine .settings-hint {
-  margin-top: 6px;
+/* Nothing to show yet (the engine status and the model choice are both still unknown). */
+.settings-engine:empty {
+  display: none;
+}
+
+.settings-engine .cuda-tip {
+  margin-top: 10px;
+}
+
+.speech-model {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-faint);
+}
+
+.speech-model:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.speech-model-title {
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.speech-model-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.speech-model-option input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.speech-model-download {
+  margin-top: 8px;
+}
+
+.speech-model-download .engine-progress {
+  max-width: 280px;
+  margin-bottom: 6px;
+}
+
+.speech-model-download .settings-hint {
+  margin-top: 0;
+}
+
+.speech-model .page-error {
+  margin: 8px 0 0;
 }
 
 @media (max-width: 560px) {

@@ -2,7 +2,14 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "../SettingsPage";
 import { apiClient } from "../../../interop/WebViewApiClient";
-import type { EngineStatus, HotkeyDefinition, MicrophoneInfo, MurmurSettings } from "../../../types/domain";
+import type {
+  DownloadProgress,
+  EngineStatus,
+  HotkeyDefinition,
+  MicrophoneInfo,
+  ModelChoice,
+  MurmurSettings,
+} from "../../../types/domain";
 
 vi.mock("../../../interop/WebViewApiClient", () => ({
   apiClient: {
@@ -25,21 +32,45 @@ const stored: MurmurSettings = {
 const usb: MicrophoneInfo = { id: "usb", name: "USB Mic", isDefault: true };
 const headset: MicrophoneInfo = { id: "headset", name: "Headset", isDefault: false };
 
-const ready: EngineStatus = { state: "ready", modelName: "large-v3-turbo", runtime: "Cuda", downloadProgress: null, error: null };
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
 
 function engine(overrides: Partial<EngineStatus>): EngineStatus {
   return { ...ready, ...overrides };
 }
+
+const smallDownload: DownloadProgress = {
+  modelName: "Whisper small (English)",
+  bytesReceived: 122_000_000,
+  totalBytes: 488_000_000,
+  bytesPerSecond: 18_000_000,
+  secondsRemaining: 20,
+  retries: 0,
+  reconnecting: false,
+};
+
+const BEST = "Best accuracy (large, 1.6 GB)";
+const FAST = "Faster (small, 488 MB)";
+const BEST_RECOMMENDED = `${BEST} — recommended for this PC`;
+const choice: ModelChoice = {
+  selected: "largeV3Turbo",
+  recommended: "largeV3Turbo",
+  options: [
+    { id: "largeV3Turbo", label: BEST, sizeBytes: 1_624_555_275 },
+    { id: "smallEn", label: FAST, sizeBytes: 487_614_201 },
+  ],
+};
 
 interface ServerOptions {
   settings?: MurmurSettings;
   microphones?: MicrophoneInfo[];
   captureHotkey?: () => Promise<HotkeyDefinition | null>;
   update?: (params: MurmurSettings) => MurmurSettings | Promise<MurmurSettings>;
+  /** What models.getChoice answers, and setChoice echoes with the new selection. Null (the default): no answer. */
+  choice?: ModelChoice | null;
 }
 
 /** The server: update stores and echoes by default. */
-function mockServer({ settings = stored, microphones = [usb, headset], captureHotkey, update }: ServerOptions = {}) {
+function mockServer({ settings = stored, microphones = [usb, headset], captureHotkey, update, choice: modelChoice = null }: ServerOptions = {}) {
   let current = settings;
   vi.mocked(apiClient.call).mockImplementation(async (service, method, params) => {
     const key = `${service}.${method}`;
@@ -50,6 +81,10 @@ function mockServer({ settings = stored, microphones = [usb, headset], captureHo
     }
     if (key === "settings.getMicrophones") return microphones;
     if (key === "settings.captureHotkey") return captureHotkey ? captureHotkey() : null;
+    if (key === "models.getChoice") return modelChoice;
+    if (key === "models.setChoice" && modelChoice) {
+      return { ...modelChoice, selected: (params as { model: ModelChoice["selected"] }).model };
+    }
     return null;
   });
 }
@@ -81,6 +116,7 @@ function toggle(name: string) {
 describe("SettingsPage", () => {
   beforeEach(() => {
     vi.mocked(apiClient.call).mockReset();
+    vi.mocked(apiClient.on).mockClear();
   });
 
   describe("hotkey", () => {
@@ -289,18 +325,37 @@ describe("SettingsPage", () => {
   });
 
   describe("engine card", () => {
-    it("names the model", async () => {
+    it("names the model from the engine status", async () => {
       await renderLoaded();
 
       expect(screen.getByRole("heading", { name: "Whisper large-v3-turbo" })).toBeTruthy();
     });
 
-    it("shows a progress bar and the percentage while downloading", async () => {
-      await renderLoaded({}, engine({ state: "downloading", runtime: null, downloadProgress: 0.42 }));
+    it("shows no model name while it is empty, as before the first model is chosen", async () => {
+      await renderLoaded({}, engine({ state: "notStarted", modelName: "", runtime: null }));
 
-      expect(screen.getByText("Downloading model… 42%")).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: "Whisper large-v3-turbo" })).toBeNull();
+      expect(screen.queryByRole("heading", { level: 2, name: "" })).toBeNull();
+      expect(screen.getByText("Loading model…")).toBeTruthy();
+    });
+
+    it("shows a progress bar, the percentage and the size, speed and time left while downloading", async () => {
+      const download = { ...smallDownload, modelName: "Whisper large-v3-turbo", bytesReceived: 672_000_000, totalBytes: 1_600_000_000 };
+      await renderLoaded({}, engine({ state: "downloading", runtime: null, download }));
+
+      expect(screen.getByText("Downloading speech model… 42%")).toBeTruthy();
+      expect(screen.getByText("672 MB of 1.6 GB · 18 MB/s · less than a minute left")).toBeTruthy();
       const bar = screen.getByRole("progressbar");
       expect(bar.getAttribute("aria-valuenow")).toBe("42");
+    });
+
+    it("says Reconnecting… once while the first download reconnects", async () => {
+      const download = { ...smallDownload, retries: 2, reconnecting: true };
+      await renderLoaded({}, engine({ state: "downloading", runtime: null, download }));
+
+      expect(screen.getAllByText(/Reconnecting…/)).toHaveLength(1);
+      expect(screen.getByText("Reconnecting…")).toBeTruthy();
+      expect(screen.getByText("122 MB of 488 MB")).toBeTruthy();
     });
 
     it.each(["loading", "notStarted"] as const)("says Loading model… when %s", async (state) => {
@@ -310,18 +365,38 @@ describe("SettingsPage", () => {
       expect(screen.queryByRole("progressbar")).toBeNull();
     });
 
-    it("shows Ready and the runtime, with no GPU note on CUDA", async () => {
-      await renderLoaded({}, engine({ state: "ready", runtime: "Cuda" }));
-
-      expect(screen.getByText("Ready · Cuda")).toBeTruthy();
-      expect(screen.queryByText(/without GPU acceleration/)).toBeNull();
-    });
-
-    it.each(["Vulkan", "Cpu"])("explains the missing GPU acceleration when ready on %s", async (runtime) => {
+    it.each([
+      ["Cuda", "CUDA"],
+      ["Vulkan", "Vulkan"],
+      ["Cpu", "CPU"],
+    ])("shows Ready and the %s runtime, with no CUDA tip when there is no advice", async (runtime, label) => {
       await renderLoaded({}, engine({ state: "ready", runtime }));
 
-      expect(screen.getByText(`Ready · ${runtime}`)).toBeTruthy();
-      expect(screen.getByText("Running without GPU acceleration — install CUDA 13 for faster transcription.")).toBeTruthy();
+      expect(screen.getByText(`Ready · ${label}`)).toBeTruthy();
+      expect(screen.queryByText(/without GPU acceleration/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Get CUDA 13 ↗" })).toBeNull();
+    });
+
+    it("shows the CUDA tip of the settings variant when the engine advises installing CUDA", async () => {
+      const gpu = { state: "installCuda", gpuName: "NVIDIA GeForce RTX 3060" } as const;
+      await renderLoaded({}, engine({ state: "ready", runtime: "Vulkan", gpu }));
+
+      expect(screen.getByText("Ready · Vulkan")).toBeTruthy();
+      expect(
+        screen.getByText("CUDA isn't installed. Your NVIDIA GeForce RTX 3060 can run Murmur about twice as fast with CUDA 13."),
+      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Get CUDA 13 ↗" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Restart Murmur" }));
+      await waitFor(() => expect(callsTo("app.restart")).toHaveLength(1));
+    });
+
+    it("shows no CUDA tip when CUDA is in use", async () => {
+      const gpu = { state: "cudaInUse", gpuName: "NVIDIA GeForce RTX 3060" } as const;
+      await renderLoaded({}, engine({ state: "ready", runtime: "Cuda", gpu }));
+
+      expect(screen.getByText("Ready · CUDA")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Restart Murmur" })).toBeNull();
     });
 
     it("shows the error text in the error color", async () => {
@@ -329,15 +404,110 @@ describe("SettingsPage", () => {
 
       const text = screen.getByText("Out of memory");
       expect(text.className).toMatch(/error/);
-      expect(screen.queryByText(/without GPU acceleration/)).toBeNull();
     });
 
     it("shows no status line until the engine status is known", async () => {
       await renderLoaded({}, null);
 
-      expect(screen.getByRole("heading", { name: "Whisper large-v3-turbo" })).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: "Whisper large-v3-turbo" })).toBeNull();
       expect(screen.queryByText(/model…/)).toBeNull();
       expect(screen.queryByText(/^Ready/)).toBeNull();
+    });
+  });
+
+  describe("speech model", () => {
+    it("lists the models as radio buttons, with the selected one checked and the recommended one marked", async () => {
+      await renderLoaded({ choice });
+
+      const best = (await screen.findByRole("radio", { name: BEST_RECOMMENDED })) as HTMLInputElement;
+      expect(best.checked).toBe(true);
+      expect((screen.getByRole("radio", { name: FAST }) as HTMLInputElement).checked).toBe(false);
+      expect(screen.getAllByRole("radio")).toHaveLength(2);
+    });
+
+    it("marks the recommended model even when another one is selected", async () => {
+      await renderLoaded({ choice: { ...choice, selected: "smallEn" } });
+
+      expect(((await screen.findByRole("radio", { name: FAST })) as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole("radio", { name: BEST_RECOMMENDED }) as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("chooses the other model, and shows it selected once the answer comes back", async () => {
+      await renderLoaded({ choice });
+
+      fireEvent.click(await screen.findByRole("radio", { name: FAST }));
+
+      await waitFor(() => expect(apiClient.call).toHaveBeenCalledWith("models", "setChoice", { model: "smallEn" }));
+      await waitFor(() => expect((screen.getByRole("radio", { name: FAST }) as HTMLInputElement).checked).toBe(true));
+      expect((screen.getByRole("radio", { name: BEST_RECOMMENDED }) as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("does not call setChoice for the model that is already selected", async () => {
+      await renderLoaded({ choice });
+
+      fireEvent.click(await screen.findByRole("radio", { name: BEST_RECOMMENDED }));
+
+      expect(callsTo("models.setChoice")).toHaveLength(0);
+    });
+
+    it("shows nothing for the model choice until it is known", async () => {
+      await renderLoaded();
+
+      expect(screen.queryByRole("radio")).toBeNull();
+    });
+
+    it("shows the progress of a model switch under the choices while the old model stays ready", async () => {
+      await renderLoaded({ choice }, engine({ state: "ready", runtime: "Cuda", download: smallDownload }));
+      await screen.findByRole("radio", { name: FAST });
+
+      expect(screen.getByText("Ready · CUDA")).toBeTruthy();
+      expect(screen.getByText("Downloading Whisper small (English)")).toBeTruthy();
+      expect(screen.getByText("122 MB of 488 MB · 18 MB/s · less than a minute left")).toBeTruthy();
+      expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("25");
+    });
+
+    it("shows Reconnecting… in the switch progress line", async () => {
+      const download = { ...smallDownload, retries: 1, reconnecting: true };
+      await renderLoaded({ choice }, engine({ state: "ready", runtime: "Cuda", download }));
+      await screen.findByRole("radio", { name: FAST });
+
+      expect(screen.getByText("122 MB of 488 MB · Reconnecting…")).toBeTruthy();
+    });
+
+    it("shows no switch progress line when nothing is downloading", async () => {
+      await renderLoaded({ choice });
+      await screen.findByRole("radio", { name: FAST });
+
+      expect(screen.queryByText(/^Downloading/)).toBeNull();
+      expect(screen.queryByRole("progressbar")).toBeNull();
+    });
+
+    it("says why a model switch failed while the old model stays ready", async () => {
+      const error = "Could not switch to Whisper small (English): disk full";
+      await renderLoaded({ choice }, engine({ state: "ready", runtime: "Cuda", error }));
+      await screen.findByRole("radio", { name: FAST });
+
+      expect((await screen.findByRole("alert")).textContent).toBe(error);
+    });
+
+    it("reads the choice again when the engine is ready after a switch, in case a failed switch put the old model back", async () => {
+      await renderLoaded({ choice });
+      await screen.findByRole("radio", { name: FAST });
+      fireEvent.click(screen.getByRole("radio", { name: FAST }));
+      await waitFor(() => expect((screen.getByRole("radio", { name: FAST }) as HTMLInputElement).checked).toBe(true));
+      const readsBefore = callsTo("models.getChoice").length;
+
+      // The engine reports the failed switch: ready on the old model again. The server's choice is back to large.
+      vi.mocked(apiClient.call).mockImplementation(async (service, method) =>
+        `${service}.${method}` === "models.getChoice" ? choice : null,
+      );
+      const pushed = vi.mocked(apiClient.on).mock.calls
+        .filter(([name]) => name === "engine.statusChanged")
+        .map(([, callback]) => callback as (status: EngineStatus) => void);
+      act(() => pushed.forEach((callback) => callback(engine({ state: "ready", runtime: "Cuda" }))));
+
+      await waitFor(() => expect(callsTo("models.getChoice").length).toBeGreaterThan(readsBefore));
+      await waitFor(() => expect((screen.getByRole("radio", { name: BEST_RECOMMENDED }) as HTMLInputElement).checked).toBe(true));
     });
   });
 

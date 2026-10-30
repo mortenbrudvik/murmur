@@ -31,3 +31,10 @@
   border-radius: 999px;
   transition: width 0.3s ease;
 }
+
+/* Size, speed and time left next to the status text while the first download runs. */
+.engine-status-detail {
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import "./SettingsPage.css";
+import CudaTip from "./CudaTip";
 import EngineStatusLine from "./EngineStatusLine";
-import { NO_GPU_NOTE, showsNoGpuNote } from "./engineStatusText";
+import SpeechModelSection from "./SpeechModelSection";
 import { useMicrophones } from "./useMicrophones";
 import { useSettings } from "./useSettings";
 import type { EngineStatus, MurmurSettings } from "../../types/domain";
@@ -149,14 +150,15 @@ export default function SettingsPage({ engineStatus }: Props) {
         </>
       )}
 
-      <section className="settings-card settings-engine" aria-labelledby="settings-engine-title">
-        <h2 id="settings-engine-title">Whisper large-v3-turbo</h2>
+      <section className="settings-card settings-engine" aria-label="Speech engine">
+        {engineStatus?.modelName && <h2 className="settings-engine-name">{engineStatus.modelName}</h2>}
         {engineStatus && (
           <>
             <EngineStatusLine status={engineStatus} />
-            {showsNoGpuNote(engineStatus) && <p className="settings-hint">{NO_GPU_NOTE}</p>}
+            <CudaTip advice={engineStatus.gpu} variant="settings" />
           </>
         )}
+        <SpeechModelSection status={engineStatus} />
       </section>
     </section>
   );

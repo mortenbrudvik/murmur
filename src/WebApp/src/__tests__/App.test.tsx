@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { apiClient } from "../interop/WebViewApiClient";
-import type { EngineStatus, MurmurSettings, Vocabulary } from "../types/domain";
+import type { DownloadProgress, EngineStatus, MurmurSettings, Vocabulary } from "../types/domain";
 
 vi.mock("../interop/WebViewApiClient", () => ({
   apiClient: {
@@ -19,7 +19,16 @@ const settings: MurmurSettings = {
   keepAudio: false,
 };
 const vocabulary: Vocabulary = { hintWords: [], replacements: [] };
-const ready: EngineStatus = { state: "ready", modelName: "large-v3-turbo", runtime: "Cuda", downloadProgress: null, error: null };
+const download: DownloadProgress = {
+  modelName: "Whisper large-v3-turbo",
+  bytesReceived: 400_000_000,
+  totalBytes: 1_600_000_000,
+  bytesPerSecond: 18_000_000,
+  secondsRemaining: 70,
+  retries: 0,
+  reconnecting: false,
+};
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
 
 function mockServer(status: EngineStatus) {
   vi.mocked(apiClient.call).mockImplementation(async (service, method) => {
@@ -48,11 +57,12 @@ describe("App engine status banner", () => {
   });
 
   it("shows the download progress above the History page, with a progress bar", async () => {
-    mockServer({ ...ready, state: "downloading", runtime: null, downloadProgress: 0.25 });
+    mockServer({ ...ready, state: "downloading", runtime: null, download });
 
     render(<App />);
 
-    expect(await screen.findByText("Downloading model… 25%")).toBeTruthy();
+    expect(await screen.findByText("Downloading speech model… 25%")).toBeTruthy();
+    expect(screen.getByText("400 MB of 1.6 GB · 18 MB/s · about 1 minute left")).toBeTruthy();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("25");
     expect(screen.getByRole("heading", { name: "History" })).toBeTruthy();
   });

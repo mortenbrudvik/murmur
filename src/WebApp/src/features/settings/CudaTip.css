@@ -1,0 +1,93 @@
+/* The CUDA tip: a blue-outlined box with a lightning bolt, on the setup page and on the Settings engine card. */
+.cuda-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 8px;
+}
+
+.cuda-tip-icon {
+  flex: none;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.cuda-tip-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cuda-tip p {
+  margin: 0;
+}
+
+.cuda-tip-title {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.cuda-tip-detail,
+.cuda-tip-text {
+  font-size: 12px;
+}
+
+.cuda-tip-detail {
+  color: var(--muted);
+}
+
+.cuda-tip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cuda-tip-button {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.cuda-tip-primary {
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.cuda-tip-primary:hover {
+  filter: brightness(1.08);
+}
+
+.cuda-tip-ghost {
+  color: var(--accent);
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.cuda-tip-ghost:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.cuda-tip-dismiss {
+  color: var(--muted);
+  background: none;
+  border: 1px solid transparent;
+}
+
+.cuda-tip-dismiss:hover {
+  color: var(--text);
+}
+
+.cuda-tip-error {
+  font-size: 12px;
+  color: var(--error);
+}

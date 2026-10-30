@@ -11,8 +11,8 @@ vi.mock("../../../interop/WebViewApiClient", () => ({
   },
 }));
 
-const loading: EngineStatus = { state: "loading", modelName: "large-v3-turbo", runtime: null, downloadProgress: null, error: null };
-const ready: EngineStatus = { state: "ready", modelName: "large-v3-turbo", runtime: "Cuda", downloadProgress: null, error: null };
+const loading: EngineStatus = { state: "loading", modelName: "Whisper large-v3-turbo", runtime: null, error: null, download: null, gpu: null };
+const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
 
 /** The callback useEngineStatus registered for engine.statusChanged. */
 function changedCallback(): (status: EngineStatus) => void {

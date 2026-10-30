@@ -1,24 +1,50 @@
 import { describe, expect, it } from "vitest";
-import { NO_GPU_NOTE, describeEngineStatus, showsNoGpuNote } from "../engineStatusText";
-import type { EngineStatus } from "../../../types/domain";
+import { describeEngineStatus } from "../engineStatusText";
+import type { DownloadProgress, EngineStatus } from "../../../types/domain";
 
 function status(overrides: Partial<EngineStatus>): EngineStatus {
-  return { state: "loading", modelName: "large-v3-turbo", runtime: null, downloadProgress: null, error: null, ...overrides };
+  return { state: "loading", modelName: "Whisper large-v3-turbo", runtime: null, error: null, download: null, gpu: null, ...overrides };
+}
+
+function download(overrides: Partial<DownloadProgress>): DownloadProgress {
+  return {
+    modelName: "Whisper large-v3-turbo",
+    bytesReceived: 0,
+    totalBytes: 1_000_000_000,
+    bytesPerSecond: 0,
+    secondsRemaining: null,
+    retries: 0,
+    reconnecting: false,
+    ...overrides,
+  };
 }
 
 describe("describeEngineStatus", () => {
-  it("shows the rounded download percentage with a progress value", () => {
-    expect(describeEngineStatus(status({ state: "downloading", downloadProgress: 0.426 }))).toEqual({
-      text: "Downloading model… 43%",
+  it("shows the rounded download percentage taken from the bytes, with a progress value", () => {
+    expect(
+      describeEngineStatus(status({ state: "downloading", download: download({ bytesReceived: 380_000_000 }) })),
+    ).toEqual({
+      text: "Downloading speech model… 38%",
       tone: "progress",
-      progress: 43,
+      progress: 38,
     });
   });
 
-  it("treats a missing or out-of-range download progress as 0..100", () => {
-    expect(describeEngineStatus(status({ state: "downloading", downloadProgress: null })).text).toBe("Downloading model… 0%");
-    expect(describeEngineStatus(status({ state: "downloading", downloadProgress: 1.7 })).progress).toBe(100);
-    expect(describeEngineStatus(status({ state: "downloading", downloadProgress: -1 })).progress).toBe(0);
+  it("says Reconnecting… while the download reconnects, and keeps the bar where it was", () => {
+    const view = describeEngineStatus(
+      status({ state: "downloading", download: download({ bytesReceived: 380_000_000, retries: 1, reconnecting: true }) }),
+    );
+
+    expect(view).toEqual({ text: "Reconnecting…", tone: "progress", progress: 38 });
+  });
+
+  it("shows 0% while the download details are not known yet", () => {
+    expect(describeEngineStatus(status({ state: "downloading", download: null }))).toEqual({
+      text: "Downloading speech model… 0%",
+      tone: "progress",
+      progress: 0,
+    });
+    expect(describeEngineStatus(status({ state: "downloading", download: download({ totalBytes: 0 }) })).progress).toBe(0);
   });
 
   it("says Loading model… for loading and notStarted", () => {
@@ -27,10 +53,24 @@ describe("describeEngineStatus", () => {
     }
   });
 
-  it("names the runtime when ready, and drops the separator when it is unknown", () => {
-    expect(describeEngineStatus(status({ state: "ready", runtime: "Cuda" })).text).toBe("Ready · Cuda");
-    expect(describeEngineStatus(status({ state: "ready", runtime: null })).text).toBe("Ready");
+  it("names the runtime when ready, in capitals where it is an acronym", () => {
+    expect(describeEngineStatus(status({ state: "ready", runtime: "Cuda" })).text).toBe("Ready · CUDA");
+    expect(describeEngineStatus(status({ state: "ready", runtime: "Vulkan" })).text).toBe("Ready · Vulkan");
+    expect(describeEngineStatus(status({ state: "ready", runtime: "Cpu" })).text).toBe("Ready · CPU");
+    expect(describeEngineStatus(status({ state: "ready", runtime: "Metal" })).text).toBe("Ready · Metal");
     expect(describeEngineStatus(status({ state: "ready", runtime: "Cuda" })).tone).toBe("ready");
+  });
+
+  it("drops the separator when the runtime is unknown", () => {
+    expect(describeEngineStatus(status({ state: "ready", runtime: null })).text).toBe("Ready");
+  });
+
+  it("stays Ready, with no progress bar, while a model switch downloads", () => {
+    const view = describeEngineStatus(
+      status({ state: "ready", runtime: "Cuda", download: download({ bytesReceived: 380_000_000 }) }),
+    );
+
+    expect(view).toEqual({ text: "Ready · CUDA", tone: "ready", progress: null });
   });
 
   it("shows the error text, with a fallback when there is none", () => {
@@ -40,20 +80,5 @@ describe("describeEngineStatus", () => {
       progress: null,
     });
     expect(describeEngineStatus(status({ state: "error", error: null })).text).toBe("The speech model could not be loaded.");
-  });
-});
-
-describe("showsNoGpuNote", () => {
-  it("is true only when ready on something other than CUDA", () => {
-    expect(showsNoGpuNote(status({ state: "ready", runtime: "Vulkan" }))).toBe(true);
-    expect(showsNoGpuNote(status({ state: "ready", runtime: "Cpu" }))).toBe(true);
-    expect(showsNoGpuNote(status({ state: "ready", runtime: null }))).toBe(true);
-    expect(showsNoGpuNote(status({ state: "ready", runtime: "Cuda" }))).toBe(false);
-    expect(showsNoGpuNote(status({ state: "loading", runtime: "Vulkan" }))).toBe(false);
-    expect(showsNoGpuNote(status({ state: "error", runtime: null }))).toBe(false);
-  });
-
-  it("has the agreed wording", () => {
-    expect(NO_GPU_NOTE).toBe("Running without GPU acceleration — install CUDA 13 for faster transcription.");
   });
 });
