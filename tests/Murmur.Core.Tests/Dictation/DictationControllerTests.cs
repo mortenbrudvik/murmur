@@ -25,6 +25,9 @@ public sealed class DictationControllerTests : IDisposable
     private const int RightCtrl = 0xA3;
     private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(5);
 
+    /// <summary>How long the default hotkey (Right Ctrl, a lone modifier) is held before recording starts.</summary>
+    private static readonly TimeSpan ArmDelay = DictationTimings.Default.ArmDelay;
+
     /// <summary>300 ms of a 0.1-amplitude sine at 16 kHz: loud enough for the speech detector.</summary>
     private static readonly float[] Speech = Sine(milliseconds: 300, amplitude: 0.1f);
 
@@ -90,7 +93,7 @@ public sealed class DictationControllerTests : IDisposable
     [Fact]
     public async Task HoldAndRelease_WithSpeech_PastesAndSavesHistory()
     {
-        Down();
+        DownPastArmDelay();
         _matcher.DictationActive.ShouldBeTrue();
         _pill.Received(1).ShowListening();
 
@@ -276,9 +279,102 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     [Fact]
-    public void OtherInputWhileHeld_CancelsTheRecording()
+    public void ShortcutWithTheHotkey_NeverOpensTheMicrophone()
+    {
+        Down(); // Right Ctrl...
+        _time.Advance(ArmDelay - TimeSpan.FromMilliseconds(1));
+
+        Signal(HotkeySignal.OtherInputWhileHeld); // ...+C, just within the arm delay
+        Up();
+        _time.Advance(ArmDelay);
+
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _cues.DidNotReceive().PlayStart();
+        _pill.DidNotReceive().ShowListening();
+        _pill.ReceivedCalls().ShouldBeEmpty(); // not even a Hide, which would take down a notice the pill was showing
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped();
+    }
+
+    [Fact]
+    public void ModifierHotkey_StartsOnlyAfterTheArmDelay()
     {
         Down();
+        _time.Advance(ArmDelay - TimeSpan.FromMilliseconds(1));
+
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _pill.ReceivedCalls().ShouldBeEmpty();
+        _cues.ReceivedCalls().ShouldBeEmpty();
+        _matcher.DictationActive.ShouldBeFalse(); // so Esc still reaches the app
+        _machine.State.ShouldBe(DictationState.Armed);
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+
+        _recorder.Received(1).Start(Arg.Any<string?>());
+        _pill.Received(1).ShowListening();
+        _cues.Received(1).PlayStart();
+        _matcher.DictationActive.ShouldBeTrue();
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+    }
+
+    [Fact]
+    public void ModifierHotkey_TapWithinTheArmDelay_RecordsHandsFree()
+    {
+        Down();
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+
+        Up();
+
+        _recorder.Received(1).Start(Arg.Any<string?>());
+        _pill.Received(1).ShowListening();
+        _matcher.DictationActive.ShouldBeTrue();
+        _machine.State.ShouldBe(DictationState.HandsFreeRecording);
+
+        // The recording's 100 ms tick runs.
+        _keys.ClearReceivedCalls();
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+        _keys.Received(1).IsKeyDown(RightCtrl);
+    }
+
+    [Fact]
+    public void ModifierHotkey_ReleaseMissedWhileArmed_StartsNothingAndForgetsTheHeldKey()
+    {
+        _matcher.OnKey(new KeyInput(RightCtrl, IsDown: true, IsInjected: false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
+        Down();
+        _hotkeyDown = false; // released, but the key-up event never arrived
+
+        _time.Advance(ArmDelay);
+
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _pill.ReceivedCalls().ShouldBeEmpty();
+        _matcher.IsHotkeyHeld.ShouldBeFalse();
+        _machine.State.ShouldBe(DictationState.Idle);
+        AssertTimerStopped();
+    }
+
+    [Fact]
+    public void ArmTickBeforeTheDelayIsUp_StartsAtTheNextPoll()
+    {
+        // A real timer can fire up to a clock tick (15.6 ms) early by the clock the press is timed with. Stamping the
+        // press 5 ms after the timer starts counting has the same effect: the first poll comes 5 ms too soon.
+        _hotkeyDown = true;
+        Controller.HandleSignal(HotkeySignal.HotkeyDown, _time.GetUtcNow() + TimeSpan.FromMilliseconds(5));
+
+        _time.Advance(ArmDelay);
+        _machine.State.ShouldBe(DictationState.Armed);
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+
+        // The next poll follows within a few milliseconds, not a whole 100 ms tick later.
+        _time.Advance(TimeSpan.FromMilliseconds(10));
+        _recorder.Received(1).Start(Arg.Any<string?>());
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+    }
+
+    [Fact]
+    public void OtherInputWhileHeld_CancelsTheRecording()
+    {
+        DownPastArmDelay();
 
         Signal(HotkeySignal.OtherInputWhileHeld);
 
@@ -329,7 +425,7 @@ public sealed class DictationControllerTests : IDisposable
         HoldAndRelease();
         var first = Controller.CurrentWork;
         Signal(HotkeySignal.Escape);
-        Down(); // a new recording starts while the first transcription is still running
+        DownPastArmDelay(); // a new recording starts while the first transcription is still running
         _pill.ClearReceivedCalls();
         _cues.ClearReceivedCalls();
 
@@ -421,7 +517,7 @@ public sealed class DictationControllerTests : IDisposable
         _matcher.DictationActive.ShouldBeFalse();
 
         // A press straight after the paste starts a new recording.
-        Down();
+        DownPastArmDelay();
         _machine.State.ShouldBe(DictationState.HoldRecording);
         _recorder.Received(2).Start(Arg.Any<string?>());
         _pill.Received(2).ShowListening();
@@ -472,7 +568,7 @@ public sealed class DictationControllerTests : IDisposable
         _chunksOnStart = [];
         _recorder.When(r => r.Start(Arg.Any<string?>())).Do(_ => throw new AudioDeviceException("No microphone"));
 
-        Down();
+        DownPastArmDelay();
 
         Received.InOrder(() =>
         {
@@ -486,7 +582,7 @@ public sealed class DictationControllerTests : IDisposable
         Up();
         _recorder.DidNotReceive().Stop();
 
-        Down();
+        DownPastArmDelay();
         _recorder.Received(2).Start(Arg.Any<string?>());
     }
 
@@ -495,7 +591,7 @@ public sealed class DictationControllerTests : IDisposable
     {
         _settings.Load().Returns(MurmurSettings.Default with { MicrophoneId = "mic-2" });
 
-        Down();
+        DownPastArmDelay();
 
         _recorder.Received(1).Start("mic-2");
     }
@@ -507,7 +603,7 @@ public sealed class DictationControllerTests : IDisposable
         _controller = Create(ui);
         var mic = OpenSlowly();
 
-        ui.Run(Down); // returns while the microphone is still opening
+        DownPastArmDelay(ui); // returns while the microphone is still opening
 
         mic.WaitUntilOpening();
         mic.StartContext.ShouldNotBeSameAs(ui);
@@ -529,7 +625,7 @@ public sealed class DictationControllerTests : IDisposable
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly();
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
 
         ui.Run(() => Signal(HotkeySignal.Escape));
@@ -543,7 +639,7 @@ public sealed class DictationControllerTests : IDisposable
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly();
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
 
         ui.Run(() => Signal(HotkeySignal.OtherInputWhileHeld));
@@ -557,7 +653,7 @@ public sealed class DictationControllerTests : IDisposable
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly();
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
         RaiseSamples(Speech); // the capture thread can deliver audio before Start has returned
         ui.RunPending();
@@ -594,7 +690,7 @@ public sealed class DictationControllerTests : IDisposable
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly();
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
         _time.Advance(TimeSpan.FromMilliseconds(800));
         ui.RunPending();
@@ -630,7 +726,7 @@ public sealed class DictationControllerTests : IDisposable
             throw new AudioDeviceException("No microphone");
         });
 
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
 
         contextDuringOpen.ShouldNotBeSameAs(ui);
@@ -648,7 +744,7 @@ public sealed class DictationControllerTests : IDisposable
         ui.Run(Up);
         _recorder.DidNotReceive().Stop();
 
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
         _recorder.Received(2).Start(Arg.Any<string?>());
     }
@@ -660,7 +756,7 @@ public sealed class DictationControllerTests : IDisposable
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly(failure: new AudioDeviceException("No microphone"));
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
         _time.Advance(TimeSpan.FromMilliseconds(800));
         ui.RunPending();
@@ -688,11 +784,11 @@ public sealed class DictationControllerTests : IDisposable
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly();
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
 
         ui.Run(() => Signal(HotkeySignal.Escape));
-        ui.Run(Down); // pressed again before the first microphone has finished opening
+        DownPastArmDelay(ui); // pressed again before the first microphone has finished opening
 
         _recorder.Received(1).Start(Arg.Any<string?>()); // the recorder takes one recording at a time
         _pill.Received(2).ShowListening();
@@ -726,12 +822,48 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task FaultedOpen_DoesNotStopTheNextDictation()
+    {
+        using var logs = new LogCapture();
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        var mic = OpenSlowly();
+        var bug = new InvalidOperationException("A bug in the open's continuation");
+        var cancels = 0;
+        _recorder.When(r => r.Cancel()).Do(_ =>
+        {
+            if (Interlocked.Increment(ref cancels) == 1)
+                throw bug; // the first open faults as it releases the microphone of the press Esc ended
+        });
+        DownPastArmDelay(ui);
+        mic.WaitUntilOpening();
+        ui.Run(() => Signal(HotkeySignal.Escape));
+        DownPastArmDelay(ui); // the next open waits for the one that is about to fault
+
+        mic.Open();
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+
+        _recorder.Received(2).Start(Arg.Any<string?>());
+        mic.Recordings.ShouldBe(1);
+        logs.Events.ShouldContain(e => e.Level == LogEventLevel.Error && e.Exception == bug);
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        ui.RunPending();
+        ui.Run(Up);
+        await ui.RunUntilCompleteAsync(Controller.CurrentWork, WaitLimit);
+
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        logs.Outcomes.ShouldBe(["cancelled", "pasted"]);
+    }
+
+    [Fact]
     public async Task DisposeWhileTheMicrophoneOpens_ReleasesItOnceOpen()
     {
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly();
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
 
         ui.Run(Controller.Dispose);
@@ -755,11 +887,11 @@ public sealed class DictationControllerTests : IDisposable
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
         var mic = OpenSlowly();
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         mic.WaitUntilOpening();
-        _time.Advance(TimeSpan.FromMilliseconds(150));
+        _time.Advance(TimeSpan.FromMilliseconds(50));
 
-        ui.Run(Up);
+        ui.Run(Up); // 200 ms after the press: a tap
 
         _machine.State.ShouldBe(DictationState.HandsFreeRecording);
         mic.Open();
@@ -776,13 +908,13 @@ public sealed class DictationControllerTests : IDisposable
     {
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
-        _time.Advance(TimeSpan.FromMilliseconds(150));
+        _time.Advance(TimeSpan.FromMilliseconds(100));
         ui.RunPending(); // the 100 ms tick: still held
 
         _hotkeyDown = false;
-        var releasedAt = _time.GetUtcNow(); // the hook stamps the release (a tap)...
+        var releasedAt = _time.GetUtcNow(); // the hook stamps the release 250 ms after the press (a tap)...
         _time.Advance(TimeSpan.FromMilliseconds(400)); // ...but the UI thread is busy for another 400 ms
         ui.Run(() => Controller.HandleSignal(HotkeySignal.HotkeyUp, releasedAt));
         ui.RunPending(); // the ticks that queued up behind it
@@ -794,7 +926,7 @@ public sealed class DictationControllerTests : IDisposable
     [Fact]
     public void CaptureFailedWhileRecording_ShowsMicNoticeAndReturnsIdle()
     {
-        Down();
+        DownPastArmDelay();
 
         RaiseCaptureFailed();
 
@@ -807,7 +939,7 @@ public sealed class DictationControllerTests : IDisposable
         _recorder.DidNotReceive().Stop();
         _ = _engine.DidNotReceiveWithAnyArgs().TranscribeAsync(default!, default!, Ct);
 
-        Down();
+        DownPastArmDelay();
         _recorder.Received(2).Start(Arg.Any<string?>());
     }
 
@@ -1058,7 +1190,7 @@ public sealed class DictationControllerTests : IDisposable
     {
         _chunksOnStart = [];
 
-        Down();
+        DownPastArmDelay();
         _cues.DidNotReceive().PlayStart(); // the mic is not live yet (a Bluetooth headset takes about a second)
 
         RaiseSamples(Speech);
@@ -1075,7 +1207,7 @@ public sealed class DictationControllerTests : IDisposable
         });
         await Finished();
 
-        Down();
+        DownPastArmDelay();
         _cues.Received(1).PlayStart();
         RaiseSamples(Speech);
         _cues.Received(2).PlayStart();
@@ -1086,7 +1218,7 @@ public sealed class DictationControllerTests : IDisposable
     {
         _chunksOnStart = [Sine(milliseconds: 30, amplitude: 1f), Sine(milliseconds: 30, amplitude: 0.01f)];
 
-        Down();
+        DownPastArmDelay();
 
         _pill.Received(1).PushLevel(Arg.Is<float>(db => Math.Abs(db - -3.01f) < 0.05f));
         _pill.Received(1).PushLevel(Arg.Is<float>(db => Math.Abs(db - -43.01f) < 0.05f));
@@ -1120,6 +1252,7 @@ public sealed class DictationControllerTests : IDisposable
         _matcher.OnKey(new KeyInput(vkLeftAlt, true, false));
         _matcher.OnKey(new KeyInput(vkD, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
         Signal(HotkeySignal.HotkeyDown);
+        _recorder.Received(1).Start(Arg.Any<string?>()); // no arm delay: the combo is swallowed, so it is no app's shortcut
 
         _time.Advance(TimeSpan.FromMilliseconds(800));
 
@@ -1139,7 +1272,7 @@ public sealed class DictationControllerTests : IDisposable
         _chunksOnStart = [];
         var ui = new QueueSynchronizationContext();
         _controller = Create(ui);
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
 
         RaiseSamples(Speech); // as the capture thread would
@@ -1175,7 +1308,7 @@ public sealed class DictationControllerTests : IDisposable
             return new InsertResult(InsertOutcome.Pasted, "Notepad");
         });
 
-        ui.Run(Down);
+        DownPastArmDelay(ui);
         await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit); // and the chunk raised as it opened
         _time.Advance(TimeSpan.FromMilliseconds(800));
         ui.RunPending();
@@ -1192,7 +1325,7 @@ public sealed class DictationControllerTests : IDisposable
     [Fact]
     public void Dispose_CancelsTheRecordingAndStopsListening()
     {
-        Down();
+        DownPastArmDelay();
 
         Controller.Dispose();
 
@@ -1240,6 +1373,23 @@ public sealed class DictationControllerTests : IDisposable
         Signal(HotkeySignal.HotkeyUp);
     }
 
+    /// <summary>Hotkey pressed and held through the arm delay: the tick has started the recording.</summary>
+    private void DownPastArmDelay()
+    {
+        Down();
+        _time.Advance(ArmDelay);
+    }
+
+    /// <summary>
+    /// As <see cref="DownPastArmDelay()"/>, with the press and the tick that starts the recording run on <paramref name="ui"/>.
+    /// </summary>
+    private void DownPastArmDelay(QueueSynchronizationContext ui)
+    {
+        ui.Run(Down);
+        _time.Advance(ArmDelay);
+        ui.RunPending();
+    }
+
     /// <summary>
     /// Makes announcing a history entry wait for <paramref name="publish"/>; the returned task completes once the
     /// announcement has started.
@@ -1257,7 +1407,7 @@ public sealed class DictationControllerTests : IDisposable
         return started.Task;
     }
 
-    /// <summary>Hold for 800 ms, then release: the controller stops and transcribes.</summary>
+    /// <summary>Hold for 800 ms (recording starts after the arm delay), then release: the controller stops and transcribes.</summary>
     private void HoldAndRelease()
     {
         Down();
@@ -1265,11 +1415,11 @@ public sealed class DictationControllerTests : IDisposable
         Up();
     }
 
-    /// <summary>Press for 150 ms: a tap, which starts hands-free recording.</summary>
+    /// <summary>Press for 100 ms: a tap, released within the arm delay, which starts hands-free recording.</summary>
     private void Tap()
     {
         Down();
-        _time.Advance(TimeSpan.FromMilliseconds(150));
+        _time.Advance(TimeSpan.FromMilliseconds(100));
         Up();
     }
 

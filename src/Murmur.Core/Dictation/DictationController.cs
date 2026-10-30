@@ -49,6 +49,13 @@ public sealed class DictationController : IDisposable
 
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(100);
 
+    /// <summary>
+    /// While armed, how often the tick polls once the arm delay is up. A timer can fire up to a clock tick (15.6 ms) early
+    /// by the clock the press is timed with, so the first poll can come just before the delay is over; waiting a whole
+    /// <see cref="TickInterval"/> for the next one would hold the start back by another 100 ms.
+    /// </summary>
+    private static readonly TimeSpan ArmPollInterval = TimeSpan.FromMilliseconds(10);
+
     private readonly ILogger _logger = Log.ForContext<DictationController>();
     private readonly DictationStateMachine _machine;
     private readonly HotkeyMatcher _matcher;
@@ -68,8 +75,8 @@ public sealed class DictationController : IDisposable
     private readonly SynchronizationContext? _context;
     private readonly SpeechDetector _detector = new();
 
-    // Identifies the current dictation. Bumped when one starts and when one is abandoned (Esc, microphone failure),
-    // so recorder events, ticks and completions that belong to an older one recognise themselves as stale.
+    // Identifies the current dictation. Bumped when one arms, when it starts and when it is abandoned (Esc, microphone
+    // failure), so recorder events, ticks and completions that belong to an older one recognise themselves as stale.
     private int _generation;
 
     // The dictation the recorder's recording belongs to: set before each open, read on the capture thread to tag its
@@ -83,7 +90,8 @@ public sealed class DictationController : IDisposable
     private bool _micLive;
 
     // The microphone open in flight (Start on the thread pool, then the rest back on this thread), or a completed task.
-    // Never faults. The next open waits for it, because the recorder takes one recording at a time, and so does a stop.
+    // Never meant to fault. The next open waits for it, because the recorder takes one recording at a time, and so does a
+    // stop; both through WaitForOpenAsync, so that a fault (a bug) cannot stop every later dictation.
     private Task _opening = Task.CompletedTask;
 
     // The recorder's Start of the latest open, on the thread pool. Dispose releases the microphone from there.
@@ -130,7 +138,8 @@ public sealed class DictationController : IDisposable
     public Task CurrentWork { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    /// The microphone open in flight, or a completed task. It finishes on the UI thread and never faults. Tests wait for it.
+    /// The microphone open in flight, or a completed task. It finishes on the UI thread and is not meant to fault. Tests
+    /// wait for it.
     /// </summary>
     internal Task MicrophoneOpening => _opening;
 
@@ -149,7 +158,7 @@ public sealed class DictationController : IDisposable
         var status = _engine.Status;
         var action = signal switch
         {
-            HotkeySignal.HotkeyDown => _machine.OnHotkeyDown(at, _engine.CanTranscribe),
+            HotkeySignal.HotkeyDown => _machine.OnHotkeyDown(at, _engine.CanTranscribe, _matcher.Hotkey.IsModifierOnly),
             HotkeySignal.HotkeyUp => _machine.OnHotkeyUp(at),
             HotkeySignal.OtherInputWhileHeld => _machine.OnOtherInputWhileHeld(),
             HotkeySignal.Escape => _machine.OnEscape(),
@@ -208,8 +217,12 @@ public sealed class DictationController : IDisposable
     {
         switch (action)
         {
+            case DictationAction.Arm:
+                Arm();
+                break;
             case DictationAction.StartRecording:
-                StartRecording(at);
+                // Timed from the press, also when recording starts only after the arm delay or on a tap's release.
+                StartRecording(_machine.PressedAt);
                 break;
             case DictationAction.StopAndPaste:
                 StopRecording(paste: true, at);
@@ -221,7 +234,23 @@ public sealed class DictationController : IDisposable
                 Abandon();
                 _pill.Hide();
                 break;
+            case DictationAction.None when !_machine.IsActive:
+                // An armed press that came to nothing (a shortcut, Esc, or a release only the tick saw) started nothing
+                // but its tick. Otherwise there is nothing running while idle, and this does nothing.
+                EndDictation();
+                break;
         }
+    }
+
+    /// <summary>
+    /// A lone-modifier hotkey went down. It may be the start of another app's shortcut (Right Ctrl+C), so nothing starts
+    /// yet: no pill, no microphone, no cue, and Esc still reaches the app. Only the tick runs, from when the arm delay is
+    /// up; another key, a release or the tick then decides.
+    /// </summary>
+    private void Arm()
+    {
+        var generation = Interlocked.Increment(ref _generation);
+        StartTicking(generation, _machine.Timings.ArmDelay, ArmPollInterval);
     }
 
     private void StartRecording(DateTimeOffset pressedAt)
@@ -242,13 +271,21 @@ public sealed class DictationController : IDisposable
 
         // Polls while the microphone opens too (a missed release); not when the open has already failed.
         if (IsCurrent(generation))
-            _timer = _time.CreateTimer(_ => Dispatch(() => OnTick(generation)), null, TickInterval, TickInterval);
+            StartTicking(generation, TickInterval, TickInterval);
+    }
+
+    /// <summary>Starts polling for dictation <paramref name="generation"/>, in place of an armed press's poll.</summary>
+    private void StartTicking(int generation, TimeSpan dueTime, TimeSpan period)
+    {
+        _timer?.Dispose();
+        _timer = _time.CreateTimer(_ => Dispatch(() => OnTick(generation)), null, dueTime, period);
     }
 
     /// <summary>
     /// Opens the microphone for dictation <paramref name="generation"/> on the thread pool and finishes on the UI thread.
     /// What ends a dictation while its microphone opens leaves the microphone to this method (Esc, a combo key, a
-    /// capture failure: it cancels the recording once open) or to the stop that waits for it (a release). Never faults.
+    /// capture failure: it cancels the recording once open) or to the stop that waits for it (a release). Not meant to
+    /// fault.
     /// </summary>
     /// <param name="previous">
     /// The previous open. The recorder takes one recording at a time, so after Esc and a quick re-press this waits for the
@@ -256,7 +293,7 @@ public sealed class DictationController : IDisposable
     /// </param>
     private async Task OpenMicrophoneAsync(int generation, string? microphoneId, Task previous)
     {
-        await previous;
+        await WaitForOpenAsync(previous);
         if (!IsCurrent(generation))
             return; // ended before its turn came: nothing to open
 
@@ -294,6 +331,23 @@ public sealed class DictationController : IDisposable
 
         // Esc or a combo key while it opened, or the microphone failed already (then this is a no-op).
         _recorder.Cancel();
+    }
+
+    /// <summary>
+    /// Waits for a microphone open to finish. An open is not meant to fault, but every later open and every stop waits for
+    /// the one before, so a fault (a bug) would end dictation until Murmur restarts: it is logged here instead of rethrown.
+    /// An open that has finished already continues at once.
+    /// </summary>
+    private async Task WaitForOpenAsync(Task opening)
+    {
+        try
+        {
+            await opening;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Opening the microphone failed unexpectedly");
+        }
     }
 
     /// <summary>
@@ -431,7 +485,7 @@ public sealed class DictationController : IDisposable
         {
             // Not Stop while the open is running: Stop waits for it, and this is the UI thread. Already open, this
             // continues at once.
-            await opening;
+            await WaitForOpenAsync(opening);
             if (!IsCurrent(generation))
             {
                 outcome = CancelledOutcome; // Esc while it opened: Abandon or the open released the microphone

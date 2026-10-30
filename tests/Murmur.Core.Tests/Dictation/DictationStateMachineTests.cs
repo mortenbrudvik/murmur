@@ -11,11 +11,13 @@ public sealed class DictationStateMachineTests
 
     private static DictationStateMachine NewMachine() => new(DictationTimings.Default);
 
+    // Unless a test says otherwise, presses are of a combo hotkey, which starts recording at once.
+
     /// <summary>Press at t0 and release after 800 ms: a hold, so the machine ends up Transcribing.</summary>
     private static DictationStateMachine HoldAndRelease()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
         sm.OnHotkeyUp(Ms(800));
         return sm;
     }
@@ -24,8 +26,17 @@ public sealed class DictationStateMachineTests
     private static DictationStateMachine Tap()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
         sm.OnHotkeyUp(Ms(150));
+        return sm;
+    }
+
+    /// <summary>A lone-modifier hotkey (Right Ctrl) pressed at t0: armed, nothing started yet.</summary>
+    private static DictationStateMachine Armed()
+    {
+        var sm = NewMachine();
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: true).ShouldBe(DictationAction.Arm);
+        sm.State.ShouldBe(DictationState.Armed);
         return sm;
     }
 
@@ -35,6 +46,122 @@ public sealed class DictationStateMachineTests
         DictationTimings.Default.TapThreshold.ShouldBe(TimeSpan.FromMilliseconds(300));
         DictationTimings.Default.StrayTapTimeout.ShouldBe(TimeSpan.FromSeconds(8));
         DictationTimings.Default.HandsFreeLimit.ShouldBe(TimeSpan.FromMinutes(10));
+        DictationTimings.Default.ArmDelay.ShouldBe(TimeSpan.FromMilliseconds(150));
+
+        // A release while armed is always a tap.
+        DictationTimings.Default.ArmDelay.ShouldBeLessThan(DictationTimings.Default.TapThreshold);
+    }
+
+    [Fact]
+    public void ComboHotkey_StartsAtOnce()
+    {
+        var sm = NewMachine();
+
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false).ShouldBe(DictationAction.StartRecording);
+        sm.State.ShouldBe(DictationState.HoldRecording);
+    }
+
+    [Fact]
+    public void ModifierHotkey_Pressed_ArmsWithoutStarting()
+    {
+        var sm = NewMachine();
+
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: true).ShouldBe(DictationAction.Arm);
+        sm.State.ShouldBe(DictationState.Armed);
+        sm.IsActive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ModifierHotkey_OtherInputWithinArmDelay_GoesIdleWithoutStarting()
+    {
+        var sm = Armed();
+        sm.OnTick(Ms(100), hotkeyPhysicallyDown: true).ShouldBe(DictationAction.None);
+
+        sm.OnOtherInputWhileHeld().ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.Idle);
+
+        // The shortcut's own release, and the polls after it, start nothing either.
+        sm.OnHotkeyUp(Ms(200)).ShouldBe(DictationAction.None);
+        sm.OnTick(Ms(300), hotkeyPhysicallyDown: false).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public void ModifierHotkey_HeldPastArmDelay_StartsRecording()
+    {
+        var sm = Armed();
+
+        sm.OnTick(Ms(149), hotkeyPhysicallyDown: true).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.Armed);
+        sm.OnTick(Ms(150), hotkeyPhysicallyDown: true).ShouldBe(DictationAction.StartRecording);
+        sm.State.ShouldBe(DictationState.HoldRecording);
+
+        sm.OnHotkeyUp(Ms(800)).ShouldBe(DictationAction.StopAndPaste);
+        sm.State.ShouldBe(DictationState.Transcribing);
+    }
+
+    [Fact]
+    public void ModifierHotkey_ReleasedWithinArmDelay_StartsHandsFree()
+    {
+        var sm = Armed();
+
+        sm.OnHotkeyUp(Ms(100)).ShouldBe(DictationAction.StartRecording);
+        sm.State.ShouldBe(DictationState.HandsFreeRecording);
+
+        // The hands-free timers run from the press.
+        sm.OnTick(Ms(7999), hotkeyPhysicallyDown: false).ShouldBe(DictationAction.None);
+        sm.OnTick(Ms(8000), hotkeyPhysicallyDown: false).ShouldBe(DictationAction.Cancel);
+    }
+
+    [Fact]
+    public void ModifierHotkey_ReleasedAfterArmDelayButBeforeTapThreshold_IsATap()
+    {
+        var sm = Armed();
+        sm.OnTick(Ms(150), hotkeyPhysicallyDown: true).ShouldBe(DictationAction.StartRecording);
+
+        sm.OnHotkeyUp(Ms(250)).ShouldBe(DictationAction.None); // timed from the press, not from the start
+        sm.State.ShouldBe(DictationState.HandsFreeRecording);
+    }
+
+    [Fact]
+    public void ModifierHotkey_ReleaseMissedWhileArmed_GoesIdleWithoutStarting()
+    {
+        var sm = Armed();
+
+        sm.OnTick(Ms(150), hotkeyPhysicallyDown: false).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public void ModifierHotkey_EscapeWhileArmed_GoesIdleWithoutCancelling()
+    {
+        var sm = Armed();
+
+        sm.OnEscape().ShouldBe(DictationAction.None); // nothing was started, so there is nothing to cancel
+        sm.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public void ModifierHotkey_SpeechWhileArmed_IsIgnored()
+    {
+        var sm = Armed();
+
+        sm.OnSpeechDetected();
+
+        sm.SpeechSeen.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HandsFree_SecondTap_StopsWithoutArming()
+    {
+        var sm = Armed();
+        sm.OnHotkeyUp(Ms(100)).ShouldBe(DictationAction.StartRecording);
+
+        sm.OnHotkeyDown(Ms(3000), engineReady: true, modifierOnly: true).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.HandsFreeRecording);
+        sm.OnTick(Ms(3200), hotkeyPhysicallyDown: true).ShouldBe(DictationAction.None); // past the arm delay: no start
+        sm.OnHotkeyUp(Ms(3300)).ShouldBe(DictationAction.StopAndPaste);
+        sm.State.ShouldBe(DictationState.Transcribing);
     }
 
     [Fact]
@@ -52,7 +179,7 @@ public sealed class DictationStateMachineTests
     {
         var sm = NewMachine();
 
-        sm.OnHotkeyDown(T0, engineReady: true).ShouldBe(DictationAction.StartRecording);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false).ShouldBe(DictationAction.StartRecording);
         sm.State.ShouldBe(DictationState.HoldRecording);
         sm.OnHotkeyUp(Ms(800)).ShouldBe(DictationAction.StopAndPaste);
         sm.State.ShouldBe(DictationState.Transcribing);
@@ -62,7 +189,7 @@ public sealed class DictationStateMachineTests
     public void Hold_ReleasedExactlyAtThreshold_IsAHold()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnHotkeyUp(Ms(300)).ShouldBe(DictationAction.StopAndPaste);
         sm.State.ShouldBe(DictationState.Transcribing);
@@ -72,7 +199,7 @@ public sealed class DictationStateMachineTests
     public void Tap_StartsHandsFree()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnHotkeyUp(Ms(150)).ShouldBe(DictationAction.None);
         sm.State.ShouldBe(DictationState.HandsFreeRecording);
@@ -83,7 +210,7 @@ public sealed class DictationStateMachineTests
     public void Tap_ReleasedJustBeforeThreshold_IsATap()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnHotkeyUp(Ms(299)).ShouldBe(DictationAction.None);
         sm.State.ShouldBe(DictationState.HandsFreeRecording);
@@ -94,7 +221,7 @@ public sealed class DictationStateMachineTests
     {
         var sm = Tap();
 
-        sm.OnHotkeyDown(Ms(3000), engineReady: true).ShouldBe(DictationAction.None);
+        sm.OnHotkeyDown(Ms(3000), engineReady: true, modifierOnly: false).ShouldBe(DictationAction.None);
         sm.OnHotkeyUp(Ms(3100)).ShouldBe(DictationAction.StopAndPaste);
         sm.State.ShouldBe(DictationState.Transcribing);
     }
@@ -104,7 +231,7 @@ public sealed class DictationStateMachineTests
     {
         var sm = Tap();
 
-        sm.OnHotkeyDown(Ms(3000), engineReady: true);
+        sm.OnHotkeyDown(Ms(3000), engineReady: true, modifierOnly: false);
         sm.OnOtherInputWhileHeld().ShouldBe(DictationAction.None);
 
         sm.OnHotkeyUp(Ms(3100)).ShouldBe(DictationAction.None);
@@ -124,7 +251,7 @@ public sealed class DictationStateMachineTests
     public void HandsFree_MissedSecondRelease_TickRecovers()
     {
         var sm = Tap();
-        sm.OnHotkeyDown(Ms(3000), engineReady: true);
+        sm.OnHotkeyDown(Ms(3000), engineReady: true, modifierOnly: false);
 
         sm.OnTick(Ms(3500), hotkeyPhysicallyDown: true).ShouldBe(DictationAction.None);
         sm.OnTick(Ms(3600), hotkeyPhysicallyDown: false).ShouldBe(DictationAction.StopAndPaste);
@@ -185,7 +312,7 @@ public sealed class DictationStateMachineTests
     public void Hold_OtherInputWhileHeld_Cancels()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnOtherInputWhileHeld().ShouldBe(DictationAction.Cancel);
         sm.State.ShouldBe(DictationState.Idle);
@@ -195,7 +322,7 @@ public sealed class DictationStateMachineTests
     public void Hold_MissedRelease_TickRecovers()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnTick(Ms(900), hotkeyPhysicallyDown: false).ShouldBe(DictationAction.StopAndPaste);
         sm.State.ShouldBe(DictationState.Transcribing);
@@ -205,7 +332,7 @@ public sealed class DictationStateMachineTests
     public void Hold_MissedRelease_TickWithinTapThreshold_StartsHandsFree()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnTick(Ms(100), hotkeyPhysicallyDown: false).ShouldBe(DictationAction.None);
         sm.State.ShouldBe(DictationState.HandsFreeRecording);
@@ -215,7 +342,7 @@ public sealed class DictationStateMachineTests
     public void Hold_TickWhileStillHeld_DoesNothing()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnTick(Ms(900), hotkeyPhysicallyDown: true).ShouldBe(DictationAction.None);
         sm.State.ShouldBe(DictationState.HoldRecording);
@@ -225,7 +352,7 @@ public sealed class DictationStateMachineTests
     public void Escape_WhileRecording_Cancels()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnEscape().ShouldBe(DictationAction.Cancel);
         sm.State.ShouldBe(DictationState.Idle);
@@ -258,12 +385,14 @@ public sealed class DictationStateMachineTests
         sm.State.ShouldBe(DictationState.Idle);
     }
 
-    [Fact]
-    public void EngineNotReady_NotifiesAndStaysIdle()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EngineNotReady_NotifiesAndStaysIdle(bool modifierOnly)
     {
         var sm = NewMachine();
 
-        sm.OnHotkeyDown(T0, engineReady: false).ShouldBe(DictationAction.NotifyNotReady);
+        sm.OnHotkeyDown(T0, engineReady: false, modifierOnly).ShouldBe(DictationAction.NotifyNotReady);
         sm.State.ShouldBe(DictationState.Idle);
         sm.IsActive.ShouldBeFalse();
     }
@@ -273,7 +402,7 @@ public sealed class DictationStateMachineTests
     {
         var sm = HoldAndRelease();
 
-        sm.OnHotkeyDown(Ms(900), engineReady: true).ShouldBe(DictationAction.None);
+        sm.OnHotkeyDown(Ms(900), engineReady: true, modifierOnly: false).ShouldBe(DictationAction.None);
         sm.State.ShouldBe(DictationState.Transcribing);
     }
 
@@ -316,7 +445,7 @@ public sealed class DictationStateMachineTests
     {
         // A stale completion (e.g. from a transcription cancelled with Esc) must not end a newer recording.
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
 
         sm.OnTranscriptionFinished();
 
@@ -333,7 +462,7 @@ public sealed class DictationStateMachineTests
         sm.SpeechSeen.ShouldBeTrue();
 
         sm.OnEscape();
-        sm.OnHotkeyDown(Ms(20_000), engineReady: true);
+        sm.OnHotkeyDown(Ms(20_000), engineReady: true, modifierOnly: false);
         sm.SpeechSeen.ShouldBeFalse();
     }
 
@@ -341,7 +470,7 @@ public sealed class DictationStateMachineTests
     public void Reset_ReturnsToIdle_AndClearsFlags()
     {
         var sm = NewMachine();
-        sm.OnHotkeyDown(T0, engineReady: true);
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
         sm.OnSpeechDetected();
 
         sm.Reset();
