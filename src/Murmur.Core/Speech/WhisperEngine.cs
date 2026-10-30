@@ -46,7 +46,10 @@ public sealed class WhisperEngine(
     /// <summary>Held by a transcription while it uses the loaded model, and by an operation while it swaps the model.</summary>
     private readonly SemaphoreSlim _modelGate = new(1, 1);
 
-    /// <summary>Makes saving a requested model and restoring the previous one after a failed switch mutually exclusive.</summary>
+    /// <summary>
+    /// Makes saving a requested model, restoring the previous one after a failed switch and checking that a switch is
+    /// for the newest choice mutually exclusive.
+    /// </summary>
     private readonly Lock _choiceLock = new();
 
     /// <summary>Cancelled by <see cref="Dispose"/>; every operation's token is linked to it.</summary>
@@ -61,7 +64,8 @@ public sealed class WhisperEngine(
     private CancellationToken _lifetime;
     private bool _started;
 
-    // Under _choiceLock: counts the requested choices, so a failed switch only restores the choice it replaced.
+    // Under _choiceLock: counts the requested choices, so only the newest one is switched to and a failed switch only
+    // restores the choice it replaced.
     private int _choiceVersion;
 
     // Written by the first operation; operations never overlap, so later ones read it without a lock.
@@ -110,23 +114,7 @@ public sealed class WhisperEngine(
         if (!TrySaveChoice(model, out var target, out var choiceVersion))
             return;
 
-        Task switching;
-        await _operationGate.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            switching = await BeginSwitchAsync(target, choiceVersion).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Could not start switching the speech model to {Model}", target.DisplayName);
-            return;
-        }
-        finally
-        {
-            _operationGate.Release();
-        }
-
-        await switching.ConfigureAwait(false);
+        await SwitchToChoiceAsync(target, choiceVersion).ConfigureAwait(false);
     }
 
     public async Task<TranscriptionResult> TranscribeAsync(float[] samples16kMono, string prompt, CancellationToken ct)
@@ -190,7 +178,11 @@ public sealed class WhisperEngine(
 
     private static string Gigabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1e9:0.0} GB");
 
-    private bool TrySaveChoice(SpeechModelId model, out SpeechModelInfo target, out int choiceVersion)
+    /// <summary>
+    /// The first half of <see cref="SwitchModelAsync"/>: saves <paramref name="model"/> as the choice and numbers it.
+    /// Internal, with <see cref="SwitchToChoiceAsync"/>, so a test can interleave two switches the way the thread pool can.
+    /// </summary>
+    internal bool TrySaveChoice(SpeechModelId model, out SpeechModelInfo target, out int choiceVersion)
     {
         try
         {
@@ -213,6 +205,28 @@ public sealed class WhisperEngine(
         }
     }
 
+    /// <summary>The second half of <see cref="SwitchModelAsync"/>: switches to a choice <see cref="TrySaveChoice"/> saved.</summary>
+    internal async Task SwitchToChoiceAsync(SpeechModelInfo target, int choiceVersion)
+    {
+        Task switching;
+        await _operationGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            switching = await BeginSwitchAsync(target, choiceVersion).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not start switching the speech model to {Model}", target.DisplayName);
+            return;
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+
+        await switching.ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Under <see cref="_operationGate"/>: cancels and awaits the running operation, deletes the partial download it
     /// leaves behind, and starts the operation that ends on <paramref name="target"/>, if any.
@@ -222,6 +236,19 @@ public sealed class WhisperEngine(
         // Before InitializeAsync, the saved choice is all it takes: that is the model it loads.
         if (IsDisposed || !_started || _lifetime.IsCancellationRequested)
             return Task.CompletedTask;
+
+        // A newer choice was saved while this request waited for the gate (requests run on the thread pool, so it may
+        // even have switched already). Its request switches to it; switching to this one now would leave a model
+        // running that is not the saved choice.
+        bool superseded;
+        lock (_choiceLock)
+            superseded = choiceVersion != _choiceVersion;
+
+        if (superseded)
+        {
+            _logger.Information("Not switching the speech model to {Model}: a newer choice was made", target.DisplayName);
+            return Task.CompletedTask;
+        }
 
         var previous = _operation;
         if (previous is not null)

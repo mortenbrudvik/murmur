@@ -520,6 +520,44 @@ public sealed class WhisperEngineTests : IDisposable
         switching.IsCompleted.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// ApiBridge runs each request on the thread pool, so a request can save its choice and then reach the operation
+    /// gate after a later request. Running the older switch last would leave a model running that is not the choice.
+    /// </summary>
+    [Fact]
+    public async Task SwitchModelAsync_OlderChoiceReachesTheGateLast_EndsOnTheNewerChoice()
+    {
+        await ReadyOnLargeAsync();
+        _engine.TrySaveChoice(SpeechModelId.LargeV3Turbo, out var large, out var largeVersion).ShouldBeTrue();
+        _engine.TrySaveChoice(SpeechModelId.SmallEn, out var small, out var smallVersion).ShouldBeTrue();
+
+        await _engine.SwitchToChoiceAsync(small, smallVersion).WaitAsync(Patience, Ct);
+        await _engine.SwitchToChoiceAsync(large, largeVersion).WaitAsync(Patience, Ct);
+
+        _stored.SpeechModel.ShouldBe(SpeechModelId.SmallEn);
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Small);
+        _loader.LoadCount.ShouldBe(2);
+        (await _engine.TranscribeAsync(Speech(), "", Ct)).Text.ShouldBe("from ggml-small.en.bin");
+    }
+
+    [Fact]
+    public async Task SwitchModelAsync_OlderSwitchAwayReachesTheGateLast_StaysOnTheNewerChoice()
+    {
+        await ReadyOnLargeAsync();
+        _engine.TrySaveChoice(SpeechModelId.SmallEn, out var small, out var smallVersion).ShouldBeTrue();
+        _engine.TrySaveChoice(SpeechModelId.LargeV3Turbo, out var large, out var largeVersion).ShouldBeTrue();
+
+        await _engine.SwitchToChoiceAsync(large, largeVersion).WaitAsync(Patience, Ct);
+        await _engine.SwitchToChoiceAsync(small, smallVersion).WaitAsync(Patience, Ct);
+
+        _stored.SpeechModel.ShouldBe(SpeechModelId.LargeV3Turbo);
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Large);
+        _loader.LoadCount.ShouldBe(1);
+        await _models.DidNotReceive().EnsureModelAsync(SpeechModelCatalog.SmallEn, Arg.Any<IProgress<DownloadProgress>>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task SwitchModelAsync_ActiveModelWhileReady_OnlyPersistsTheChoice()
     {
