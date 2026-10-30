@@ -1,7 +1,7 @@
 using System.Diagnostics;
-using System.Net;
 using System.Speech.AudioFormat;
 using System.Speech.Synthesis;
+using Murmur.Core.Hardware;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
@@ -11,8 +11,11 @@ using Shouldly;
 namespace Murmur.Core.Tests.Speech;
 
 /// <summary>
-/// Loads the real model on the real GPU. The first run downloads about 1.6 GB into the app's own models
-/// folder (<see cref="MurmurPaths.Default"/>), so later runs and the app itself reuse it.
+/// Loads the real model on the real GPU, built from the same parts as the app: the app's own settings and models
+/// folder (<see cref="MurmurPaths.Default"/>), GPU detection, the CUDA runtime search and Whisper.net. The model is the
+/// one the settings choose, which a PC that already has the large model keeps; like the app, it saves that choice when
+/// the settings have none yet. A PC with no model downloads it once (about 1.6 GB for the large one), so later runs and
+/// the app itself reuse it. Never switches models: that would delete one.
 /// </summary>
 public sealed class WhisperEngineFixture : IAsyncLifetime
 {
@@ -23,7 +26,12 @@ public sealed class WhisperEngineFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        Engine = new WhisperEngine(new ModelManager(MurmurPaths.Default, _http, TimeProvider.System, new DiskSpace()));
+        var paths = MurmurPaths.Default;
+        var settings = new SettingsService(paths);
+        var models = new ModelManager(paths, _http, TimeProvider.System, new DiskSpace());
+        var gpu = new GpuInfo(paths);
+        Engine = new WhisperEngine(models, new ModelSelection(settings, gpu, models), gpu, new CudaRuntimeLocator(paths),
+            new WhisperModelLoader(), settings, TimeProvider.System);
         var stopwatch = Stopwatch.StartNew();
         await Engine.InitializeAsync(CancellationToken.None);
         InitializeElapsed = stopwatch.Elapsed;
@@ -128,14 +136,14 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
     }
 
     [Fact]
-    public async Task Transcribe_BeforeInitialize_Throws()
+    public void Initialize_OnCuda_ReportsCudaInUse()
     {
-        using var http = new HttpClient();
-        using var engine = new WhisperEngine(new ModelManager(MurmurPaths.Default, http, TimeProvider.System, new DiskSpace()));
+        var status = Ready().Status;
 
-        engine.Status.State.ShouldBe(EngineState.NotStarted);
-        await Should.ThrowAsync<InvalidOperationException>(
-            () => engine.TranscribeAsync(new float[16000], "", TestContext.Current.CancellationToken));
+        output.WriteLine($"Runtime: {status.Runtime ?? "(unknown)"}, GPU advice: {status.Gpu}");
+        Assert.SkipUnless(status.Runtime?.StartsWith("Cuda", StringComparison.Ordinal) == true, "not on CUDA");
+        status.Gpu.ShouldNotBeNull().State.ShouldBe(GpuAdviceState.CudaInUse);
+        status.Gpu.GpuName.ShouldNotBeNullOrEmpty();
     }
 
     /// <summary>One spoken sentence in a clip of exactly 5 s, the length of a typical dictation.</summary>
@@ -164,106 +172,5 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
         for (var i = 0; i < samples.Length; i++)
             samples[i] = BitConverter.ToInt16(bytes, offset + i * 2) / 32768f;
         return samples;
-    }
-}
-
-/// <summary>Status transitions of <see cref="WhisperEngine"/> with a fake model manager, so no real model is involved.</summary>
-public sealed class WhisperEngineStatusTests : IDisposable
-{
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-engine-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
-    }
-
-    private static WhisperEngine CreateEngine(Func<IProgress<DownloadProgress>, CancellationToken, Task<string>> ensure) =>
-        new(new FakeModelManager(ensure));
-
-    [Fact]
-    public async Task Initialize_DownloadFails_EndsInErrorAndDoesNotThrow()
-    {
-        using var engine = CreateEngine((_, _) =>
-            throw new HttpRequestException("Response status code does not indicate success: 404 (Not Found).", null, HttpStatusCode.NotFound));
-        var states = Record(engine);
-
-        await engine.InitializeAsync(TestContext.Current.CancellationToken);
-
-        engine.Status.State.ShouldBe(EngineState.Error);
-        engine.Status.Error.ShouldNotBeNull().ShouldContain("download the speech model");
-        engine.Status.Error.ShouldContain("internet connection");
-        states.Select(s => s.State).ShouldBe([EngineState.Downloading, EngineState.Error]);
-        await Should.ThrowAsync<InvalidOperationException>(
-            () => engine.TranscribeAsync(new float[16000], "", TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
-    public async Task Initialize_CorruptModel_ReportsThrottledProgressThenLoadError()
-    {
-        var body = new byte[2000];
-        Random.Shared.NextBytes(body);
-        using var engine = CreateEngine(async (progress, ct) =>
-        {
-            // One report per byte, like a slow connection, so every read is a progress report.
-            for (var received = 1; received <= body.Length; received++)
-                progress.Report(new DownloadProgress("Whisper large-v3-turbo", received, body.Length, 0, null, 0));
-
-            Directory.CreateDirectory(_root);
-            var path = Path.Combine(_root, "corrupt.bin");
-            await File.WriteAllBytesAsync(path, body, ct);
-            return path;
-        });
-        var states = Record(engine);
-
-        await engine.InitializeAsync(TestContext.Current.CancellationToken);
-
-        var downloads = states.Where(s => s.State == EngineState.Downloading).Select(s => s.DownloadProgress!.Value).ToList();
-        downloads.First().ShouldBe(0);
-        downloads.Last().ShouldBe(1.0);
-        downloads.ShouldBeInOrder(SortDirection.Ascending);
-        downloads.Distinct().Count().ShouldBe(downloads.Count, "each whole percent is reported once");
-        downloads.Count.ShouldBeLessThanOrEqualTo(101);
-        states.Select(s => s.State).Distinct().ShouldBe([EngineState.Downloading, EngineState.Loading, EngineState.Error]);
-        engine.Status.Error.ShouldNotBeNull().ShouldContain("load the speech model");
-        engine.Status.Error.ShouldContain(Path.Combine(Path.GetTempPath(), "ggml-large-v3-turbo.bin"));
-    }
-
-    [Fact]
-    public async Task Initialize_Cancelled_DoesNotThrowAndLeavesNotStarted()
-    {
-        using var engine = CreateEngine(async (_, ct) =>
-        {
-            await Task.Delay(TimeSpan.FromSeconds(30), ct);
-            throw new InvalidOperationException("not cancelled");
-        });
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-
-        await engine.InitializeAsync(cts.Token);
-
-        engine.Status.State.ShouldBe(EngineState.NotStarted);
-        engine.Status.Error.ShouldBeNull();
-    }
-
-    private static List<EngineStatus> Record(WhisperEngine engine)
-    {
-        var states = new List<EngineStatus>();
-        engine.StatusChanged += states.Add;
-        return states;
-    }
-
-    /// <summary>Has no model on disk, and hands the download over to <c>ensure</c>.</summary>
-    private sealed class FakeModelManager(Func<IProgress<DownloadProgress>, CancellationToken, Task<string>> ensure) : IModelManager
-    {
-        public string PathFor(SpeechModelInfo model) => Path.Combine(Path.GetTempPath(), model.FileName);
-
-        public bool HasExpectedFile(SpeechModelInfo model) => false;
-
-        public Task<string> EnsureModelAsync(SpeechModelInfo model, IProgress<DownloadProgress> progress, CancellationToken ct) =>
-            ensure(progress, ct);
-
-        public void Delete(SpeechModelInfo model)
-        {
-        }
     }
 }

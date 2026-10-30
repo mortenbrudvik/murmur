@@ -26,7 +26,8 @@ public class EventHandlerTests
     [Fact]
     public async Task EngineStatusEventHandler_PublishesEngineStatusChangedWithTheStatus()
     {
-        var status = new EngineStatus(EngineState.Downloading, "ggml-large-v3-turbo", DownloadProgress: 0.25);
+        var status = new EngineStatus(EngineState.Downloading, "Whisper large-v3-turbo",
+            Download: new DownloadProgress("Whisper large-v3-turbo", 250, 1000, 100, 7.5, 0));
 
         await new EngineStatusEventHandler(_events).Handle(new EngineStatusChangedNotification(status), CancellationToken.None);
 

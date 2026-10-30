@@ -116,15 +116,51 @@ public sealed class TrayIconHostTests
             .ShouldBe("Murmur — hold Right Ctrl to talk");
     }
 
+    [Theory]
+    [InlineData(380, "Murmur — downloading speech model 38%")]
+    [InlineData(389, "Murmur — downloading speech model 38%")] // whole percent reached, never rounded up
+    [InlineData(290, "Murmur — downloading speech model 29%")] // 0.29 * 100 is 28.999… in floating point
+    [InlineData(999, "Murmur — downloading speech model 99%")]
+    [InlineData(1000, "Murmur — downloading speech model 100%")]
+    public void FormatToolTip_Downloading_ShowsWholePercent(long received, string expected)
+    {
+        InEnglish(() => TrayIconHost.FormatToolTip(Downloading(received, retries: 0), "Right Ctrl").ShouldBe(expected));
+    }
+
     [Fact]
-    public void FormatToolTip_Downloading_ShowsWholePercent()
+    public void FormatToolTip_DownloadingWithoutDetails_ShowsZeroPercent()
+    {
+        InEnglish(() => TrayIconHost.FormatToolTip(new EngineStatus(EngineState.Downloading, Model), "Right Ctrl")
+            .ShouldBe("Murmur — downloading speech model 0%"));
+    }
+
+    [Fact]
+    public void FormatToolTip_Reconnecting_SaysSo()
+    {
+        TrayIconHost.FormatToolTip(Downloading(380, retries: 2), "Right Ctrl")
+            .ShouldBe("Murmur — reconnecting to download the speech model…");
+    }
+
+    /// <summary>A model switch downloads the next model while the current one keeps working.</summary>
+    [Fact]
+    public void FormatToolTip_ReadyWhileDownloadingAnotherModel_NamesTheHotkey()
+    {
+        var status = new EngineStatus(EngineState.Ready, Model, "Cuda",
+            Download: new DownloadProgress("Whisper small (English)", 100, 1000, 1000, 1, Retries: 1));
+
+        TrayIconHost.FormatToolTip(status, "Right Ctrl").ShouldBe("Murmur — hold Right Ctrl to talk");
+    }
+
+    private static EngineStatus Downloading(long received, int retries) =>
+        new(EngineState.Downloading, Model, Download: new DownloadProgress(Model, received, 1000, 1000, 1, retries));
+
+    private static void InEnglish(Action assert)
     {
         var previous = CultureInfo.CurrentCulture;
         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
         try
         {
-            TrayIconHost.FormatToolTip(new EngineStatus(EngineState.Downloading, Model, DownloadProgress: 0.45), "Right Ctrl")
-                .ShouldBe("Murmur — downloading model 45%");
+            assert();
         }
         finally
         {

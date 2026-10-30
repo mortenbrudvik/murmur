@@ -117,12 +117,24 @@ public enum EngineState
     Error
 }
 
+/// <param name="ModelName">The display name of the model the state is about ("Whisper large-v3-turbo"); empty before one is chosen.</param>
+/// <param name="Runtime">The Whisper runtime the loaded model runs on ("Cuda", "Vulkan", "Cpu"), once Ready.</param>
+/// <param name="Error">
+/// Why the engine failed (with <see cref="EngineState.Error"/>), or why a model switch failed while the previous model
+/// stays <see cref="EngineState.Ready"/>.
+/// </param>
+/// <param name="Download">
+/// The download in progress: the model itself while <see cref="EngineState.Downloading"/>, or the next model while a
+/// switch keeps the current one <see cref="EngineState.Ready"/>.
+/// </param>
+/// <param name="Gpu">The tip about CUDA for this PC; null until the engine has looked at the GPU.</param>
 public sealed record EngineStatus(
     EngineState State,
     string ModelName,
     string? Runtime = null,
-    double? DownloadProgress = null,
-    string? Error = null);
+    string? Error = null,
+    DownloadProgress? Download = null,
+    GpuAdvice? Gpu = null);
 
 public sealed record TranscriptionResult(string Text, float MaxNoSpeechProbability);
 

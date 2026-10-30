@@ -106,11 +106,26 @@ public class RequestJsonContractTests
     [Fact]
     public void EngineStatus_SerializesTheStateAsACamelCaseString()
     {
-        var json = JsonUtils.Serialize(new EngineStatus(EngineState.NotStarted, "ggml-large-v3-turbo", DownloadProgress: 0.5));
+        var json = JsonUtils.Serialize(new EngineStatus(EngineState.NotStarted, "Whisper large-v3-turbo"));
 
         json.ShouldContain("\"state\":\"notStarted\"");
-        json.ShouldContain("\"modelName\":\"ggml-large-v3-turbo\"");
-        json.ShouldContain("\"downloadProgress\":0.5");
+        json.ShouldContain("\"modelName\":\"Whisper large-v3-turbo\"");
+        json.ShouldContain("\"download\":null");
+        json.ShouldContain("\"gpu\":null");
+    }
+
+    [Fact]
+    public void EngineStatus_SerializesTheDownloadAndTheGpuAdvice()
+    {
+        var status = new EngineStatus(EngineState.Ready, "Whisper large-v3-turbo", "Vulkan",
+            Download: new DownloadProgress("Whisper small (English)", 100, 1000, 50, 18, Retries: 1),
+            Gpu: new GpuAdvice(GpuAdviceState.InstallCuda, "NVIDIA GeForce RTX 3060"));
+
+        var json = JsonUtils.Serialize(status);
+
+        json.ShouldContain("\"download\":{\"modelName\":\"Whisper small (English)\",\"bytesReceived\":100,\"totalBytes\":1000,"
+            + "\"bytesPerSecond\":50,\"secondsRemaining\":18,\"retries\":1,\"reconnecting\":true}");
+        json.ShouldContain("\"gpu\":{\"state\":\"installCuda\",\"gpuName\":\"NVIDIA GeForce RTX 3060\"}");
     }
 
     [Fact]

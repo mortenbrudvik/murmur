@@ -117,18 +117,32 @@ public sealed partial class TrayIconHost : IDisposable
         _icon?.Dispose();
     }
 
-    /// <summary>The tooltip for an engine state; long error messages are cut to fit.</summary>
+    /// <summary>
+    /// The tooltip for an engine state; long error messages are cut to fit. Ready stays Ready while a model switch
+    /// downloads the next model: the current one keeps dictating meanwhile, and the download shows in Settings.
+    /// </summary>
     internal static string FormatToolTip(EngineStatus status, string hotkeyName)
     {
         var text = status.State switch
         {
             EngineState.Ready => $"Murmur — hold {hotkeyName} to talk",
-            EngineState.Downloading => $"Murmur — downloading model {status.DownloadProgress ?? 0:P0}",
+            EngineState.Downloading when status.Download is { Reconnecting: true } => "Murmur — reconnecting to download the speech model…",
+            EngineState.Downloading => $"Murmur — downloading speech model {WholeFraction(status.Download):P0}",
             EngineState.Error => $"Murmur — {status.Error ?? "the speech engine failed"}",
             _ => "Murmur — loading model…",
         };
 
         return text.Length <= MaxToolTipLength ? text : string.Concat(text.AsSpan(0, MaxToolTipLength - 1), "…");
+    }
+
+    /// <summary>The share downloaded, cut to a whole percent so the tooltip never shows 100% before the end.</summary>
+    private static double WholeFraction(DownloadProgress? download)
+    {
+        if (download is not { TotalBytes: > 0 })
+            return 0;
+
+        // In whole numbers: 0.29 * 100 is 28.999… in floating point.
+        return Math.Clamp(download.BytesReceived, 0, download.TotalBytes) * 100 / download.TotalBytes / 100.0;
     }
 
     /// <summary>Adds the icon to the notification area; on failure, schedules the next attempt while any are left.</summary>

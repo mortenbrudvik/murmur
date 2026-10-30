@@ -1,71 +1,136 @@
-using System.Diagnostics;
-using System.Text;
+using System.Globalization;
 using Murmur.Core.Audio;
+using Murmur.Core.Hardware;
 using Murmur.Core.Models;
+using Murmur.Core.Services;
 using Serilog;
-using Whisper.net;
-using Whisper.net.LibraryLoader;
 
 namespace Murmur.Core.Speech;
 
 /// <summary>
-/// Whisper large-v3-turbo through Whisper.net, on CUDA when the CUDA 13 runtime DLLs can be found (see
-/// <see cref="CudaRuntimeSearch"/> and <see cref="CudaRuntimeLoader"/>), otherwise Vulkan, otherwise the CPU.
-/// <see cref="InitializeAsync"/> warms the model up with a second of zeros, so the one-off cost of the first run is
-/// paid before it reports Ready rather than on the first dictation.
+/// The speech engine: the chosen Whisper model (<see cref="ModelSelection"/>), downloaded by <see cref="IModelManager"/>
+/// and loaded by <see cref="IWhisperModelLoader"/>, on CUDA only when <see cref="GpuAdvisor.CanUseCuda"/> says the GPU
+/// supports Murmur's CUDA build. The status carries the download's details and the tip about CUDA
+/// (<see cref="GpuAdvice"/>).
+/// <para>
+/// Starting and switching models are operations that run one at a time on the thread pool. A switch cancels the
+/// running operation and waits for it to end before it touches any model file, because a download holds its .part file
+/// open. Transcriptions use the loaded model under <c>_modelGate</c>, which an operation also takes to swap models, so
+/// a model is never disposed while it transcribes.
+/// </para>
 /// </summary>
-public sealed class WhisperEngine(IModelManager models) : ISpeechEngine, IDisposable
+public sealed class WhisperEngine(
+    IModelManager models,
+    ModelSelection selection,
+    IGpuInfo gpu,
+    ICudaRuntimeLocator cuda,
+    IWhisperModelLoader loader,
+    ISettingsService settings,
+    TimeProvider time) : ISpeechEngine, IDisposable
 {
-    public const string ModelName = "Whisper large-v3-turbo";
-
     private const int SampleRate = 16000;
 
     /// <summary>Far below any real microphone's noise floor (about -70 dBFS), so only a dead input falls under it.</summary>
     private const float DigitalSilenceDbfs = -80f;
 
-    private static readonly SpeechModelInfo Model = SpeechModelCatalog.LargeV3Turbo;
+    /// <summary>How long <see cref="Dispose"/> waits for a running transcription before it leaves the model to process exit.</summary>
+    private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
 
     private readonly ILogger _logger = Log.ForContext<WhisperEngine>();
-    private readonly SemaphoreSlim _initializeGate = new(1, 1);
-    private EngineStatus _status = new(EngineState.NotStarted, ModelName);
-    private WhisperFactory? _factory;
-    private int _lastReportedPercent;
-    private bool _disposed;
+
+    /// <summary>Serialises starting, cancelling and replacing operations. Operations themselves never take it.</summary>
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
+
+    /// <summary>Held by a transcription while it uses the loaded model, and by an operation while it swaps the model.</summary>
+    private readonly SemaphoreSlim _modelGate = new(1, 1);
+
+    /// <summary>Makes saving a requested model and restoring the previous one after a failed switch mutually exclusive.</summary>
+    private readonly Lock _choiceLock = new();
+
+    /// <summary>Cancelled by <see cref="Dispose"/>; every operation's token is linked to it.</summary>
+    private readonly CancellationTokenSource _disposeCts = new();
+
+    private EngineStatus _status = new(EngineState.NotStarted, "");
+    private LoadedModel? _loaded;
+    private int _disposed;
+
+    // Under _operationGate.
+    private Operation? _operation;
+    private CancellationToken _lifetime;
+    private bool _started;
+
+    // Under _choiceLock: counts the requested choices, so a failed switch only restores the choice it replaced.
+    private int _choiceVersion;
+
+    // Written by the first operation; operations never overlap, so later ones read it without a lock.
+    private HardwareFacts? _hardware;
 
     public EngineStatus Status => Volatile.Read(ref _status);
 
     public event Action<EngineStatus>? StatusChanged;
 
+    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
     public async Task InitializeAsync(CancellationToken ct)
     {
         try
         {
-            await _initializeGate.WaitAsync(ct).ConfigureAwait(false);
+            await _operationGate.WaitAsync(ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             return;
         }
 
+        Task running;
         try
         {
-            if (_disposed || Status.State == EngineState.Ready)
+            if (IsDisposed || Volatile.Read(ref _loaded) is not null)
                 return;
 
-            await InitializeCoreAsync(ct).ConfigureAwait(false);
+            _started = true;
+            _lifetime = ct;
+            running = _operation is { Task.IsCompleted: false } operation
+                ? operation.Task
+                : Start(target: null, deferredDelete: null, choiceVersion: 0);
         }
         finally
         {
-            _initializeGate.Release();
+            _operationGate.Release();
         }
+
+        await running.ConfigureAwait(false);
+    }
+
+    public async Task SwitchModelAsync(SpeechModelId model)
+    {
+        // Before the first await, so whoever asked for the switch reads the new choice straight back.
+        if (!TrySaveChoice(model, out var target, out var choiceVersion))
+            return;
+
+        Task switching;
+        await _operationGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            switching = await BeginSwitchAsync(target, choiceVersion).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not start switching the speech model to {Model}", target.DisplayName);
+            return;
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+
+        await switching.ConfigureAwait(false);
     }
 
     public async Task<TranscriptionResult> TranscribeAsync(float[] samples16kMono, string prompt, CancellationToken ct)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var factory = Volatile.Read(ref _factory);
-        if (Status.State != EngineState.Ready || factory is null)
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (Volatile.Read(ref _loaded) is null)
             throw new InvalidOperationException($"The speech engine is not ready (state: {Status.State}).");
 
         // Whisper invents text ("Thank you.") for digital silence, and the no-speech probability that
@@ -76,125 +141,385 @@ public sealed class WhisperEngine(IModelManager models) : ISpeechEngine, IDispos
             return new TranscriptionResult("", 1f);
         }
 
-        return await TranscribeCoreAsync(factory, samples16kMono, prompt, ct).ConfigureAwait(false);
+        await _modelGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            var loaded = Volatile.Read(ref _loaded)
+                ?? throw new InvalidOperationException($"The speech engine is not ready (state: {Status.State}).");
+            return await loaded.Model.TranscribeAsync(samples16kMono, prompt, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _modelGate.Release();
+        }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        _disposed = true;
-        Interlocked.Exchange(ref _factory, null)?.Dispose();
+        _disposeCts.Cancel();
+
+        // Disposing native Whisper under a running transcription can crash the process.
+        if (!_modelGate.Wait(DisposeWait))
+        {
+            _logger.Warning("A transcription is still running; its speech model is left to process exit");
+            return;
+        }
+
+        try
+        {
+            Interlocked.Exchange(ref _loaded, null)?.Model.Dispose();
+        }
+        finally
+        {
+            _modelGate.Release();
+        }
     }
 
-    private async Task InitializeCoreAsync(CancellationToken ct)
+    /// <summary>"Murmur needs 1.8 GB free on C:\ and there is 0.9 GB": decimal gigabytes with one decimal, like the web's formatBytes.</summary>
+    internal static string DescribeShortfall(InsufficientDiskSpaceException ex)
     {
+        var drive = Path.GetPathRoot(ex.Directory) is { Length: > 0 } root ? root : ex.Directory;
+        return $"Murmur needs {Gigabytes(ex.RequiredBytes)} free on {drive} and there is {Gigabytes(ex.AvailableBytes)}";
+    }
+
+    private static string Gigabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1e9:0.0} GB");
+
+    private bool TrySaveChoice(SpeechModelId model, out SpeechModelInfo target, out int choiceVersion)
+    {
+        try
+        {
+            target = SpeechModelCatalog.Get(model);
+            lock (_choiceLock)
+            {
+                settings.Update(s => s with { SpeechModel = model });
+                choiceVersion = ++_choiceVersion;
+            }
+
+            _logger.Information("Speech model chosen: {Model}", target.DisplayName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not save {Model} as the speech model", model);
+            target = null!;
+            choiceVersion = 0;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Under <see cref="_operationGate"/>: cancels and awaits the running operation, deletes the model it was getting
+    /// when nothing needs it any more, and starts the operation that ends on <paramref name="target"/>, if any.
+    /// </summary>
+    private async Task<Task> BeginSwitchAsync(SpeechModelInfo target, int choiceVersion)
+    {
+        // Before InitializeAsync, the saved choice is all it takes: that is the model it loads.
+        if (IsDisposed || !_started || _lifetime.IsCancellationRequested)
+            return Task.CompletedTask;
+
+        var previous = _operation;
+        if (previous is not null)
+        {
+            previous.Superseded = true;
+            Cancel(previous);
+            await previous.Task.ConfigureAwait(false);
+        }
+
+        if (IsDisposed)
+            return Task.CompletedTask;
+
+        var loaded = Volatile.Read(ref _loaded);
+        SpeechModelInfo? deferredDelete = null;
+        if (previous?.Target is { } abandoned && abandoned != target && abandoned != loaded?.Info)
+        {
+            // A complete file that was about to become the first model stays until the next one is loaded, so a failed
+            // download does not leave the user with neither; a partial download goes now, to free its disk space.
+            if (loaded is null && models.HasExpectedFile(abandoned))
+                deferredDelete = abandoned;
+            else
+                Delete(abandoned);
+        }
+
+        if (loaded is not null && loaded.Info == target)
+        {
+            // Already loaded: at most a switch away from it was cancelled above, or failed before.
+            SetStatus(loaded.ReadyStatus);
+            return Task.CompletedTask;
+        }
+
+        _logger.Information("Switching the speech model to {Model}", target.DisplayName);
+        return Start(target, deferredDelete, choiceVersion);
+    }
+
+    /// <summary>
+    /// Under <see cref="_operationGate"/>, with no operation running: starts a first load when no model is loaded yet,
+    /// otherwise a switch from the loaded one. A null <paramref name="target"/> means the model <see cref="ModelSelection"/> resolves.
+    /// </summary>
+    private Task Start(SpeechModelInfo? target, SpeechModelInfo? deferredDelete, int choiceVersion)
+    {
+        _operation?.Cts.Dispose();
+
+        var from = Volatile.Read(ref _loaded);
+        var operation = new Operation(CancellationTokenSource.CreateLinkedTokenSource(_lifetime, _disposeCts.Token), choiceVersion)
+        {
+            Target = target,
+        };
+        operation.Task = Task.Run(async () =>
+        {
+            try
+            {
+                if (from is null)
+                    await LoadFirstModelAsync(operation, deferredDelete).ConfigureAwait(false);
+                else
+                    await SwitchFromAsync(operation, from).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Each operation reports its own failures; this only keeps a bug from faulting the callers' tasks.
+                _logger.Error(ex, "A speech engine operation failed unexpectedly");
+            }
+        });
+        _operation = operation;
+        return operation.Task;
+    }
+
+    private async Task LoadFirstModelAsync(Operation operation, SpeechModelInfo? deferredDelete)
+    {
+        var ct = operation.Cts.Token;
+        HardwareFacts? hardware = null;
+        SpeechModelInfo? model = null;
         var loading = false;
         try
         {
-            var modelPath = await EnsureModelAsync(ct).ConfigureAwait(false);
+            hardware = Hardware();
+            model = operation.Target ??= SpeechModelCatalog.Get(selection.ResolveActive());
+            var loadingStatus = new EngineStatus(EngineState.Loading, model.DisplayName, Gpu: hardware.Advice);
+
+            var target = model;
+            var path = await EnsureModelAsync(model,
+                download => new EngineStatus(EngineState.Downloading, target.DisplayName, Download: download, Gpu: hardware.Advice),
+                whileVerifying: loadingStatus, ct).ConfigureAwait(false);
 
             loading = true;
-            SetStatus(new EngineStatus(EngineState.Loading, ModelName));
-            var stopwatch = Stopwatch.StartNew();
-            var factory = await Task.Run(() => CreateFactory(modelPath), ct).ConfigureAwait(false);
-            Interlocked.Exchange(ref _factory, factory)?.Dispose();
-            var loaded = stopwatch.Elapsed;
+            SetStatus(loadingStatus);
+            var next = await LoadAsync(model, path, hardware, ct).ConfigureAwait(false);
+            if (hardware.RuntimeDirectory is not null && next.Model.Runtime?.StartsWith("Cuda", StringComparison.Ordinal) != true)
+            {
+                _logger.Warning("The CUDA 13 runtime is in {Directory}, but the speech engine runs on {Runtime}",
+                    hardware.RuntimeDirectory, next.Model.Runtime ?? "an unknown runtime");
+            }
 
-            stopwatch.Restart();
-            await TranscribeCoreAsync(factory, new float[SampleRate], "", ct).ConfigureAwait(false);
-            var runtime = RuntimeOptions.LoadedLibrary?.ToString();
-            _logger.Information("Speech model loaded in {LoadMs:F0} ms and warmed up in {WarmupMs:F0} ms on {Runtime}",
-                loaded.TotalMilliseconds, stopwatch.Elapsed.TotalMilliseconds, runtime ?? "an unknown runtime");
+            if (!await TrySwapInAsync(next, ct).ConfigureAwait(false))
+                return;
 
-            SetStatus(new EngineStatus(EngineState.Ready, ModelName, runtime));
+            SetStatus(next.ReadyStatus);
+            if (deferredDelete is not null)
+                Delete(deferredDelete);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _logger.Information("Speech engine start-up was cancelled");
-            SetStatus(new EngineStatus(EngineState.NotStarted, ModelName));
+            // A switch that cancelled it reports the next model itself.
+            if (!operation.Superseded && !IsDisposed)
+                SetStatus(new EngineStatus(EngineState.NotStarted, model?.DisplayName ?? "", Gpu: hardware?.Advice));
         }
         catch (Exception ex)
         {
-            var step = loading ? "load the speech model" : "download the speech model";
-            _logger.Error(ex, "Speech engine failed to {Step}", step);
-            var hint = ex switch
-            {
-                HttpRequestException => " Check the internet connection and restart Murmur.",
-                _ when loading => $" If the model file is damaged, delete {models.PathFor(Model)} and restart Murmur to download it again.",
-                _ => ""
-            };
-            SetStatus(new EngineStatus(EngineState.Error, ModelName, Error: $"Could not {step}: {ex.Message}{hint}"));
+            _logger.Error(ex, "Speech engine failed to {Step} the speech model", loading ? "load" : "download");
+            SetStatus(new EngineStatus(EngineState.Error, model?.DisplayName ?? "", Error: DescribeStartFailure(ex, model, loading),
+                Gpu: hardware?.Advice));
         }
     }
 
-    private async Task<string> EnsureModelAsync(CancellationToken ct)
+    private async Task SwitchFromAsync(Operation operation, LoadedModel from)
     {
-        _lastReportedPercent = 0;
-        if (!models.HasExpectedFile(Model))
-            SetStatus(new EngineStatus(EngineState.Downloading, ModelName, DownloadProgress: 0));
-
-        // Also verifies a model file that is already there, which reports nothing while it hashes it once.
-        return await models.EnsureModelAsync(Model, new InlineProgress(ReportDownloadProgress), ct).ConfigureAwait(false);
-    }
-
-    /// <summary>Raises the status only when the whole percent changes: a 1.6 GB download makes thousands of reads.</summary>
-    private void ReportDownloadProgress(DownloadProgress progress)
-    {
-        var fraction = progress.TotalBytes > 0 ? Math.Min((double)progress.BytesReceived / progress.TotalBytes, 1.0) : 0;
-        var percent = (int)(fraction * 100);
-        if (percent == _lastReportedPercent)
-            return;
-
-        _lastReportedPercent = percent;
-        SetStatus(new EngineStatus(EngineState.Downloading, ModelName, DownloadProgress: percent / 100.0));
-    }
-
-    private static WhisperFactory CreateFactory(string modelPath)
-    {
-        // Process-wide and only honored before the first factory loads the native library.
-        RuntimeOptions.RuntimeLibraryOrder = [RuntimeLibrary.Cuda, RuntimeLibrary.Vulkan, RuntimeLibrary.Cpu];
-
-        // Before the factory loads the native library: without it the packaged (Store) build can never use CUDA.
-        var cudaDirectory = CudaRuntimeLoader.FindRuntimeDirectory(CudaRuntimeSearch.Directories(CudaRuntimeSearch.FromSystem()), File.Exists);
-        if (cudaDirectory is not null)
-            CudaRuntimeLoader.TryLoad(cudaDirectory);
-        else
-            Log.ForContext<WhisperEngine>().Information("No CUDA 13 runtime found; the speech engine will use Vulkan or the CPU");
-        return WhisperFactory.FromPath(modelPath);
-    }
-
-    private async Task<TranscriptionResult> TranscribeCoreAsync(WhisperFactory factory, float[] samples, string prompt, CancellationToken ct)
-    {
-        var builder = factory.CreateBuilder().WithLanguage("en");
-        if (!string.IsNullOrEmpty(prompt))
-            builder = builder.WithPrompt(prompt);
-        _logger.Debug("Transcribing {Seconds:F1} s of audio with a {PromptLength}-character prompt",
-            (double)samples.Length / SampleRate, prompt?.Length ?? 0);
-
-        var text = new StringBuilder();
-        var maxNoSpeechProbability = 0f;
-        var processor = builder.Build();
-        await using var disposal = processor.ConfigureAwait(false);
-        await foreach (var segment in processor.ProcessAsync(samples, ct).ConfigureAwait(false))
+        var ct = operation.Cts.Token;
+        var target = operation.Target!;
+        LoadedModel next;
+        try
         {
-            var segmentText = segment.Text.Trim();
-            if (segmentText.Length > 0)
+            var hardware = Hardware();
+            var path = await EnsureModelAsync(target, download => from.ReadyStatus with { Download = download }, whileVerifying: null, ct)
+                .ConfigureAwait(false);
+
+            SetStatus(new EngineStatus(EngineState.Loading, target.DisplayName, Gpu: from.Gpu));
+            next = await LoadAsync(target, path, hardware, ct).ConfigureAwait(false);
+            if (!await TrySwapInAsync(next, ct).ConfigureAwait(false))
+                return;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.Information("Switching the speech model to {Model} was cancelled", target.DisplayName);
+            if (!IsDisposed)
+                SetStatus(from.ReadyStatus);
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not switch the speech model to {Model}; staying on {Previous}", target.DisplayName, from.Info.DisplayName);
+            RestoreChoice(operation, from.Info);
+            SetStatus(from.ReadyStatus with { Error = $"Could not switch to {target.DisplayName}: {DescribeSwitchFailure(ex)}" });
+            return;
+        }
+
+        SetStatus(next.ReadyStatus);
+        _logger.Information("Switched the speech model from {Previous} to {Model}", from.Info.DisplayName, target.DisplayName);
+
+        // No transcription can hold the previous model any more: they take it under _modelGate, which the swap held.
+        try
+        {
+            from.Model.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning(ex, "Could not unload {Model}", from.Info.DisplayName);
+        }
+
+        Delete(from.Info);
+    }
+
+    /// <summary>
+    /// The verified model file, downloading what is missing. A missing file reports throttled progress through
+    /// <paramref name="downloading"/>; a file that is there already reports <paramref name="whileVerifying"/>, when
+    /// given, while it is verified (once per file: a second or two for the large model, with no progress to report).
+    /// </summary>
+    private Task<string> EnsureModelAsync(
+        SpeechModelInfo model, Func<DownloadProgress, EngineStatus> downloading, EngineStatus? whileVerifying, CancellationToken ct)
+    {
+        var throttle = new DownloadReportThrottle(time);
+        var progress = new InlineProgress(report =>
+        {
+            if (throttle.ShouldReport(report))
+                SetStatus(downloading(report));
+        });
+
+        if (!models.HasExpectedFile(model))
+            progress.Report(new DownloadProgress(model.DisplayName, 0, model.SizeBytes, 0, null, 0));
+        else if (whileVerifying is not null)
+            SetStatus(whileVerifying);
+
+        return models.EnsureModelAsync(model, progress, ct);
+    }
+
+    private async Task<LoadedModel> LoadAsync(SpeechModelInfo model, string path, HardwareFacts hardware, CancellationToken ct)
+    {
+        var loadedModel = await loader.LoadAsync(path, hardware.CanUseCuda, hardware.RuntimeDirectory, ct).ConfigureAwait(false);
+        return new LoadedModel(model, loadedModel, hardware.AdviceFor(loadedModel.Runtime));
+    }
+
+    /// <summary>
+    /// Makes <paramref name="next"/> the loaded model once no transcription is using the current one. Disposes
+    /// <paramref name="next"/> and returns false when it cannot be swapped in: cancelled, or the engine was disposed.
+    /// </summary>
+    private async Task<bool> TrySwapInAsync(LoadedModel next, CancellationToken ct)
+    {
+        try
+        {
+            await _modelGate.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            next.Model.Dispose();
+            throw;
+        }
+
+        try
+        {
+            if (IsDisposed)
             {
-                if (text.Length > 0)
-                    text.Append(' ');
-                text.Append(segmentText);
+                next.Model.Dispose();
+                return false;
             }
 
-            maxNoSpeechProbability = Math.Max(maxNoSpeechProbability, segment.NoSpeechProbability);
+            Volatile.Write(ref _loaded, next);
+            return true;
         }
-
-        return new TranscriptionResult(text.ToString(), maxNoSpeechProbability);
+        finally
+        {
+            _modelGate.Release();
+        }
     }
 
+    /// <summary>Makes <paramref name="previous"/> the saved choice again, unless a newer choice was made since the switch began.</summary>
+    private void RestoreChoice(Operation operation, SpeechModelInfo previous)
+    {
+        try
+        {
+            lock (_choiceLock)
+            {
+                if (_choiceVersion != operation.ChoiceVersion)
+                    return;
+
+                settings.Update(s => s with { SpeechModel = previous.Id });
+            }
+
+            _logger.Information("Speech model choice restored to {Model}", previous.DisplayName);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not restore {Model} as the speech model", previous.DisplayName);
+        }
+    }
+
+    private void Delete(SpeechModelInfo model)
+    {
+        try
+        {
+            models.Delete(model);
+            _logger.Information("Deleted the {Model} files", model.DisplayName);
+        }
+        catch (Exception ex)
+        {
+            // Only costs disk space: the next download of it starts over or resumes.
+            _logger.Warning(ex, "Could not delete the {Model} files", model.DisplayName);
+        }
+    }
+
+    /// <summary>The GPU and CUDA runtime facts, gathered once. Looks for the runtime only on a GPU that can use it.</summary>
+    private HardwareFacts Hardware()
+    {
+        if (_hardware is { } known)
+            return known;
+
+        var report = gpu.Report;
+        var canUseCuda = GpuAdvisor.CanUseCuda(report);
+        var runtimeDirectory = canUseCuda ? cuda.FindRuntimeDirectory() : null;
+        var facts = new HardwareFacts(report, canUseCuda, runtimeDirectory);
+        _logger.Information("CUDA {CanUseCuda}, runtime {RuntimeDirectory}, advice {Advice}",
+            canUseCuda ? "supported" : "not supported", runtimeDirectory ?? "not found", facts.Advice.State);
+        return _hardware = facts;
+    }
+
+    private string DescribeStartFailure(Exception ex, SpeechModelInfo? model, bool loading) => ex switch
+    {
+        InsufficientDiskSpaceException disk =>
+            $"Not enough disk space for the speech model: {DescribeShortfall(disk)}. Free some space and restart Murmur.",
+        ModelVerificationException => "The speech model download was damaged twice. Restart Murmur to try again.",
+        HttpRequestException when !loading =>
+            $"Could not download the speech model: {ex.Message} Check the internet connection and restart Murmur.",
+        _ when loading && model is not null =>
+            $"Could not load the speech model: {ex.Message} If the model file is damaged, delete {models.PathFor(model)} and restart Murmur to download it again.",
+        _ => $"Could not {(loading ? "load" : "download")} the speech model: {ex.Message}",
+    };
+
+    private static string DescribeSwitchFailure(Exception ex) => ex switch
+    {
+        InsufficientDiskSpaceException disk => $"not enough disk space. {DescribeShortfall(disk)}.",
+        ModelVerificationException => "the download was damaged twice.",
+        HttpRequestException => $"{ex.Message} Check the internet connection and try again.",
+        _ => ex.Message,
+    };
+
+    /// <summary>Raises <see cref="StatusChanged"/> unless nothing changed. Only operations call it, and they never overlap.</summary>
     private void SetStatus(EngineStatus status)
     {
+        if (status == Volatile.Read(ref _status))
+            return;
+
         Volatile.Write(ref _status, status);
         try
         {
@@ -206,7 +531,55 @@ public sealed class WhisperEngine(IModelManager models) : ISpeechEngine, IDispos
         }
     }
 
-    /// <summary>Unlike <see cref="Progress{T}"/> it runs inline, so reports cannot arrive out of order.</summary>
+    private static void Cancel(Operation operation)
+    {
+        try
+        {
+            operation.Cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // It ended long ago.
+        }
+    }
+
+    /// <summary>A first load or a switch, running or finished.</summary>
+    private sealed class Operation(CancellationTokenSource cts, int choiceVersion)
+    {
+        private volatile bool _superseded;
+
+        public CancellationTokenSource Cts => cts;
+
+        /// <summary>The choice that started it; a failed switch restores the previous model only while this is the newest.</summary>
+        public int ChoiceVersion => choiceVersion;
+
+        public Task Task { get; set; } = Task.CompletedTask;
+
+        /// <summary>The model it ends on; a first load resolves it, so it is null until then.</summary>
+        public SpeechModelInfo? Target { get; set; }
+
+        /// <summary>Cancelled by a switch, which reports what comes next.</summary>
+        public bool Superseded
+        {
+            get => _superseded;
+            set => _superseded = value;
+        }
+    }
+
+    private sealed record LoadedModel(SpeechModelInfo Info, ILoadedSpeechModel Model, GpuAdvice Gpu)
+    {
+        public EngineStatus ReadyStatus => new(EngineState.Ready, Info.DisplayName, Model.Runtime, Gpu: Gpu);
+    }
+
+    private sealed record HardwareFacts(GpuReport Report, bool CanUseCuda, string? RuntimeDirectory)
+    {
+        /// <summary>The tip before a model is loaded.</summary>
+        public GpuAdvice Advice { get; } = GpuAdvisor.Decide(Report, RuntimeDirectory is not null, null);
+
+        public GpuAdvice AdviceFor(string? loadedRuntime) => GpuAdvisor.Decide(Report, RuntimeDirectory is not null, loadedRuntime);
+    }
+
+    /// <summary>Unlike <see cref="Progress{T}"/> it runs inline, so reports cannot arrive out of order or after the download.</summary>
     private sealed class InlineProgress(Action<DownloadProgress> report) : IProgress<DownloadProgress>
     {
         public void Report(DownloadProgress value) => report(value);
