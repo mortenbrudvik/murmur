@@ -365,6 +365,46 @@ describe("useHistory", () => {
       expect(result.current.entries.map((e) => e.id)).toEqual(["b"]);
     });
 
+    it("drops an older page that arrives after Clear all", async () => {
+      let resolveOlder: (value: HistoryPageResult) => void = () => {};
+      vi.mocked(apiClient.call).mockImplementation((_service, method, params) => {
+        if (method === "clear") return Promise.resolve(true);
+        if ((params as { before?: string } | undefined)?.before !== undefined) {
+          return new Promise<HistoryPageResult>((resolve) => { resolveOlder = resolve; });
+        }
+        return Promise.resolve(page([makeEntry("a")], true));
+      });
+      const { result } = renderHook(() => useHistory(""));
+      await waitFor(() => expect(result.current.hasMore).toBe(true));
+      act(() => { void result.current.loadOlder(); });
+      await waitFor(() => expect(result.current.loadingOlder).toBe(true));
+
+      await act(async () => { await result.current.clearAll(); });
+      expect(result.current.loadingOlder).toBe(false);
+
+      await act(async () => { resolveOlder(page([makeEntry("old")], true)); });
+
+      expect(result.current.entries).toEqual([]);
+      expect(result.current.hasMore).toBe(false);
+      expect(result.current.loadingOlder).toBe(false);
+    });
+
+    it("loadOlder answers the first entry it appended, or null when it appended none", async () => {
+      vi.mocked(apiClient.call)
+        .mockResolvedValueOnce(page([makeEntry("a"), makeEntry("b")], true))
+        .mockResolvedValueOnce(page([makeEntry("b"), makeEntry("c"), makeEntry("d")], true))
+        .mockRejectedValueOnce(new Error("bridge down"));
+      const { result } = renderHook(() => useHistory(""));
+      await waitFor(() => expect(result.current.entries).toHaveLength(2));
+
+      let first: string | null = null;
+      await act(async () => { first = await result.current.loadOlder(); });
+      expect(first).toBe("c"); // b was on screen already
+
+      await act(async () => { first = await result.current.loadOlder(); });
+      expect(first).toBeNull();
+    });
+
     it("has nothing older after clearing", async () => {
       vi.mocked(apiClient.call).mockImplementation(async (_service, method) =>
         method === "get" ? page([makeEntry("a")], true) : true,

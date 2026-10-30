@@ -253,6 +253,33 @@ describe("HistoryPage", () => {
       await waitFor(() => expect(screen.queryByRole("button", { name: "Show older" })).toBeNull());
     });
 
+    it("moves focus to the first entry Show older loaded, as the button goes with the last page", async () => {
+      mockPages(
+        { entries: [todayEntry("a", 10, 0), todayEntry("b", 9, 0)], hasMore: true },
+        { b: { entries: [todayEntry("c", 8, 0), todayEntry("d", 7, 0)], hasMore: false } },
+      );
+
+      render(<HistoryPage />);
+      const button = await screen.findByRole("button", { name: "Show older" });
+      button.focus();
+      fireEvent.click(button);
+
+      await screen.findByText("text c");
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByText("text c").closest("li")));
+      expect(screen.queryByRole("button", { name: "Show older" })).toBeNull();
+    });
+
+    it("takes no focus when the first page loads, or when an entry is pushed", async () => {
+      mockPages({ entries: [todayEntry("a", 10, 0)], hasMore: true }, {});
+
+      render(<HistoryPage />);
+      await screen.findByText("text a");
+      pushAdded(todayEntry("fresh", 11, 0, { text: "just dictated" }));
+      await screen.findByText("just dictated");
+
+      expect(document.activeElement).toBe(document.body);
+    });
+
     it("keeps Show older while the page loaded still has more behind it", async () => {
       mockPages(
         { entries: [todayEntry("a", 10, 0)], hasMore: true },

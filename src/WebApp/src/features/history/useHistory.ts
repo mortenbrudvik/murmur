@@ -23,8 +23,11 @@ export function useHistory(search: string): {
   /** Whether the store holds entries older than the last one loaded. */
   hasMore: boolean;
   error: string | null;
-  /** Appends the page of entries just below the oldest loaded one. */
-  loadOlder(): Promise<void>;
+  /**
+   * Appends the page of entries just below the oldest loaded one. Answers the id of the first entry it appended, or
+   * null when it appended none (nothing to load, a failure, or a newer fetch or Clear all overtook it).
+   */
+  loadOlder(): Promise<string | null>;
   remove(id: string): Promise<void>;
   clearAll(): Promise<void>;
 } {
@@ -82,8 +85,8 @@ export function useHistory(search: string): {
     setEntries((current) => (current.some((e) => e.id === entry.id) ? current : [entry, ...current]));
   });
 
-  const loadOlder = useCallback(async () => {
-    if (loading || olderInFlight.current || !hasMore || entries.length === 0) return;
+  const loadOlder = useCallback(async (): Promise<string | null> => {
+    if (loading || olderInFlight.current || !hasMore || entries.length === 0) return null;
 
     const fetchId = ++latestFetch.current;
     olderInFlight.current = true;
@@ -95,15 +98,20 @@ export function useHistory(search: string): {
         limit: LIMIT,
         before: entries[entries.length - 1].id,
       });
-      if (fetchId !== latestFetch.current) return;
+      if (fetchId !== latestFetch.current) return null;
       setEntries((current) => {
         const known = new Set(current.map((e) => e.id));
         return [...current, ...result.entries.filter((e) => !known.has(e.id))];
       });
       setHasMore(result.hasMore);
+      // Entries pushed meanwhile are new dictations, never part of an older page, so the entries this page was asked
+      // below are enough to tell which of its entries are new.
+      const shown = new Set(entries.map((e) => e.id));
+      return result.entries.find((e) => !shown.has(e.id))?.id ?? null;
     } catch {
-      if (fetchId !== latestFetch.current) return;
+      if (fetchId !== latestFetch.current) return null;
       setActionError("Could not load older entries.");
+      return null;
     } finally {
       if (fetchId === latestFetch.current) {
         olderInFlight.current = false;
@@ -130,6 +138,12 @@ export function useHistory(search: string): {
     setActionError(null);
     try {
       await apiClient.call<boolean>("history", "clear", {});
+      // Counts as a fetch: whatever page is still on its way (an older page, a search) answers for entries that are
+      // gone now, so it is dropped, and nothing is loading any more.
+      ++latestFetch.current;
+      olderInFlight.current = false;
+      setLoadingOlder(false);
+      setLoading(false);
       setEntries([]);
       setHasMore(false);
     } catch {

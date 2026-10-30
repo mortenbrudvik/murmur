@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./HistoryPage.css";
 import HistoryEntryCard from "./HistoryEntryCard";
 import { groupByDay } from "./groupByDay";
@@ -8,15 +8,29 @@ import { useHotkeyName } from "./useHotkeyName";
 export default function HistoryPage() {
   const [search, setSearch] = useState("");
   const [confirmingClear, setConfirmingClear] = useState(false);
+  // The first entry the last Show older loaded, which takes the focus from the button (it goes with the last page).
+  const [focusEntryId, setFocusEntryId] = useState<string | null>(null);
+  const list = useRef<HTMLDivElement>(null);
   const { entries, loading, loadingOlder, hasMore, error, loadOlder, remove, clearAll } = useHistory(search);
   const hotkeyName = useHotkeyName();
 
   const groups = useMemo(() => groupByDay(entries, new Date()), [entries]);
   const showEmpty = !loading && !error && entries.length === 0;
 
+  // Only Show older sets it, so the first page and pushed entries never take the focus.
+  useEffect(() => {
+    if (focusEntryId === null) return;
+    list.current?.querySelector<HTMLElement>(`[data-entry-id="${focusEntryId}"]`)?.focus();
+  }, [focusEntryId]);
+
   function confirmClear() {
     setConfirmingClear(false);
     void clearAll();
+  }
+
+  async function showOlder() {
+    const first = await loadOlder();
+    if (first !== null) setFocusEntryId(first);
   }
 
   return (
@@ -57,7 +71,7 @@ export default function HistoryPage() {
         </p>
       )}
 
-      <div className="history-scroll">
+      <div className="history-scroll" ref={list}>
         {/* Keyed by the day, not its newest entry: a pushed entry must not remount the group and reset its cards. */}
         {groups.map((group) => (
           <section className="history-group" key={group.label}>
@@ -75,7 +89,7 @@ export default function HistoryPage() {
             type="button"
             className="history-older"
             disabled={loading || loadingOlder}
-            onClick={() => void loadOlder()}
+            onClick={() => void showOlder()}
           >
             Show older
           </button>

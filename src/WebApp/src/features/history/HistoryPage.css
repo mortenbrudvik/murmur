@@ -238,7 +238,8 @@
 }
 
 .history button:focus-visible,
-.history-search:focus-visible {
+.history-search:focus-visible,
+.history-card:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

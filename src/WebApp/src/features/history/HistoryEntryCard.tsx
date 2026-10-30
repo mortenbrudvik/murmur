@@ -9,7 +9,8 @@ interface Props {
 
 export default function HistoryEntryCard({ entry, onDelete }: Props) {
   return (
-    <li className="history-card">
+    // Focusable from script only: Show older moves the focus to the first entry it loaded.
+    <li className="history-card" tabIndex={-1} data-entry-id={entry.id}>
       <div className="history-card-body">
         <p className="history-card-text">{entry.text}</p>
         <p className="history-card-meta">
