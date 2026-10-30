@@ -75,7 +75,7 @@ export default function CudaTip({ advice, variant, onDismiss }: Props) {
               Restart Murmur
             </button>
           )}
-          {!settings && installCuda && onDismiss && (
+          {!settings && onDismiss && (
             <button type="button" className="cuda-tip-button cuda-tip-dismiss" onClick={onDismiss}>
               Not now
             </button>

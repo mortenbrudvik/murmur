@@ -107,6 +107,25 @@ describe("CudaTip", () => {
       expect(screen.queryByRole("button", { name: "Restart Murmur" })).toBeNull();
     });
 
+    it("offers Not now in the setup variant, which calls onDismiss and opens nothing", () => {
+      const onDismiss = vi.fn();
+      render(<CudaTip advice={updateDriver} variant="setup" onDismiss={onDismiss} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+      expect(apiClient.call).not.toHaveBeenCalled();
+    });
+
+    it("has no Not now button in the settings variant, nor without onDismiss", () => {
+      const settings = render(<CudaTip advice={updateDriver} variant="settings" onDismiss={() => undefined} />);
+      expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+      settings.unmount();
+
+      render(<CudaTip advice={updateDriver} variant="setup" />);
+      expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+    });
+
     it.each(["setup", "settings"] as const)("opens the NVIDIA driver page in the %s variant", async (variant) => {
       render(<CudaTip advice={updateDriver} variant={variant} />);
 
