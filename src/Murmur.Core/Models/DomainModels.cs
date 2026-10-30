@@ -40,11 +40,15 @@ public sealed record HotkeyDefinition(int VirtualKey, HotkeyModifiers Modifiers,
             || Modifiers != HotkeyModifiers.None);
 }
 
+/// <param name="StartWithWindows">
+/// Off by default: Murmur must not register itself for sign-in without being asked, which the Microsoft Store expects.
+/// A saved settings file always carries the value, so this only decides it for a first run.
+/// </param>
 public sealed record MurmurSettings(
     HotkeyDefinition Hotkey,
     string? MicrophoneId = null,
     bool SoundCues = true,
-    bool StartWithWindows = true,
+    bool StartWithWindows = false,
     bool KeepAudio = false)
 {
     public static MurmurSettings Default { get; } = new(HotkeyDefinition.Default);

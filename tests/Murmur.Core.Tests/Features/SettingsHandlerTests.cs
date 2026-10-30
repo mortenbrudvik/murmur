@@ -132,7 +132,7 @@ public sealed class SettingsHandlerTests
         _startup.When(s => s.Apply(Arg.Any<bool>())).Throw(new UnauthorizedAccessException("blocked by policy"));
         var handler = new SettingsUpdatedHandler(matcher, _startup);
 
-        await handler.Handle(new SettingsUpdatedNotification(new MurmurSettings(CtrlShiftSpace)), CancellationToken.None);
+        await handler.Handle(new SettingsUpdatedNotification(new MurmurSettings(CtrlShiftSpace, StartWithWindows: true)), CancellationToken.None);
 
         matcher.Hotkey.ShouldBe(CtrlShiftSpace);
         _startup.Received(1).Apply(true);

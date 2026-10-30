@@ -229,4 +229,20 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool GetTokenInformation(nint tokenHandle, int tokenInformationClass, out uint tokenInformation,
         uint tokenInformationLength, out uint returnLength);
+
+    // ---- Package identity ----
+
+    /// <summary>
+    /// <see cref="GetCurrentPackageFullName"/> answers with an error code rather than a BOOL: this one means the process
+    /// has no package, anything else (including ERROR_INSUFFICIENT_BUFFER from a zero-length buffer) means it has one.
+    /// </summary>
+    internal const int APPMODEL_ERROR_NO_PACKAGE = 15700;
+
+    /// <summary>
+    /// Called with a zero length and no buffer purely to read the status: ERROR_INSUFFICIENT_BUFFER when the process has
+    /// a package, <see cref="APPMODEL_ERROR_NO_PACKAGE"/> when it does not. The name itself is never wanted, which is
+    /// why the buffer is a pointer that is always null here.
+    /// </summary>
+    [LibraryImport("kernel32.dll")]
+    internal static unsafe partial int GetCurrentPackageFullName(ref uint packageFullNameLength, char* packageFullName);
 }

@@ -104,6 +104,10 @@ public partial class App : Application
         // 5. Container and API
         _container = AutofacBootstrapper.Bootstrap();
 
+        // Decides how Murmur starts with Windows (see AppModule.RegisterStartup) and how it tells a sign-in start.
+        var identity = _container.Resolve<IPackageIdentity>();
+        Log.Information("Running {Channel}", identity.IsPackaged ? "from its MSIX package" : "unpackaged");
+
         var registry = _container.Resolve<ApiRegistry>();
         registry.Register<GetHistoryRequest>("history", "get");
         registry.Register<DeleteHistoryEntryRequest>("history", "delete");
@@ -154,9 +158,17 @@ public partial class App : Application
         _guard.ListenForShowRequests(ShowMainWindow);
 
         // 13. Started at sign-in, Murmur stays in the tray.
-        if (!args.Contains(MinimizedArgument, StringComparer.OrdinalIgnoreCase))
+        if (!IsSignInStart(args, identity))
             ShowMainWindow();
     }
+
+    /// <summary>
+    /// The Run key starts Murmur with <see cref="MinimizedArgument"/>. The Store package's startup task cannot pass
+    /// arguments, so a packaged start asks Windows how it was activated instead.
+    /// </summary>
+    private static bool IsSignInStart(string[] args, IPackageIdentity identity) =>
+        args.Contains(MinimizedArgument, StringComparer.OrdinalIgnoreCase)
+        || (identity.IsPackaged && PackagedStartupRegistration.IsStartupActivation());
 
     /// <summary>Leaves nothing behind (no global hooks, no tray icon, no claim on the single instance), says why, and exits.</summary>
     private void FailStartup(Exception ex)

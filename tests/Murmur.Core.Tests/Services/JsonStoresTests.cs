@@ -42,7 +42,7 @@ public sealed class JsonStoresTests : IDisposable
         loaded.MicrophoneId.ShouldBe("mic-1");
         loaded.KeepAudio.ShouldBeTrue();
         loaded.SoundCues.ShouldBeTrue();
-        loaded.StartWithWindows.ShouldBeTrue();
+        loaded.StartWithWindows.ShouldBeFalse();
         File.Exists(_paths.SettingsFile + ".tmp").ShouldBeFalse();
     }
 

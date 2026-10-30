@@ -16,6 +16,15 @@ namespace Murmur.UI;
 
 public class AppModule : Module
 {
+#if DEBUG
+    private const bool IsDebugBuild = true;
+#else
+    private const bool IsDebugBuild = false;
+#endif
+
+    // Probed here rather than resolved: this module is configuring the container, so it cannot ask it a question.
+    private readonly IPackageIdentity _identity = new PackageIdentity();
+
     protected override void Load(ContainerBuilder builder)
     {
         // WebView
@@ -30,6 +39,7 @@ public class AppModule : Module
         builder.RegisterType<ApiRegistry>().SingleInstance();
 
         RegisterCore(builder);
+        RegisterStartup(builder, _identity, IsDebugBuild);
         RegisterDictation(builder);
 
         // ViewModels
@@ -68,12 +78,24 @@ public class AppModule : Module
         builder.RegisterType<Win32KeyboardSender>().As<IKeyboardSender>().SingleInstance();
         builder.RegisterType<Win32KeyStateProbe>().As<IKeyStateProbe>().SingleInstance();
         builder.RegisterType<TextInserter>().As<ITextInserter>().SingleInstance();
+    }
 
-#if DEBUG
-        builder.RegisterType<NoopStartupRegistration>().As<IStartupRegistration>().SingleInstance();
-#else
-        builder.Register(_ => new StartupRegistration(Environment.ProcessPath!)).As<IStartupRegistration>().SingleInstance();
-#endif
+    /// <summary>
+    /// Where package identity decides how Murmur starts with Windows. Inside a package a Run key write lands in a
+    /// private hive that Explorer never reads and still reports success, so the wrong choice here is invisible at run
+    /// time. Debug builds never register, so running from a development folder never adds that folder's executable to
+    /// the owner's sign-in programs. The probe is registered as well, for App to ask how it was started.
+    /// </summary>
+    internal static void RegisterStartup(ContainerBuilder builder, IPackageIdentity identity, bool debugBuild)
+    {
+        builder.RegisterInstance(identity).As<IPackageIdentity>();
+
+        if (debugBuild)
+            builder.RegisterType<NoopStartupRegistration>().As<IStartupRegistration>().SingleInstance();
+        else if (identity.IsPackaged)
+            builder.RegisterType<PackagedStartupRegistration>().As<IStartupRegistration>().SingleInstance();
+        else
+            builder.Register(_ => new StartupRegistration(Environment.ProcessPath!)).As<IStartupRegistration>().SingleInstance();
     }
 
     private static void RegisterDictation(ContainerBuilder builder)
