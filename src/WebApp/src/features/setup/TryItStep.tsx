@@ -27,31 +27,30 @@ export default function TryItStep({ engineStatus, onDone, saveError }: Props) {
       <h1 className="setup-title" tabIndex={-1}>
         Try it
       </h1>
-      {ready ? (
-        <>
+      {/* One region for the whole step, outside the branches below, so that it stays in the page when the model becomes ready. */}
+      <div className="setup-live" role="status" aria-live="polite">
+        {ready ? (
           <p className="setup-muted">
             Click the box, hold <kbd className="setup-key">{hotkey}</kbd>, say a sentence, and let go.
           </p>
+        ) : (
+          <p className="setup-muted">Waiting for the speech model…</p>
+        )}
+        {ready && dictated && <p className="setup-ok">✓ That's it — Murmur types wherever your cursor is.</p>}
+      </div>
+      {ready ? (
+        <>
           <textarea className="text-input setup-practice" aria-label="Practice dictation" rows={3} />
-          {/* Always there, so that a screen reader announces the line when it comes into it. */}
-          <div className="setup-live" role="status" aria-live="polite">
-            {dictated && <p className="setup-ok">✓ That's it — Murmur types wherever your cursor is.</p>}
-          </div>
           <p className="setup-muted setup-small">
             Tap <kbd className="setup-key">{hotkey}</kbd> once for hands-free; tap again to finish. Esc cancels. Change the key in Settings.
           </p>
         </>
       ) : (
-        <>
-          <div role="status" aria-live="polite">
-            <p className="setup-muted">Waiting for the speech model…</p>
-          </div>
-          {engineStatus?.state === "error" && (
-            <p className="setup-error" role="alert">
-              {describeEngineStatus(engineStatus).text}
-            </p>
-          )}
-        </>
+        engineStatus?.state === "error" && (
+          <p className="setup-error" role="alert">
+            {describeEngineStatus(engineStatus).text}
+          </p>
+        )
       )}
       <StepFooter note="Murmur lives in the tray from now on." action="Done" primary onAction={onDone} error={saveError} />
     </>

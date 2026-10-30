@@ -59,9 +59,18 @@
   color: var(--muted);
 }
 
-/* A live region that adds no box of its own: its lines are laid out as if they sat in the parent. */
+/*
+ * A live region stays in the page and in the accessibility tree before its content changes, so it is never display: none
+ * or display: contents. While empty it is taken out of the layout and adds no gap; with content it stacks its lines.
+ */
 .setup-live {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.setup-live:empty {
+  position: absolute;
 }
 
 .setup-small {

@@ -697,17 +697,32 @@ describe("SetupPage", () => {
       expect(screen.getByText("✓ That's it — Murmur types wherever your cursor is.")).toBeTruthy();
     });
 
-    it("announces the first dictation in a polite live region that was already there", async () => {
+    it("keeps one live region from waiting to ready, so the change is announced", () => {
+      const update = vi.fn<Update>().mockResolvedValue(undefined);
+      const view = renderPage({ state: tryItStep, engineStatus: loading, update });
+      const region = screen.getByRole("status");
+      expect(region.getAttribute("aria-live")).toBe("polite");
+      expect(region.textContent).toBe("Waiting for the speech model…");
+
+      view.rerender(<SetupPage state={tryItStep} engineStatus={ready} update={update} onDone={() => undefined} />);
+
+      expect(screen.getByRole("status")).toBe(region);
+      expect(region.textContent).toBe("Click the box, hold Right Ctrl, say a sentence, and let go.");
+      expect(region.contains(screen.getByRole("textbox", { name: "Practice dictation" }))).toBe(false);
+    });
+
+    it("announces the first dictation in the same live region", async () => {
       renderPage({ state: tryItStep, engineStatus: ready });
       await act(async () => undefined);
       const region = screen.getByRole("status");
-      expect(region.getAttribute("aria-live")).toBe("polite");
-      expect(region.textContent).toBe("");
+      expect(region.textContent).toBe("Click the box, hold Right Ctrl, say a sentence, and let go.");
 
       push("history.added", entry);
 
       expect(screen.getByRole("status")).toBe(region);
-      expect(region.textContent).toBe("✓ That's it — Murmur types wherever your cursor is.");
+      expect(region.textContent).toBe(
+        "Click the box, hold Right Ctrl, say a sentence, and let go.✓ That's it — Murmur types wherever your cursor is.",
+      );
     });
 
     it("says where Murmur lives afterwards", () => {
