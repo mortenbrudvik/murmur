@@ -13,6 +13,8 @@ public interface IModelManager
     /// <summary>
     /// Returns the path of a verified model file, resuming, retrying and downloading as needed. Transient network
     /// failures are retried without end (progress reports them); cancelling keeps the partial download for the next start.
+    /// A download first reports, at once, where it starts: the bytes its partial download already holds (all of them
+    /// for a complete one that is about to be verified). A model file that is already there and verifies reports nothing.
     /// </summary>
     /// <exception cref="HttpRequestException">The server answered with an error that retrying will not fix.</exception>
     /// <exception cref="InsufficientDiskSpaceException">The drive cannot hold the rest of the download.</exception>

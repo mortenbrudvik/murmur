@@ -40,6 +40,9 @@ public sealed class WhisperEngineTests : IDisposable
     private readonly WhisperEngine _engine;
 
     private readonly Dictionary<SpeechModelId, Func<IProgress<DownloadProgress>, CancellationToken, Task<string>>> _downloads = [];
+
+    /// <summary>What a model's .part file already holds, where its download reports it starts; 0 when not given.</summary>
+    private readonly Dictionary<SpeechModelId, long> _partLengths = [];
     private readonly List<EngineStatus> _statuses = [];
     private readonly List<string> _events = [];
 
@@ -239,6 +242,34 @@ public sealed class WhisperEngineTests : IDisposable
         received.Count.ShouldBeLessThanOrEqualTo(102, "the first report, then one per whole percent");
         received.ShouldBeInOrder(SortDirection.Ascending);
         received[^1].ShouldBe(total);
+    }
+
+    /// <summary>The manager reports where a resumed download starts, so the engine adds no 0 % of its own.</summary>
+    [Fact]
+    public async Task InitializeAsync_ResumedDownload_NeverShowsZeroBytes()
+    {
+        _partLengths[SpeechModelId.LargeV3Turbo] = 1_000_000_000;
+
+        await _engine.InitializeAsync(Ct);
+
+        var downloading = Statuses().Where(s => s.State == EngineState.Downloading).ToList();
+        downloading.ShouldNotBeEmpty();
+        downloading[0].Download!.BytesReceived.ShouldBe(1_000_000_000);
+        downloading.ShouldAllBe(s => s.Download!.BytesReceived > 0);
+    }
+
+    [Fact]
+    public async Task SwitchModelAsync_ResumedDownload_NeverShowsZeroBytes()
+    {
+        await ReadyOnLargeAsync();
+        _partLengths[SpeechModelId.SmallEn] = 200_000_000;
+
+        await _engine.SwitchModelAsync(SpeechModelId.SmallEn).WaitAsync(Patience, Ct);
+
+        var downloading = Statuses().Where(s => s.Download is not null).ToList();
+        downloading.ShouldNotBeEmpty();
+        downloading[0].Download!.BytesReceived.ShouldBe(200_000_000);
+        downloading.ShouldAllBe(s => s.Download!.BytesReceived > 0);
     }
 
     [Fact]
@@ -665,6 +696,10 @@ public sealed class WhisperEngineTests : IDisposable
         Log($"ensure:{model.Id}");
         try
         {
+            // Like ModelManager: a download first reports where it starts, which is what its .part file already holds.
+            if (!_models.HasExpectedFile(model))
+                progress.Report(new DownloadProgress(model.DisplayName, _partLengths.GetValueOrDefault(model.Id), model.SizeBytes, 0, null, 0));
+
             if (_downloads.TryGetValue(model.Id, out var download))
                 return await download(progress, ct);
 

@@ -74,7 +74,40 @@ public sealed class ModelManagerTests : IDisposable
         _handler.Ranges.ShouldBe(["bytes=400-"]);
         File.ReadAllBytes(path).ShouldBe(_body);
         File.Exists(PartPath).ShouldBeFalse();
-        _progress.Reports.First().BytesReceived.ShouldBe(500, "progress counts the bytes that were already on disk");
+        _progress.Reports[1].BytesReceived.ShouldBe(500, "progress counts the bytes that were already on disk");
+    }
+
+    /// <summary>A resumed download starts where its part left off, so the first status never shows 0 %.</summary>
+    [Fact]
+    public async Task EnsureModelAsync_PartFileExists_FirstReportIsThePartLength()
+    {
+        WritePart(_body[..400]);
+        var manager = CreateManager(_ => Partial(new ScriptedStream(_body[400..], chunkSize: 100)));
+
+        await Ensure(manager);
+
+        _progress.Reports[0].ShouldBe(new DownloadProgress("Test", 400, _body.Length, 0, null, 0));
+    }
+
+    [Fact]
+    public async Task EnsureModelAsync_Missing_FirstReportIsZeroBeforeAnyRequest()
+    {
+        DownloadProgress? first = null;
+        var calls = -1;
+        var progress = new RecordingProgress(report =>
+        {
+            if (first is null)
+            {
+                first = report;
+                calls = _handler.Calls;
+            }
+        });
+        var manager = CreateManager(_ => Ok(_body));
+
+        await manager.EnsureModelAsync(_model, progress, TestContext.Current.CancellationToken);
+
+        first.ShouldBe(new DownloadProgress("Test", 0, _body.Length, 0, null, 0));
+        calls.ShouldBe(0, "the download shows at once, not when the server first answers");
     }
 
     [Fact]
@@ -87,7 +120,8 @@ public sealed class ModelManagerTests : IDisposable
 
         _handler.Ranges.ShouldBe(["bytes=400-"]);
         File.ReadAllBytes(path).ShouldBe(_body);
-        _progress.Reports.First().BytesReceived.ShouldBe(250, "a 200 answer replaces the part, so counting starts at zero");
+        _progress.Reports[0].BytesReceived.ShouldBe(400);
+        _progress.Reports[1].BytesReceived.ShouldBe(250, "a 200 answer replaces the part, so counting starts at zero");
     }
 
     [Fact]
@@ -116,6 +150,18 @@ public sealed class ModelManagerTests : IDisposable
         File.Exists(PartPath).ShouldBeFalse();
     }
 
+    /// <summary>Hashing a complete part takes a moment for the large model; meanwhile the status shows it complete, not 0 %.</summary>
+    [Fact]
+    public async Task EnsureModelAsync_CompletePartFile_ReportsItCompleteBeforeItIsVerified()
+    {
+        WritePart(_body);
+        var manager = CreateManager(_ => throw new InvalidOperationException("the network must not be touched"));
+
+        await Ensure(manager);
+
+        _progress.Reports.ShouldBe([new DownloadProgress("Test", _body.Length, _body.Length, 0, null, 0)]);
+    }
+
     [Fact]
     public async Task EnsureModelAsync_PartLargerThanModel_StartsOver()
     {
@@ -126,6 +172,7 @@ public sealed class ModelManagerTests : IDisposable
 
         _handler.Ranges.ShouldBe([null]);
         File.ReadAllBytes(path).ShouldBe(_body);
+        _progress.Reports[0].BytesReceived.ShouldBe(0, "the oversized part is gone before the download starts");
     }
 
     [Fact]
@@ -400,6 +447,7 @@ public sealed class ModelManagerTests : IDisposable
         path.ShouldBe(ModelPath);
         _handler.Calls.ShouldBe(0);
         File.ReadAllText(_paths.ModelVerificationFile).ShouldContain("test.bin");
+        _progress.Reports.ShouldBeEmpty("nothing was downloaded");
     }
 
     [Fact]
@@ -501,7 +549,9 @@ public sealed class ModelManagerTests : IDisposable
 
         await Ensure(manager);
 
-        var reports = _progress.Reports;
+        // After the report of where the download starts, one per write.
+        _progress.Reports[0].ShouldBe(new DownloadProgress("Test", 0, 1000, 0, null, 0));
+        var reports = _progress.Reports[1..];
         reports.Count.ShouldBe(10);
         reports[0].BytesReceived.ShouldBe(100);
         reports[0].BytesPerSecond.ShouldBe(100, 1e-9);
@@ -524,7 +574,7 @@ public sealed class ModelManagerTests : IDisposable
 
         await Ensure(manager);
 
-        var reports = _progress.Reports;
+        var reports = _progress.Reports[1..];
         reports[0].BytesPerSecond.ShouldBe(0);
         reports[0].SecondsRemaining.ShouldBeNull();
         reports[1].BytesPerSecond.ShouldBe(200, 1e-9);
@@ -543,8 +593,9 @@ public sealed class ModelManagerTests : IDisposable
 
         await Ensure(manager);
 
-        _progress.Reports[4].BytesPerSecond.ShouldBe(100, 1e-9);
-        _progress.Reports[9].BytesPerSecond.ShouldBe(400, 1e-9);
+        var reports = _progress.Reports[1..];
+        reports[4].BytesPerSecond.ShouldBe(100, 1e-9);
+        reports[9].BytesPerSecond.ShouldBe(400, 1e-9);
     }
 
     [Theory]

@@ -386,8 +386,9 @@ public sealed class WhisperEngine(
     }
 
     /// <summary>
-    /// The verified model file, downloading what is missing. A missing file reports throttled progress through
-    /// <paramref name="downloading"/>; a file that is there already reports <paramref name="whileVerifying"/>, when
+    /// The verified model file, downloading what is missing. A download reports throttled progress through
+    /// <paramref name="downloading"/>, the first report at once and from where it starts (the manager counts what a
+    /// partial download already holds); a file that is there already reports <paramref name="whileVerifying"/>, when
     /// given, while it is verified (once per file: a second or two for the large model, with no progress to report).
     /// </summary>
     private Task<string> EnsureModelAsync(
@@ -400,9 +401,7 @@ public sealed class WhisperEngine(
                 SetStatus(downloading(report));
         });
 
-        if (!models.HasExpectedFile(model))
-            progress.Report(new DownloadProgress(model.DisplayName, 0, model.SizeBytes, 0, null, 0));
-        else if (whileVerifying is not null)
+        if (whileVerifying is not null && models.HasExpectedFile(model))
             SetStatus(whileVerifying);
 
         return models.EnsureModelAsync(model, progress, ct);

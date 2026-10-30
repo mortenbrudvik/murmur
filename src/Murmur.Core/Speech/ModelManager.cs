@@ -132,7 +132,10 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
         return true;
     }
 
-    /// <summary>Downloads until the .part file is as long as the model, resuming and retrying as needed. Does not verify it.</summary>
+    /// <summary>
+    /// Downloads until the .part file is as long as the model, resuming and retrying as needed. Does not verify it.
+    /// First reports where it starts: the bytes the part already holds, all of them when it is complete.
+    /// </summary>
     private async Task DownloadPartAsync(SpeechModelInfo model, string partPath, IProgress<DownloadProgress> progress, CancellationToken ct)
     {
         var partLength = FileLength(partPath);
@@ -143,6 +146,9 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
             partLength = 0;
         }
 
+        // Before anything that can take a while (the request, or hashing a complete part), so a resumed download is
+        // never shown at 0 % and a fresh one shows at once.
+        progress.Report(new DownloadProgress(model.DisplayName, partLength, model.SizeBytes, 0, null, 0));
         if (partLength == model.SizeBytes)
             return;
 
