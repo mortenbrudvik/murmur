@@ -58,7 +58,8 @@ const entry: HistoryEntry = { id: "1", timestamp: "2026-10-30T10:00:00Z", text: 
 interface ServerOptions {
   settings?: MurmurSettings;
   microphones?: MicrophoneInfo[];
-  micTest?: MicTestResult;
+  /** What startMicTest answers; a function is asked at every start, for a test that goes differently the second time. */
+  micTest?: MicTestResult | (() => MicTestResult);
   updateSettings?: (params: MurmurSettings) => MurmurSettings;
 }
 
@@ -73,7 +74,7 @@ function mockServer({ settings = stored, microphones = [usb, headset], micTest =
       return current;
     }
     if (key === "settings.getMicrophones") return microphones;
-    if (key === "setup.startMicTest") return micTest;
+    if (key === "setup.startMicTest") return typeof micTest === "function" ? micTest() : micTest;
     return null;
   });
 }
@@ -356,6 +357,57 @@ describe("SetupPage", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Open microphone settings" }));
 
       expect((await screen.findByRole("alert")).textContent).toBe("Could not open the link (no shell).");
+    });
+
+    it("offers Check again when access is denied or the test failed, but not while listening", async () => {
+      const listeningPage = renderPage({ state: microphoneStep });
+      await screen.findByText("✓ Microphone access allowed");
+      expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+      listeningPage.unmount();
+
+      mockServer({ micTest: { state: "accessDenied", error: null } });
+      const deniedPage = renderPage({ state: microphoneStep });
+      expect(await screen.findByRole("button", { name: "Check again" })).toBeTruthy();
+      deniedPage.unmount();
+
+      mockServer({ micTest: { state: "failed", error: "The microphone was unplugged" } });
+      renderPage({ state: microphoneStep });
+      expect(await screen.findByRole("button", { name: "Check again" })).toBeTruthy();
+    });
+
+    it("tests again on Check again, and shows access allowed once Windows lets Murmur in", async () => {
+      let allowed = false;
+      mockServer({ micTest: () => (allowed ? listening : { state: "accessDenied", error: null }) });
+      renderPage({ state: microphoneStep });
+      fireEvent.click(await screen.findByRole("button", { name: "Check again" }));
+
+      // Still blocked: the page keeps saying so.
+      await waitFor(() => expect(micTestCalls()).toEqual(["start:null", "stop", "start:null"]));
+      expect(await screen.findByText("Windows is blocking microphone access for Murmur.")).toBeTruthy();
+
+      allowed = true;
+      fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+
+      expect(await screen.findByText("✓ Microphone access allowed")).toBeTruthy();
+      expect(screen.queryByText("Windows is blocking microphone access for Murmur.")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+      expect(micTestCalls()).toEqual(["start:null", "stop", "start:null", "stop", "start:null"]);
+    });
+
+    it("tests again when the window gets focus back from Windows' microphone settings", async () => {
+      let allowed = false;
+      mockServer({ micTest: () => (allowed ? listening : { state: "accessDenied", error: null }) });
+      renderPage({ state: microphoneStep });
+      fireEvent.click(await screen.findByRole("button", { name: "Open microphone settings" }));
+      await waitFor(() => expect(apiClient.call).toHaveBeenCalledWith("app", "openLink", { target: "microphonePrivacy" }));
+
+      allowed = true;
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      expect(await screen.findByText("✓ Microphone access allowed")).toBeTruthy();
+      expect(screen.queryByText("Windows is blocking microphone access for Murmur.")).toBeNull();
     });
 
     it("shows why the microphone test failed", async () => {

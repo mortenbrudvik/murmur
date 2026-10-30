@@ -40,6 +40,13 @@ function setVisibility(state: "visible" | "hidden") {
   });
 }
 
+/** The window gets the keyboard focus again (for example after the user came back from another program). */
+function focusWindow() {
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
+}
+
 /** A promise the test settles itself, to hold a request back. */
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -218,13 +225,80 @@ describe("useMicLevel", () => {
     await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "start:usb"]));
   });
 
-  it("stops listening for the window being shown once it is unmounted", async () => {
+  it("starts the test again when the window gets focus, e.g. after Windows' microphone settings were closed", async () => {
+    vi.mocked(apiClient.call).mockResolvedValueOnce({ state: "accessDenied", error: null });
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result?.state).toBe("accessDenied"));
+
+    // The user allowed access in Windows' settings: Murmur's window was never hidden, so only the focus tells.
+    focusWindow();
+
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+    expect(setupCalls()).toEqual(["start:usb", "start:usb"]);
+  });
+
+  it("sends a restart after the start that has not answered yet, never before", async () => {
+    const first = deferred<MicTestResult>();
+    vi.mocked(apiClient.call).mockImplementationOnce(() => first.promise);
+    renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb"]));
+
+    focusWindow();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(setupCalls()).toEqual(["start:usb"]);
+
+    first.resolve(listening);
+
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "start:usb"]));
+  });
+
+  it("does not open the microphone while the window is hidden, and does once it is shown", async () => {
+    setVisibility("hidden");
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(setupCalls()).toEqual([]);
+    expect(result.current.result).toBeNull();
+
+    // Neither a focus event nor anything else may open the microphone for a window nobody sees.
+    focusWindow();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(setupCalls()).toEqual([]);
+
+    setVisibility("visible");
+
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+    expect(setupCalls()).toEqual(["start:usb"]);
+  });
+
+  it("does not start the new microphone's test while the window is hidden", async () => {
+    const { result, rerender } = renderHook(({ id }) => useMicLevel(id), { initialProps: { id: "usb" as string | null } });
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+
+    setVisibility("hidden");
+    rerender({ id: "headset" });
+
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "stop"]));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(setupCalls()).toEqual(["start:usb", "stop"]);
+  });
+
+  it("tests again on restart: stop, then start", async () => {
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+
+    act(() => result.current.restart());
+
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "stop", "start:usb"]));
+  });
+
+  it("stops listening for the window being shown or focused once it is unmounted", async () => {
     const { result, unmount } = renderHook(() => useMicLevel("usb"));
     await waitFor(() => expect(result.current.result).toEqual(listening));
     unmount();
     await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "stop"]));
 
     setVisibility("visible");
+    focusWindow();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(setupCalls()).toEqual(["start:usb", "stop"]);

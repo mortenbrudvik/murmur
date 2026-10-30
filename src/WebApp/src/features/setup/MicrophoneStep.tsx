@@ -28,7 +28,7 @@ function LevelMeter({ level }: { level: number }) {
 
 /** Listens on one microphone for as long as it is mounted: whether Windows lets Murmur in, and the level meter. */
 function MicrophoneTest({ microphoneId }: { microphoneId: string | null }) {
-  const { level, result } = useMicLevel(microphoneId);
+  const { level, result, restart } = useMicLevel(microphoneId);
   const [linkError, setLinkError] = useState<string | null>(null);
 
   async function openMicrophoneSettings() {
@@ -44,18 +44,24 @@ function MicrophoneTest({ microphoneId }: { microphoneId: string | null }) {
     <div className="setup-row">
       <div className="setup-mic-status">
         {result?.state === "listening" && <span className="setup-ok setup-small">✓ Microphone access allowed</span>}
-        {result?.state === "accessDenied" && (
-          <>
-            <span className="setup-small">Windows is blocking microphone access for Murmur.</span>
-            <button type="button" className="setup-button" onClick={() => void openMicrophoneSettings()}>
-              Open microphone settings
-            </button>
-          </>
-        )}
+        {result?.state === "accessDenied" && <span className="setup-small">Windows is blocking microphone access for Murmur.</span>}
         {result?.state === "failed" && (
           <p className="setup-error setup-small" role="alert">
             {result.error || "The microphone could not be opened."}
           </p>
+        )}
+        {(result?.state === "accessDenied" || result?.state === "failed") && (
+          <div className="setup-actions">
+            {result.state === "accessDenied" && (
+              <button type="button" className="setup-button" onClick={() => void openMicrophoneSettings()}>
+                Open microphone settings
+              </button>
+            )}
+            {/* Windows' settings do not hide Murmur, so allowing access there is only noticed by testing again. */}
+            <button type="button" className="setup-button" onClick={restart}>
+              Check again
+            </button>
+          </div>
         )}
         {linkError && (
           <p className="setup-error setup-small" role="alert">
