@@ -32,7 +32,13 @@ public class StopMicTestHandler(MicrophoneLevelMonitor monitor) : IRequestHandle
 /// The current microphone level during a test, from 0 (silence) to 1 (full scale); the main window shows it as the
 /// "setup.micLevel" event.
 /// </summary>
-public sealed class MicLevelNotification(double level) : INotification
+/// <param name="ended">
+/// True, with a level of 0, when the test has ended without the page asking: after <see cref="MicrophoneLevelMonitor.MaxDuration"/>,
+/// when the microphone failed, or because the window was hidden or minimized. The page then knows to start it again.
+/// </param>
+public sealed class MicLevelNotification(double level, bool ended) : INotification
 {
     public double Level { get; } = level;
+
+    public bool Ended { get; } = ended;
 }

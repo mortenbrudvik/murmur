@@ -25,12 +25,22 @@ function setupCalls(): string[] {
 }
 
 /** Delivers a setup.micLevel push to everything that subscribed to it. */
-function pushLevel(level: number) {
+function pushLevel(level: number, ended = false) {
   const callbacks = vi.mocked(apiClient.on).mock.calls
     .filter(([name]) => name === "setup.micLevel")
-    .map(([, callback]) => callback as (data: { level: number }) => void);
+    .map(([, callback]) => callback as (data: { level: number; ended: boolean }) => void);
   expect(callbacks.length).toBeGreaterThan(0);
-  act(() => callbacks.forEach((callback) => callback({ level })));
+  act(() => callbacks.forEach((callback) => callback({ level, ended })));
+}
+
+/** The .NET side ended the test without the page asking: two minutes passed, the microphone failed, or the window hid. */
+function pushEnded() {
+  pushLevel(0, true);
+}
+
+/** Gives a request that should not be sent, or a level that should not show, the chance to happen anyway. */
+function settle() {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
 }
 
 function setVisibility(state: "visible" | "hidden") {
@@ -217,12 +227,114 @@ describe("useMicLevel", () => {
     const { result } = renderHook(() => useMicLevel("usb"));
     await waitFor(() => expect(result.current.result).toEqual(listening));
 
-    // The .NET side stopped the test when the window was hidden.
+    // The .NET side stops the test when the window is hidden, and says so.
     setVisibility("hidden");
+    pushEnded();
     expect(setupCalls()).toEqual(["start:usb"]);
     setVisibility("visible");
 
     await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "start:usb"]));
+  });
+
+  it("starts the test once when the window is shown, although it both becomes visible and gets focus", async () => {
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+    setVisibility("hidden");
+    pushEnded();
+
+    setVisibility("visible");
+    focusWindow();
+    await settle();
+
+    expect(setupCalls()).toEqual(["start:usb", "start:usb"]);
+  });
+
+  it("tests a blocked microphone once when the window is shown, although it both becomes visible and gets focus", async () => {
+    vi.mocked(apiClient.call).mockResolvedValue({ state: "accessDenied", error: null });
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result?.state).toBe("accessDenied"));
+    setVisibility("hidden");
+
+    setVisibility("visible");
+    focusWindow();
+    await settle();
+
+    expect(setupCalls()).toEqual(["start:usb", "start:usb"]);
+  });
+
+  it("leaves a test that is listening alone when the window gets focus again (alt-tab back)", async () => {
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+
+    focusWindow();
+    setVisibility("visible");
+    await settle();
+
+    // Reopening a working microphone switches a Bluetooth headset's profile: a glitch and a second of flat meter.
+    expect(setupCalls()).toEqual(["start:usb"]);
+    pushLevel(0.3);
+    expect(result.current.level).toBe(0.3);
+  });
+
+  it("starts the test again on focus once the .NET side said it ended", async () => {
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+    pushLevel(0.6);
+
+    pushEnded();
+    expect(result.current.level).toBe(0);
+    focusWindow();
+
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "start:usb"]));
+    await settle();
+    expect(setupCalls()).toEqual(["start:usb", "start:usb"]);
+  });
+
+  it("shows no level that trails the end of the test", async () => {
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+
+    pushEnded();
+    pushLevel(0.6);
+
+    expect(result.current.level).toBe(0);
+  });
+
+  it("does not let the end of the previous test stop the meter of the one that is starting", async () => {
+    const second = deferred<MicTestResult>();
+    let starts = 0;
+    vi.mocked(apiClient.call).mockImplementation((service, method) => {
+      if (service !== "setup" || method !== "startMicTest") return Promise.resolve(null);
+      return ++starts === 1 ? Promise.resolve(listening) : second.promise;
+    });
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+
+    act(() => result.current.restart());
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "stop", "start:usb"]));
+    // The end of the first test arrives while the new start is on its way.
+    pushEnded();
+    second.resolve(listening);
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+
+    pushLevel(0.4);
+    expect(result.current.level).toBe(0.4);
+    focusWindow();
+    await settle();
+    expect(setupCalls()).toEqual(["start:usb", "stop", "start:usb"]);
+  });
+
+  it("drops the meter to 0 on Check again, before the new test has a level", async () => {
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+    pushLevel(0.7);
+    expect(result.current.level).toBe(0.7);
+
+    act(() => result.current.restart());
+
+    expect(result.current.level).toBe(0);
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "stop", "start:usb"]));
+    expect(result.current.level).toBe(0);
   });
 
   it("starts the test again when the window gets focus, e.g. after Windows' microphone settings were closed", async () => {
@@ -237,19 +349,34 @@ describe("useMicLevel", () => {
     expect(setupCalls()).toEqual(["start:usb", "start:usb"]);
   });
 
-  it("sends a restart after the start that has not answered yet, never before", async () => {
+  it("does not start again on focus while a start is on its way", async () => {
     const first = deferred<MicTestResult>();
     vi.mocked(apiClient.call).mockImplementationOnce(() => first.promise);
-    renderHook(() => useMicLevel("usb"));
+    const { result } = renderHook(() => useMicLevel("usb"));
     await waitFor(() => expect(setupCalls()).toEqual(["start:usb"]));
 
     focusWindow();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    setVisibility("visible");
+    first.resolve(listening);
+
+    await waitFor(() => expect(result.current.result).toEqual(listening));
+    await settle();
+    expect(setupCalls()).toEqual(["start:usb"]);
+  });
+
+  it("sends Check again after the start that has not answered yet, never before", async () => {
+    const first = deferred<MicTestResult>();
+    vi.mocked(apiClient.call).mockImplementationOnce(() => first.promise);
+    const { result } = renderHook(() => useMicLevel("usb"));
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb"]));
+
+    act(() => result.current.restart());
+    await settle();
     expect(setupCalls()).toEqual(["start:usb"]);
 
     first.resolve(listening);
 
-    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "start:usb"]));
+    await waitFor(() => expect(setupCalls()).toEqual(["start:usb", "stop", "start:usb"]));
   });
 
   it("does not open the microphone while the window is hidden, and does once it is shown", async () => {

@@ -14,15 +14,21 @@ public partial class MainWindow : FluentWindow
 
         // A hotkey capture started from the settings page must not outlive the window's focus: once the owner has
         // clicked away (or the window hid), the keys pressed next are meant for another app. Likewise a microphone
-        // test from the setup page must not keep the microphone open once nobody can see its meter.
+        // test from the setup page must not keep the microphone open once nobody can see its meter: hidden or
+        // minimized. The page hears that the test ended and starts it again when the window is back.
         Deactivated += (_, _) => hotkeyCapture.Cancel();
         IsVisibleChanged += (_, e) =>
         {
             if (e.NewValue is false)
             {
                 hotkeyCapture.Cancel();
-                micTest.Stop();
+                micTest.StopForWindow();
             }
+        };
+        StateChanged += (_, _) =>
+        {
+            if (WindowState == System.Windows.WindowState.Minimized)
+                micTest.StopForWindow();
         };
     }
 

@@ -9,8 +9,10 @@ namespace Murmur.Core.Audio;
 /// <summary>
 /// The microphone test of the first-run setup: opens the microphone on a recorder of its own (so it can never
 /// collide with a dictation) and publishes the level of what it hears as <see cref="MicLevelNotification"/>s, at most
-/// one per 50 ms. It never leaves the microphone open: the test ends on <see cref="Stop"/>, on <see cref="Dispose"/>,
-/// when the microphone fails and by itself after <see cref="MaxDuration"/>.
+/// one per 50 ms. It never leaves the microphone open: the test ends on <see cref="Stop"/>, on <see cref="StopForWindow"/>,
+/// on <see cref="Dispose"/>, when the microphone fails and by itself after <see cref="MaxDuration"/>. A test that ends
+/// without the page asking (all but <see cref="Stop"/> and <see cref="Dispose"/>) publishes a last, ended level of 0, so
+/// the page knows to start it again.
 /// </summary>
 /// <remarks>
 /// The recorder raises its events on the capture thread, where <see cref="IAudioRecorder.Stop"/> and
@@ -98,19 +100,17 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
         return new MicTestResult(MicTestState.Listening);
     }
 
-    /// <summary>Ends the test and releases the microphone. Harmless when no test is running.</summary>
-    public void Stop()
-    {
-        Session? session;
-        lock (_gate)
-        {
-            session = _current;
-            _current = null;
-        }
+    /// <summary>
+    /// Ends the test and releases the microphone, for the page that asked for it: publishes nothing. Harmless when no
+    /// test is running.
+    /// </summary>
+    public void Stop() => StopCurrent(announce: false);
 
-        if (session is not null)
-            End(session);
-    }
+    /// <summary>
+    /// Ends the test and releases the microphone because the window was hidden or minimized, and publishes an ended
+    /// level of 0, so the page starts the test again once it is seen. Harmless, and silent, when no test is running.
+    /// </summary>
+    public void StopForWindow() => StopCurrent(announce: true);
 
     /// <summary>Stops a running test; a test started afterwards is refused.</summary>
     public void Dispose()
@@ -174,7 +174,7 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
 
         session.HasPublished = true;
         session.LastPublished = now;
-        PublishLevel(LevelFromDbfs(SpeechDetector.RmsDbfs(chunk)));
+        Publish(LevelFromDbfs(SpeechDetector.RmsDbfs(chunk)), ended: false);
     }
 
     /// <summary>
@@ -188,7 +188,7 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
 
         _logger.Warning(ex, "The microphone failed during the microphone test");
         End(session);
-        PublishLevel(0);
+        PublishEnded();
     }
 
     /// <summary>Runs on a timer thread, never on the capture thread, so it may wait for the recorder to stop.</summary>
@@ -199,7 +199,25 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
 
         _logger.Information("The microphone test reached its {Limit} limit and stopped", MaxDuration);
         End(session);
-        PublishLevel(0);
+        PublishEnded();
+    }
+
+    /// <summary>Ends the current test, if any; <paramref name="announce"/> publishes that it ended.</summary>
+    private void StopCurrent(bool announce)
+    {
+        Session? session;
+        lock (_gate)
+        {
+            session = _current;
+            _current = null;
+        }
+
+        if (session is null)
+            return;
+
+        End(session);
+        if (announce)
+            PublishEnded();
     }
 
     /// <summary>Takes <paramref name="session"/> out as the current test; false when something else already did.</summary>
@@ -245,12 +263,18 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
         }
     }
 
+    /// <summary>
+    /// A silent meter that tells the page the test is over. Called after <see cref="End"/>: releasing the recorder waits
+    /// for a sample handler that is running, so this is the ended test's last publish.
+    /// </summary>
+    private void PublishEnded() => Publish(0, ended: true);
+
     /// <summary>Publishes without waiting: the capture thread must not block on the page.</summary>
-    private void PublishLevel(double level)
+    private void Publish(double level, bool ended)
     {
         try
         {
-            mediator.Publish(new MicLevelNotification(level)).FireAndForget();
+            mediator.Publish(new MicLevelNotification(level, ended)).FireAndForget();
         }
         catch (Exception ex)
         {

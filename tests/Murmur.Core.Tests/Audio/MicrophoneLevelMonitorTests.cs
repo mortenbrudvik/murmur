@@ -19,12 +19,16 @@ public sealed class MicrophoneLevelMonitorTests
     private readonly List<IAudioRecorder> _created = [];
     private readonly Queue<IAudioRecorder> _prepared = new();
     private readonly List<double> _levels = [];
+    private readonly List<MicLevelNotification> _published = [];
     private readonly MicrophoneLevelMonitor _monitor;
 
     public MicrophoneLevelMonitorTests()
     {
-        _mediator.Publish(Arg.Do<MicLevelNotification>(n => _levels.Add(n.Level)), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
+        _mediator.Publish(Arg.Do<MicLevelNotification>(n =>
+        {
+            _levels.Add(n.Level);
+            _published.Add(n);
+        }), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         _monitor = new MicrophoneLevelMonitor(CreateRecorder, _mediator, _time);
     }
 
@@ -75,6 +79,19 @@ public sealed class MicrophoneLevelMonitorTests
         _levels.Count.ShouldBe(1);
         _levels[0].ShouldBe(MicrophoneLevelMonitor.LevelFromDbfs(20 * Math.Log10(0.03)), 1e-3);
         _levels[0].ShouldBeInRange(0.48, 0.5);
+    }
+
+    [Fact]
+    public void Start_Samples_PublishLevelsThatAreNotEnded()
+    {
+        _monitor.Start(null);
+
+        Emit(Recorder(), Chunk(0.1f));
+        _time.Advance(TimeSpan.FromMilliseconds(50));
+        Emit(Recorder(), new float[480]);
+
+        _published.Count.ShouldBe(2);
+        _published.ShouldAllBe(n => !n.Ended);
     }
 
     [Fact]
@@ -244,6 +261,20 @@ public sealed class MicrophoneLevelMonitorTests
     }
 
     [Fact]
+    public void Start_After120Seconds_TellsThePageTheTestEnded()
+    {
+        _monitor.Start(null);
+        Emit(Recorder(), Chunk(0.5f));
+
+        _time.Advance(MicrophoneLevelMonitor.MaxDuration);
+
+        _published.Count.ShouldBe(2);
+        _published[0].Ended.ShouldBeFalse();
+        _published[1].Ended.ShouldBeTrue();
+        _published[1].Level.ShouldBe(0);
+    }
+
+    [Fact]
     public void Start_AfterAutoStop_CanStartAgain()
     {
         _monitor.Start(null);
@@ -307,6 +338,67 @@ public sealed class MicrophoneLevelMonitorTests
         _levels.ShouldBeEmpty();
     }
 
+    /// <summary>The page asked for the stop, so it knows: nothing is published, not even a silent meter.</summary>
+    [Fact]
+    public void Stop_WhileRunning_PublishesNothing()
+    {
+        _monitor.Start(null);
+
+        _monitor.Stop();
+
+        _published.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void StopForWindow_WhileRunning_ReleasesTheRecorderAndTellsThePageTheTestEnded()
+    {
+        _monitor.Start(null);
+        Emit(Recorder(), Chunk(0.5f));
+
+        _monitor.StopForWindow();
+
+        Recorder().Received(1).Cancel();
+        _published.Count.ShouldBe(2);
+        _published[1].Ended.ShouldBeTrue();
+        _published[1].Level.ShouldBe(0);
+    }
+
+    [Fact]
+    public void StopForWindow_CancelsTheAutoStopAndLateSamplesPublishNothing()
+    {
+        _monitor.Start(null);
+        _monitor.StopForWindow();
+
+        _time.Advance(MicrophoneLevelMonitor.MaxDuration * 2);
+        Emit(Recorder(), Chunk(0.5f));
+
+        Recorder().Received(1).Cancel();
+        _published.Count.ShouldBe(1, "only the end of the test");
+    }
+
+    [Fact]
+    public void StopForWindow_NothingRunning_PublishesNothing()
+    {
+        _monitor.StopForWindow();
+        _monitor.Start(null);
+        _monitor.Stop();
+        _monitor.StopForWindow();
+
+        _published.ShouldBeEmpty();
+        Recorder().Received(1).Cancel();
+    }
+
+    [Fact]
+    public void StopForWindow_ThenStart_StartsAFreshTest()
+    {
+        _monitor.Start(null);
+        _monitor.StopForWindow();
+
+        _monitor.Start(null).State.ShouldBe(MicTestState.Listening);
+
+        Recorder(1).Received(1).Start(null);
+    }
+
     [Fact]
     public void Stop_RecorderThrows_IsContained()
     {
@@ -343,6 +435,8 @@ public sealed class MicrophoneLevelMonitorTests
 
         _levels.Count.ShouldBe(2);
         _levels[1].ShouldBe(0);
+        _published[0].Ended.ShouldBeFalse();
+        _published[1].Ended.ShouldBeTrue("the page starts a new test on its next focus");
 
         // The timer is gone, and the test can start again.
         _time.Advance(MicrophoneLevelMonitor.MaxDuration * 2);

@@ -410,6 +410,29 @@ describe("SetupPage", () => {
       expect(screen.queryByText("Windows is blocking microphone access for Murmur.")).toBeNull();
     });
 
+    it("keeps a working microphone open when the window gets focus, and tests again once the test has ended", async () => {
+      renderPage({ state: microphoneStep });
+      await screen.findByText("✓ Microphone access allowed");
+      const meter = screen.getByRole("meter", { name: "Microphone level" });
+      push("setup.micLevel", { level: 0.5, ended: false });
+
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+      expect(micTestCalls()).toEqual(["start:null"]);
+      expect(meter.getAttribute("aria-valuenow")).toBe("50");
+
+      // The window was minimized, say: the .NET side ended the test.
+      push("setup.micLevel", { level: 0, ended: true });
+      expect(meter.getAttribute("aria-valuenow")).toBe("0");
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      await waitFor(() => expect(micTestCalls()).toEqual(["start:null", "start:null"]));
+    });
+
     it("shows why the microphone test failed", async () => {
       mockServer({ micTest: { state: "failed", error: "The microphone was unplugged" } });
       renderPage({ state: microphoneStep });

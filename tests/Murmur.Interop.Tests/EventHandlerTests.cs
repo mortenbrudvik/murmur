@@ -39,9 +39,17 @@ public class EventHandlerTests
     [Fact]
     public async Task MicLevelEventHandler_PublishesSetupMicLevelWithTheLevel()
     {
-        await new MicLevelEventHandler(_events).Handle(new MicLevelNotification(0.5), CancellationToken.None);
+        await new MicLevelEventHandler(_events).Handle(new MicLevelNotification(0.5, ended: false), CancellationToken.None);
 
-        // The page reads the level as { level }, so that is the shape that goes over the wire.
-        _events.Received(1).Publish("setup.micLevel", Arg.Is<object>(data => JsonUtils.Serialize(data) == "{\"level\":0.5}"));
+        // The page reads the level as { level, ended }, so that is the shape that goes over the wire.
+        _events.Received(1).Publish("setup.micLevel", Arg.Is<object>(data => JsonUtils.Serialize(data) == "{\"level\":0.5,\"ended\":false}"));
+    }
+
+    [Fact]
+    public async Task MicLevelEventHandler_TestEnded_SaysSo()
+    {
+        await new MicLevelEventHandler(_events).Handle(new MicLevelNotification(0, ended: true), CancellationToken.None);
+
+        _events.Received(1).Publish("setup.micLevel", Arg.Is<object>(data => JsonUtils.Serialize(data) == "{\"level\":0,\"ended\":true}"));
     }
 }
