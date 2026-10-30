@@ -36,6 +36,23 @@ public sealed class HotkeyCaptureCoordinator(TimeProvider time)
     }
 
     /// <summary>
+    /// Ends the active capture, if any, as if Esc had been pressed (its <see cref="CaptureAsync"/> returns null), so
+    /// keys stop being swallowed. Called when the window that asked for the capture loses focus or hides: keys typed
+    /// into another app afterwards must not become the hotkey. May be called from any thread.
+    /// </summary>
+    public void Cancel()
+    {
+        PendingCapture? capture;
+        lock (_gate)
+        {
+            capture = _active;
+            _active = null;
+        }
+
+        capture?.Completion.TrySetResult(null);
+    }
+
+    /// <summary>
     /// Feeds a key event to the active capture. Returns true (swallow the event) while a capture is active.
     /// Injected input is never captured and always passes through, so Murmur's own paste keeps working.
     /// </summary>

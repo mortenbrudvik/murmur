@@ -256,6 +256,33 @@ public sealed class HotkeyCaptureTests
     }
 
     [Fact]
+    public async Task Coordinator_Cancel_CompletesWithNullAndStopsSwallowing()
+    {
+        // The window lost focus mid-capture: keys meant for another app must not become the hotkey.
+        var coordinator = new HotkeyCaptureCoordinator(new FakeTimeProvider());
+        var capture = coordinator.CaptureAsync(CaptureTimeout, TestContext.Current.CancellationToken);
+        coordinator.TryHandle(Down(LeftCtrl)).ShouldBeTrue();
+
+        coordinator.Cancel();
+
+        (await capture).ShouldBeNull();
+        coordinator.TryHandle(Down(KeyA)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Coordinator_CancelWhenIdle_DoesNothing()
+    {
+        var coordinator = new HotkeyCaptureCoordinator(new FakeTimeProvider());
+
+        coordinator.Cancel();
+
+        var capture = coordinator.CaptureAsync(CaptureTimeout, TestContext.Current.CancellationToken);
+        coordinator.TryHandle(Down(RightCtrl)).ShouldBeTrue();
+        coordinator.TryHandle(Up(RightCtrl)).ShouldBeTrue();
+        (await capture).ShouldBe(HotkeyDefinition.Default);
+    }
+
+    [Fact]
     public async Task Coordinator_InjectedInput_PassesThrough()
     {
         var coordinator = new HotkeyCaptureCoordinator(new FakeTimeProvider());
