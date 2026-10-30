@@ -9,9 +9,10 @@ const CHOICE_DELAY_MS = 1000;
 
 /**
  * The speech model in use, the one that suits this PC and the models on offer. Null until known.
- * A choice shows at once but is sent one second after the last change; sending it returns at once: the download and
- * the switch go on in the background and are reported by engine.statusChanged. When reading or sending fails, `error`
- * says so and the choice shown is the one the server last confirmed.
+ * A choice shows at once but is sent one second after the last change, or at once when the page is left before then;
+ * sending it returns at once: the download and the switch go on in the background and are reported by
+ * engine.statusChanged. When reading or sending fails, `error` says so and the choice shown is the one the server last
+ * confirmed.
  */
 export function useModelChoice(): {
   choice: ModelChoice | null;
@@ -28,6 +29,8 @@ export function useModelChoice(): {
   const mounted = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedSelection = useRef<SpeechModelId | null>(null);
+  // The choice the timer will send, for an unmount during the wait.
+  const waitingSelection = useRef<SpeechModelId | null>(null);
 
   const accept = useCallback((requestId: number, answer: ModelChoice | null) => {
     if (!mounted.current || requestId !== latest.current) return;
@@ -74,11 +77,16 @@ export function useModelChoice(): {
 
     return () => {
       mounted.current = false;
-      // A choice still waiting is dropped: leaving the page is not a decision to switch models.
-      if (timer.current !== null) clearTimeout(timer.current);
+      if (timer.current === null) return;
+
+      // Leaving the page within the wait is not taking the choice back: a choice still waiting is sent at once. Its
+      // answer finds the hook unmounted and is ignored; the switch is reported through the engine status as usual.
+      clearTimeout(timer.current);
       timer.current = null;
+      const waiting = waitingSelection.current;
+      if (waiting !== null && waiting !== savedSelection.current) void send(waiting);
     };
-  }, [read]);
+  }, [read, send]);
 
   // A switch that fails leaves the engine ready on the old model and puts the old choice back, so the choice shown here
   // is read again whenever the engine reports ready with nothing left to download.
@@ -90,6 +98,7 @@ export function useModelChoice(): {
     (id: SpeechModelId) => {
       setError(null);
       setPending(id);
+      waitingSelection.current = id;
       if (timer.current !== null) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
         timer.current = null;

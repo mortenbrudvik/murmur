@@ -121,12 +121,37 @@ describe("useModelChoice", () => {
     expect(result.current.choice).toEqual(large);
   });
 
-  it("sends nothing when the hook is unmounted during the wait", async () => {
-    vi.mocked(apiClient.call).mockResolvedValue(large);
+  it("sends the waiting choice at once when the hook is unmounted during the wait", async () => {
+    vi.mocked(apiClient.call).mockImplementation(async (_service, method) => (method === "setChoice" ? small : large));
     const { result, unmount } = await renderLoaded();
 
     act(() => result.current.select("smallEn"));
     await advance(500);
+    unmount();
+
+    // Leaving Settings within the second is not taking the choice back.
+    expect(setChoiceCalls()).toEqual([["models", "setChoice", { model: "smallEn" }]]);
+    await advance(5000);
+    expect(setChoiceCalls()).toHaveLength(1);
+  });
+
+  it("sends nothing on unmount when no choice is waiting", async () => {
+    vi.mocked(apiClient.call).mockResolvedValue(large);
+    const { unmount } = await renderLoaded();
+
+    unmount();
+    await advance(5000);
+
+    expect(setChoiceCalls()).toHaveLength(0);
+  });
+
+  it("sends nothing on unmount when the waiting choice is the saved one", async () => {
+    vi.mocked(apiClient.call).mockResolvedValue(large);
+    const { result, unmount } = await renderLoaded();
+
+    act(() => result.current.select("smallEn"));
+    await advance(300);
+    act(() => result.current.select("largeV3Turbo"));
     unmount();
     await advance(5000);
 
