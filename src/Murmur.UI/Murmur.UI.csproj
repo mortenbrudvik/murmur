@@ -19,6 +19,10 @@
     <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
     <PackageReference Include="Serilog.Sinks.Debug" Version="3.*" />
     <PackageReference Include="WPF-UI" Version="4.*" />
+    <!-- Toolbox, not a dependency: makepri/makeappx/signtool for build/build-msix.ps1 come from here, so every machine
+         runs identical binaries rather than whichever Windows SDK it happens to have installed. The script reads this
+         version, so it is pinned in this one place. -->
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.6584" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>
@@ -52,6 +56,32 @@
     <Copy SourceFiles="@(FrontendFiles)"
           DestinationFolder="$(TargetDir)Assets\%(RecursiveDir)"
           SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- Publish the frontend too (the MSIX package is built from the publish output). CopyFrontend only fills the build
+       output, which dotnet publish does not copy from. Items are added at run time, after BuildFrontend has made dist,
+       because a static Content glob would be evaluated before the first frontend build and find nothing. -->
+  <Target Name="PublishFrontend" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <FrontendPublishFiles Include="$(WebAppDir)dist\**\*.*" />
+      <ResolvedFileToPublish Include="@(FrontendPublishFiles->'%(FullPath)')" Exclude="@(ResolvedFileToPublish)">
+        <RelativePath>Assets\%(FrontendPublishFiles.RecursiveDir)%(FrontendPublishFiles.Filename)%(FrontendPublishFiles.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <Error Condition="'@(FrontendPublishFiles)' == ''"
+           Text="No frontend files in $(WebAppDir)dist to publish; build the frontend (do not pass SkipFrontendBuild=true without a dist folder)." />
+  </Target>
+
+  <!-- A win-x64 publish carries only win-x64 native libraries. The Whisper.net runtime packages (and WebView2) add every
+       platform's natives as plain copy items, which publish does not filter by runtime identifier: without this the
+       MSIX would carry about 220 MB of Linux .so files plus the x86 and arm64 DLLs. -->
+  <Target Name="RemoveForeignNativeRuntimes" AfterTargets="ComputeFilesToPublish" Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="$([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('/', '\').StartsWith('runtimes\')) And !$([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Contains('win-x64'))" />
+    </ItemGroup>
   </Target>
 
 </Project>

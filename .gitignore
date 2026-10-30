@@ -25,6 +25,19 @@ coverage/
 *.nupkg
 *.snupkg
 
+# MSIX packaging (build/build-msix.ps1): the staged layout, the packages, and any signing material
+packaging/msix/staging/
+installer-output/
+*.msix
+*.msixbundle
+*.msixupload
+*.appx
+*.appxbundle
+*.appxupload
+*.pfx
+*.cer
+*.p12
+
 # OS
 .DS_Store
 Thumbs.db
