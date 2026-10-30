@@ -22,6 +22,11 @@ public interface IModelManager
     /// The server answered with an error that retrying will not fix, or no secure connection could be made to it
     /// (<see cref="HttpRequestException.HttpRequestError"/> says which).
     /// </exception>
+    /// <exception cref="HttpIOException">
+    /// No secure connection could be made, and the last of the secure-connection failures counted towards giving up came
+    /// while the body was read (<see cref="HttpIOException.HttpRequestError"/> is
+    /// <see cref="HttpRequestError.SecureConnectionError"/>).
+    /// </exception>
     /// <exception cref="InsufficientDiskSpaceException">The drive cannot hold the rest of the download.</exception>
     /// <exception cref="ModelVerificationException">Two downloads in a row did not match the pinned SHA-256.</exception>
     Task<string> EnsureModelAsync(SpeechModelInfo model, IProgress<DownloadProgress> progress, CancellationToken ct);
