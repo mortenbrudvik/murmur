@@ -46,6 +46,7 @@ public sealed class DictationStateMachineTests
         DictationTimings.Default.TapThreshold.ShouldBe(TimeSpan.FromMilliseconds(300));
         DictationTimings.Default.StrayTapTimeout.ShouldBe(TimeSpan.FromSeconds(8));
         DictationTimings.Default.HandsFreeLimit.ShouldBe(TimeSpan.FromMinutes(10));
+        DictationTimings.Default.HoldLimit.ShouldBe(TimeSpan.FromMinutes(5));
         DictationTimings.Default.ArmDelay.ShouldBe(TimeSpan.FromMilliseconds(150));
 
         // A release while armed is always a tap.
@@ -300,6 +301,19 @@ public sealed class DictationStateMachineTests
     }
 
     [Fact]
+    public void HandsFree_PastTheHoldLimit_KeepsRecording()
+    {
+        // The hold limit is for a key that is held; a hands-free session has its own, longer, limit.
+        var sm = Tap();
+        sm.OnSpeechDetected();
+
+        sm.OnTick(T0.AddMinutes(5).AddSeconds(1), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.HandsFreeRecording);
+        sm.OnTick(T0.AddMinutes(10), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.StopAndSaveOnly);
+        sm.State.ShouldBe(DictationState.Transcribing);
+    }
+
+    [Fact]
     public void HandsFree_Timers_AreMeasuredFromPressNotRelease()
     {
         // Press at t0, tap released at 150 ms: the 8 s guard fires 8 s after the press, not after the release.
@@ -336,6 +350,29 @@ public sealed class DictationStateMachineTests
 
         sm.OnTick(Ms(100), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.None);
         sm.State.ShouldBe(DictationState.HandsFreeRecording);
+    }
+
+    [Fact]
+    public void Hold_PastTheHoldLimit_StopsAndSavesOnly()
+    {
+        var sm = NewMachine();
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
+
+        sm.OnTick(T0.AddMinutes(5).AddMilliseconds(-1), hotkeyPhysicallyDown: true, engineReady: true).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.HoldRecording);
+        sm.OnTick(T0.AddMinutes(5), hotkeyPhysicallyDown: true, engineReady: true).ShouldBe(DictationAction.StopAndSaveOnly);
+        sm.State.ShouldBe(DictationState.Transcribing);
+    }
+
+    [Fact]
+    public void Hold_ReleaseSeenByTheTickPastTheHoldLimit_StillPastes()
+    {
+        // A key that was let go is a release, however late the tick finds out.
+        var sm = NewMachine();
+        sm.OnHotkeyDown(T0, engineReady: true, modifierOnly: false);
+
+        sm.OnTick(T0.AddMinutes(5), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.StopAndPaste);
+        sm.State.ShouldBe(DictationState.Transcribing);
     }
 
     [Fact]

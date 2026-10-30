@@ -23,6 +23,7 @@ namespace Murmur.Core.Tests.Dictation;
 public sealed class DictationControllerTests : IDisposable
 {
     private const int RightCtrl = 0xA3;
+    private const int GenericCtrl = 0x11, GenericAlt = 0x12, VkD = 0x44;
     private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(5);
 
     /// <summary>How long the default hotkey (Right Ctrl, a lone modifier) is held before recording starts.</summary>
@@ -53,6 +54,10 @@ public sealed class DictationControllerTests : IDisposable
     /// <summary>What <see cref="IKeyStateProbe.IsKeyDown"/> reports for Right Ctrl.</summary>
     private volatile bool _hotkeyDown;
 
+    /// <summary>What <see cref="IKeyStateProbe.IsKeyDown"/> reports for the generic Ctrl and Alt keys (a combo's modifiers).</summary>
+    private volatile bool _ctrlDown;
+    private volatile bool _altDown;
+
     private DictationController? _controller;
 
     public DictationControllerTests()
@@ -62,6 +67,8 @@ public sealed class DictationControllerTests : IDisposable
         _settings.Load().Returns(MurmurSettings.Default);
         _vocabulary.Load().Returns(Vocabulary.Empty);
         _keys.IsKeyDown(RightCtrl).Returns(_ => _hotkeyDown);
+        _keys.IsKeyDown(GenericCtrl).Returns(_ => _ctrlDown);
+        _keys.IsKeyDown(GenericAlt).Returns(_ => _altDown);
 
         _recorder.When(r => r.Start(Arg.Any<string?>())).Do(_ =>
         {
@@ -1348,20 +1355,103 @@ public sealed class DictationControllerTests : IDisposable
     public async Task ComboHotkey_TickUsesTheMatchersHeldState()
     {
         // A swallowed combo key never reaches GetAsyncKeyState, so the probe would always say "up".
-        const int vkLeftCtrl = 0xA2, vkLeftAlt = 0xA4, vkD = 0x44;
-        _matcher.Hotkey = new HotkeyDefinition(vkD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+D");
-        _matcher.OnKey(new KeyInput(vkLeftCtrl, true, false));
-        _matcher.OnKey(new KeyInput(vkLeftAlt, true, false));
-        _matcher.OnKey(new KeyInput(vkD, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
-        Signal(HotkeySignal.HotkeyDown);
-        _recorder.Received(1).Start(Arg.Any<string?>()); // no arm delay: the combo is swallowed, so it is no app's shortcut
+        PressCtrlAltD();
 
         _time.Advance(TimeSpan.FromMilliseconds(800));
 
         _machine.State.ShouldBe(DictationState.HoldRecording);
-        _keys.DidNotReceive().IsKeyDown(vkD);
+        _keys.DidNotReceive().IsKeyDown(VkD);
 
-        _matcher.OnKey(new KeyInput(vkD, false, false)).Signal.ShouldBe(HotkeySignal.HotkeyUp);
+        _matcher.OnKey(new KeyInput(VkD, false, false)).Signal.ShouldBe(HotkeySignal.HotkeyUp);
+        Signal(HotkeySignal.HotkeyUp);
+        await Finished();
+
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ComboHotkey_MissedRelease_StopsAtTheHoldLimit()
+    {
+        // The key-up never arrives (an elevated window has focus, say), but Ctrl is still held: only the limit ends it.
+        PressCtrlAltD();
+
+        _time.Advance(DictationTimings.Default.HoldLimit);
+        await Finished();
+
+        await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
+        _history.Received(1).Add("Hello world.", "", false);
+        _pill.Received(1).ShowNotice("Saved to history");
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.IsHotkeyHeld.ShouldBeFalse();
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped();
+
+        // The next press is a press, not an auto-repeat to swallow.
+        _matcher.OnKey(new KeyInput(VkD, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
+    }
+
+    [Fact]
+    public async Task ComboHotkey_HeldJustShortOfTheHoldLimit_KeepsRecording()
+    {
+        PressCtrlAltD();
+
+        _time.Advance(DictationTimings.Default.HoldLimit - TimeSpan.FromMilliseconds(100));
+
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+        _matcher.IsHotkeyHeld.ShouldBeTrue();
+        await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
+        _history.DidNotReceiveWithAnyArgs().Add(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ComboHotkey_ModifiersReleasedWithoutKeyUp_EndsTheHold()
+    {
+        PressCtrlAltD();
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+
+        // The hook never saw the main key come up, but Ctrl and Alt, which are never swallowed, are up.
+        _ctrlDown = false;
+        _altDown = false;
+        _matcher.IsHotkeyHeld.ShouldBeTrue();
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+        await Finished();
+
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        _history.Received(1).Add("Hello world.", "Notepad", true);
+        _matcher.IsHotkeyHeld.ShouldBeFalse();
+        _machine.State.ShouldBe(DictationState.Idle);
+        AssertTimerStopped();
+    }
+
+    [Fact]
+    public void ComboHotkey_OneOfTwoModifiersReleased_KeepsTheHold()
+    {
+        PressCtrlAltD();
+        _ctrlDown = false; // Alt is still down: the hotkey is still being held
+
+        _time.Advance(TimeSpan.FromSeconds(1));
+
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+        _matcher.IsHotkeyHeld.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task FunctionKeyHotkey_WithoutModifiers_HoldsUntilReleased()
+    {
+        // No modifiers is not "all modifiers up": the matcher's view of the swallowed key is all there is.
+        const int vkF12 = 0x7B;
+        _matcher.Hotkey = new HotkeyDefinition(vkF12, HotkeyModifiers.None, "F12");
+        _matcher.OnKey(new KeyInput(vkF12, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
+        Signal(HotkeySignal.HotkeyDown);
+        _recorder.Received(1).Start(Arg.Any<string?>());
+
+        _time.Advance(TimeSpan.FromSeconds(1));
+
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+        _keys.DidNotReceiveWithAnyArgs().IsKeyDown(default);
+
+        _matcher.OnKey(new KeyInput(vkF12, false, false)).Signal.ShouldBe(HotkeySignal.HotkeyUp);
         Signal(HotkeySignal.HotkeyUp);
         await Finished();
 
@@ -1473,6 +1563,23 @@ public sealed class DictationControllerTests : IDisposable
     {
         _hotkeyDown = false;
         Signal(HotkeySignal.HotkeyUp);
+    }
+
+    /// <summary>
+    /// Ctrl+Alt+D pressed with Ctrl and Alt physically down. D is swallowed by the hook, so the key-state probe never sees
+    /// it; the modifiers it does see. The recording starts at once.
+    /// </summary>
+    private void PressCtrlAltD()
+    {
+        const int vkLeftCtrl = 0xA2, vkLeftAlt = 0xA4;
+        _matcher.Hotkey = new HotkeyDefinition(VkD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+D");
+        _ctrlDown = true;
+        _altDown = true;
+        _matcher.OnKey(new KeyInput(vkLeftCtrl, true, false));
+        _matcher.OnKey(new KeyInput(vkLeftAlt, true, false));
+        _matcher.OnKey(new KeyInput(VkD, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
+        Signal(HotkeySignal.HotkeyDown);
+        _recorder.Received(1).Start(Arg.Any<string?>()); // no arm delay: the combo is swallowed, so it is no app's shortcut
     }
 
     /// <summary>Hotkey pressed and held through the arm delay: the tick has started the recording.</summary>

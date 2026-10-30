@@ -47,6 +47,13 @@ public sealed class DictationController : IDisposable
     /// </summary>
     private const float NoSpeechThreshold = 0.6f;
 
+    // Generic virtual-key codes, which cover both sides of the keyboard; the Win keys have none.
+    private const int VkShift = 0x10;
+    private const int VkCtrl = 0x11;
+    private const int VkAlt = 0x12;
+    private const int VkLeftWin = 0x5B;
+    private const int VkRightWin = 0x5C;
+
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
@@ -423,9 +430,7 @@ public sealed class DictationController : IDisposable
         if (generation != _generation || _timer is null)
             return;
 
-        // A swallowed combo key never reaches GetAsyncKeyState, so for a combo the matcher's view is all there is.
-        var hotkey = _matcher.Hotkey;
-        var physicallyDown = hotkey.IsModifierOnly ? _keys.IsKeyDown(hotkey.VirtualKey) : _matcher.IsHotkeyHeld;
+        var physicallyDown = IsHotkeyPhysicallyDown(_matcher.Hotkey);
 
         // The release was missed; forget it, or the next press would be dropped as auto-repeat.
         if (!physicallyDown && _matcher.IsHotkeyHeld)
@@ -434,8 +439,40 @@ public sealed class DictationController : IDisposable
         // An armed press held past the arm delay is decided on the engine as it is now, like a signal.
         var now = _time.GetUtcNow();
         var status = _engine.Status;
-        Execute(_machine.OnTick(now, physicallyDown, _engine.CanTranscribe), now, status);
+        var holding = _machine.State == DictationState.HoldRecording;
+        var action = _machine.OnTick(now, physicallyDown, _engine.CanTranscribe);
+
+        // A hold that ran into its limit has no release to forget it; without this the next press would be dropped as
+        // auto-repeat. (A hands-free session ending on its limit is not a held key.)
+        if (holding && action == DictationAction.StopAndSaveOnly)
+            _matcher.ResetHeld();
+
+        Execute(action, now, status);
     }
+
+    /// <summary>
+    /// Whether the hotkey is still held, as far as can be told. A lone modifier is never swallowed, so the key-state probe
+    /// reads it. A combo's main key is swallowed and never reaches the probe, so the matcher's view of it is all there is;
+    /// its modifiers are not swallowed, though, and with all of them up the combo cannot be held, whatever key-up the hook
+    /// missed. An F-key hotkey has no modifier to read, so only the hold limit ends a missed release of it.
+    /// </summary>
+    private bool IsHotkeyPhysicallyDown(HotkeyDefinition hotkey)
+    {
+        if (hotkey.IsModifierOnly)
+            return _keys.IsKeyDown(hotkey.VirtualKey);
+
+        if (!_matcher.IsHotkeyHeld)
+            return false;
+
+        return hotkey.Modifiers == HotkeyModifiers.None || IsAnyModifierDown(hotkey.Modifiers);
+    }
+
+    /// <summary>Whether any of <paramref name="modifiers"/> is down, on either side of the keyboard.</summary>
+    private bool IsAnyModifierDown(HotkeyModifiers modifiers) =>
+        (modifiers.HasFlag(HotkeyModifiers.Ctrl) && _keys.IsKeyDown(VkCtrl))
+        || (modifiers.HasFlag(HotkeyModifiers.Alt) && _keys.IsKeyDown(VkAlt))
+        || (modifiers.HasFlag(HotkeyModifiers.Shift) && _keys.IsKeyDown(VkShift))
+        || (modifiers.HasFlag(HotkeyModifiers.Win) && (_keys.IsKeyDown(VkLeftWin) || _keys.IsKeyDown(VkRightWin)));
 
     private void OnCaptureFailed(Exception error)
     {

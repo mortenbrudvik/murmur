@@ -34,23 +34,30 @@ public enum DictationAction
 /// <param name="TapThreshold">A press released sooner than this is a tap (starts hands-free); otherwise it was a hold.</param>
 /// <param name="StrayTapTimeout">A hands-free session in which no speech was heard is cancelled after this long.</param>
 /// <param name="HandsFreeLimit">A hands-free session is stopped (audio saved, not pasted) after this long.</param>
+/// <param name="HoldLimit">
+/// A hotkey that stays held (the release was never seen, or it really is) is stopped (audio saved, not pasted) after
+/// this long. Not a limit on hands-free sessions, which have <paramref name="HandsFreeLimit"/>.
+/// </param>
 /// <param name="ArmDelay">
 /// How long a lone-modifier hotkey is held before recording starts, so that using it in another app's shortcut never
 /// opens the microphone. Must be shorter than <paramref name="TapThreshold"/>: a release while armed is a tap.
 /// </param>
-public sealed record DictationTimings(TimeSpan TapThreshold, TimeSpan StrayTapTimeout, TimeSpan HandsFreeLimit, TimeSpan ArmDelay)
+public sealed record DictationTimings(
+    TimeSpan TapThreshold, TimeSpan StrayTapTimeout, TimeSpan HandsFreeLimit, TimeSpan HoldLimit, TimeSpan ArmDelay)
 {
-    public static DictationTimings Default { get; } =
-        new(TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(8), TimeSpan.FromMinutes(10), TimeSpan.FromMilliseconds(150));
+    public static DictationTimings Default { get; } = new(
+        TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(8), TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(5),
+        TimeSpan.FromMilliseconds(150));
 }
 
 /// <summary>
 /// Pure, deterministic state machine for the dictation flow: hold the hotkey to talk, tap it for hands-free
 /// recording, tap again to stop, Esc to cancel. A lone-modifier hotkey arms first and starts recording only once it
 /// has been held for <see cref="DictationTimings.ArmDelay"/> or released as a tap; another key in between means it was
-/// part of a shortcut, and nothing starts (whether the engine is ready is only asked once the press is a dictation). It
-/// performs no I/O and never reads the clock; callers pass the current time and execute the returned
-/// <see cref="DictationAction"/>. Not thread-safe: drive it from one thread.
+/// part of a shortcut, and nothing starts (whether the engine is ready is only asked once the press is a dictation).
+/// Neither a hold nor a hands-free session runs forever: they stop after <see cref="DictationTimings.HoldLimit"/> and
+/// <see cref="DictationTimings.HandsFreeLimit"/>. It performs no I/O and never reads the clock; callers pass the
+/// current time and execute the returned <see cref="DictationAction"/>. Not thread-safe: drive it from one thread.
 /// </summary>
 public sealed class DictationStateMachine(DictationTimings timings)
 {
@@ -185,7 +192,14 @@ public sealed class DictationStateMachine(DictationTimings timings)
 
             case DictationState.HoldRecording:
                 // A missed release is treated exactly like the release arriving now.
-                return hotkeyPhysicallyDown ? DictationAction.None : ReleaseHold(now);
+                if (!hotkeyPhysicallyDown)
+                    return ReleaseHold(now);
+
+                // Still held, or a release nothing can see (a combo's key is swallowed, an F-key has no modifier to read):
+                // stop on the limit, and keep the audio without pasting it into whatever happens to have focus.
+                return now - PressedAt >= timings.HoldLimit
+                    ? Enter(DictationState.Transcribing, DictationAction.StopAndSaveOnly)
+                    : DictationAction.None;
 
             case DictationState.HandsFreeRecording:
                 if (_secondTapHeld && !hotkeyPhysicallyDown)
