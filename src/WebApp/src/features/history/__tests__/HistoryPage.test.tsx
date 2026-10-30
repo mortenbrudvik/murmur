@@ -40,6 +40,14 @@ function setClipboard(writeText: (text: string) => Promise<void>) {
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 }
 
+/** Pushes an entry the way the host does after a dictation. */
+function pushAdded(entry: HistoryEntry) {
+  const calls = vi.mocked(apiClient.on).mock.calls.filter(([name]) => name === "history.added");
+  expect(calls.length).toBeGreaterThan(0);
+  const callback = calls[calls.length - 1][1] as (entry: HistoryEntry) => void;
+  act(() => callback(entry));
+}
+
 describe("HistoryPage", () => {
   beforeEach(() => {
     vi.mocked(apiClient.call).mockReset();
@@ -101,6 +109,22 @@ describe("HistoryPage", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
 
     expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+  });
+
+  it("keeps a card's Copied state when a new entry is pushed into the same day", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setClipboard(vi.fn().mockResolvedValue(undefined));
+    mockApi([todayEntry("a", 10, 0, { text: "copy me" })]);
+
+    render(<HistoryPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+
+    pushAdded(todayEntry("b", 11, 0, { text: "just dictated" }));
+
+    expect(await screen.findByText("just dictated")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
   });
 
   it("shows Copy failed for 1.5 seconds when the clipboard rejects", async () => {

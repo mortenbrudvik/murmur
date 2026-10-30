@@ -58,8 +58,9 @@ export default function HistoryPage() {
       )}
 
       <div className="history-scroll">
+        {/* Keyed by the day, not its newest entry: a pushed entry must not remount the group and reset its cards. */}
         {groups.map((group) => (
-          <section className="history-group" key={group.entries[0].id}>
+          <section className="history-group" key={group.label}>
             <h2 className="history-day">{group.label}</h2>
             <ul className="history-list">
               {group.entries.map((entry) => (
