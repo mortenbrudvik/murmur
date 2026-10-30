@@ -379,6 +379,62 @@ public sealed class DictationControllerTests : IDisposable
         _machine.State.ShouldBe(DictationState.HoldRecording);
     }
 
+    /// <summary>
+    /// The UI thread is busy for the whole press, so the tick that would have started the hold never runs and the release
+    /// finds the press still armed. The user talked and let go: starting hands-free now would record after they finished.
+    /// </summary>
+    [Fact]
+    public void ModifierHotkey_ReleasedPastTheTapThresholdWhileStillArmed_StartsNothing()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        ui.Run(Down);
+        _time.Advance(TimeSpan.FromMilliseconds(1500)); // the ticks queue up behind the busy UI thread
+
+        _hotkeyDown = false;
+        ui.Run(() => Controller.HandleSignal(HotkeySignal.HotkeyUp, _time.GetUtcNow()));
+        ui.RunPending(); // the ticks that queued up, now stale
+
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _pill.ReceivedCalls().ShouldBeEmpty();
+        _cues.ReceivedCalls().ShouldBeEmpty();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+        AssertTimerStopped(ui);
+    }
+
+    /// <summary>The press reaches the UI thread 100 ms after the hook saw it: the arm delay still runs from the press.</summary>
+    [Fact]
+    public void ModifierHotkey_PressHandledLate_FirstPollIsTheArmDelayAfterThePress()
+    {
+        _hotkeyDown = true;
+        Controller.HandleSignal(HotkeySignal.HotkeyDown, _time.GetUtcNow() - TimeSpan.FromMilliseconds(100));
+
+        _time.Advance(ArmDelay - TimeSpan.FromMilliseconds(101));
+        _machine.State.ShouldBe(DictationState.Armed);
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+        _recorder.Received(1).Start(Arg.Any<string?>());
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+    }
+
+    /// <summary>The press reaches the UI thread after its arm delay is already up: it is decided at once.</summary>
+    [Fact]
+    public async Task ModifierHotkey_PressHandledAfterTheArmDelay_IsDecidedAtTheFirstPoll()
+    {
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        _hotkeyDown = true;
+        ui.Run(() => Controller.HandleSignal(HotkeySignal.HotkeyDown, _time.GetUtcNow() - TimeSpan.FromMilliseconds(200)));
+
+        ui.RunPending(); // no time passes: the poll is due at once
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+
+        _recorder.Received(1).Start(Arg.Any<string?>());
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+    }
+
     [Fact]
     public void OtherInputWhileHeld_CancelsTheRecording()
     {

@@ -124,6 +124,38 @@ public sealed class DictationStateMachineTests
         sm.State.ShouldBe(DictationState.HandsFreeRecording);
     }
 
+    /// <summary>
+    /// The tick that would have started the hold never ran (the UI thread was busy), so the release finds the press still
+    /// armed. It was held past the tap threshold: the user talked and let go, so hands-free must not start now.
+    /// </summary>
+    [Fact]
+    public void ModifierHotkey_ReleasedPastTheTapThresholdWhileStillArmed_StartsNothing()
+    {
+        var sm = Armed();
+
+        sm.OnHotkeyUp(Ms(300), engineReady: true).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.Idle);
+        sm.IsActive.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ModifierHotkey_ReleasedPastTheTapThresholdWhileStillArmedAndNotReady_StartsNothingAndSaysNothing()
+    {
+        var sm = Armed();
+
+        sm.OnHotkeyUp(Ms(2000), engineReady: false).ShouldBe(DictationAction.None);
+        sm.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public void ModifierHotkey_ReleasedJustBeforeTheTapThresholdWhileStillArmed_IsATap()
+    {
+        var sm = Armed();
+
+        sm.OnHotkeyUp(Ms(299), engineReady: true).ShouldBe(DictationAction.StartRecording);
+        sm.State.ShouldBe(DictationState.HandsFreeRecording);
+    }
+
     [Fact]
     public void ModifierHotkey_ReleaseMissedWhileArmed_GoesIdleWithoutStarting()
     {

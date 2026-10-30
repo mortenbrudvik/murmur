@@ -40,7 +40,8 @@ public enum DictationAction
 /// </param>
 /// <param name="ArmDelay">
 /// How long a lone-modifier hotkey is held before recording starts, so that using it in another app's shortcut never
-/// opens the microphone. Must be shorter than <paramref name="TapThreshold"/>: a release while armed is a tap.
+/// opens the microphone. Must be shorter than <paramref name="TapThreshold"/>: a release while armed is a tap (unless
+/// the press is still armed past the tap threshold, which only a poll that never ran can cause; then nothing starts).
 /// </param>
 public sealed record DictationTimings(
     TimeSpan TapThreshold, TimeSpan StrayTapTimeout, TimeSpan HandsFreeLimit, TimeSpan HoldLimit, TimeSpan ArmDelay)
@@ -122,8 +123,12 @@ public sealed class DictationStateMachine(DictationTimings timings)
         switch (State)
         {
             case DictationState.Armed:
-                // Released within the arm delay, which is shorter than the tap threshold: a tap.
-                return StartArmed(DictationState.HandsFreeRecording, engineReady);
+                // Normally released within the arm delay, which is shorter than the tap threshold: a tap. Still armed
+                // past the threshold means the poll that would have started the hold never ran (a busy UI thread): the
+                // user has talked and let go, so nothing starts now.
+                return now - PressedAt < timings.TapThreshold
+                    ? StartArmed(DictationState.HandsFreeRecording, engineReady)
+                    : Enter(DictationState.Idle, DictationAction.None);
 
             case DictationState.HoldRecording:
                 return ReleaseHold(now);

@@ -240,7 +240,7 @@ public sealed class DictationController : IDisposable
                 EndDictation();
                 break;
             case DictationAction.Arm:
-                Arm();
+                Arm(_machine.PressedAt);
                 break;
             case DictationAction.StartRecording:
                 // Timed from the press, also when recording starts only after the arm delay or on a tap's release.
@@ -269,10 +269,18 @@ public sealed class DictationController : IDisposable
     /// yet: no pill, no microphone, no cue, and Esc still reaches the app. Only the tick runs, from when the arm delay is
     /// up; another key, a release or the tick then decides.
     /// </summary>
-    private void Arm()
+    /// <param name="pressedAt">
+    /// When the hook saw the press. The arm delay runs from then, not from now: the UI thread may get to the press late.
+    /// </param>
+    private void Arm(DateTimeOffset pressedAt)
     {
         var generation = Interlocked.Increment(ref _generation);
-        StartTicking(generation, _machine.Timings.ArmDelay, ArmPollInterval);
+        var armDelay = _machine.Timings.ArmDelay;
+        var left = armDelay - (_time.GetUtcNow() - pressedAt);
+
+        // Never more than the whole delay: a press stamped ahead of this clock would otherwise move the first poll out.
+        var dueTime = left < TimeSpan.Zero ? TimeSpan.Zero : left > armDelay ? armDelay : left;
+        StartTicking(generation, dueTime, ArmPollInterval);
     }
 
     private void StartRecording(DateTimeOffset pressedAt)
