@@ -239,6 +239,8 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
         {
             _logger.Warning("The server refused to resume the {Model} download at {Bytes:N0} bytes; starting over", model.DisplayName, partLength);
             File.Delete(partPath);
+            // An answer came, so the secure connection works.
+            state.SecureConnectionFailures = 0;
             return false;
         }
 
@@ -388,7 +390,7 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
     {
         public int Retries { get; set; }
 
-        /// <summary>Secure-connection failures with no other failure between them.</summary>
+        /// <summary>Secure-connection failures with no other failure and no answer from the server between them.</summary>
         public int SecureConnectionFailures { get; set; }
     }
 

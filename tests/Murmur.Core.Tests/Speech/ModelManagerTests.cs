@@ -409,6 +409,45 @@ public sealed class ModelManagerTests : IDisposable
         _handler.Calls.ShouldBe(7);
     }
 
+    /// <summary>
+    /// .NET reports any failure during the handshake as SecureConnectionError, also a reset on a lossy Wi-Fi link. Only
+    /// a certificate that was refused (an AuthenticationException) points at something inspecting HTTPS.
+    /// </summary>
+    [Fact]
+    public async Task EnsureModelAsync_HandshakeResetWithoutCertificateError_KeepsRetrying()
+    {
+        var manager = CreateManager(call => call <= 6
+            ? throw new HttpRequestException(HttpRequestError.SecureConnectionError,
+                "The SSL connection could not be established, see inner exception.", new IOException("Received an unexpected EOF or 0 bytes from the transport stream."))
+            : Ok(_body));
+
+        var task = Start(manager);
+        await AdvanceUntilAsync(() => task.IsCompleted, TimeSpan.FromSeconds(10));
+
+        File.ReadAllBytes(await task).ShouldBe(_body);
+        _handler.Calls.ShouldBe(7);
+        _progress.Reports.Where(r => r.Retries > 0).Select(r => r.Retries).ShouldBe([1, 2, 3, 4, 5, 6]);
+    }
+
+    /// <summary>Any answer from the server, even a refusal to resume, proves the secure connection works.</summary>
+    [Fact]
+    public async Task EnsureModelAsync_RangeRefusedBetweenTlsFailures_ResetsTheCount()
+    {
+        WritePart(_body[..400]);
+        var manager = CreateManager(call => call switch
+        {
+            <= 3 or 5 or 6 or 7 => throw TlsFailure(),
+            4 => Status(HttpStatusCode.RequestedRangeNotSatisfiable),
+            _ => Ok(_body),
+        });
+
+        var task = Start(manager);
+        await AdvanceUntilAsync(() => task.IsCompleted, TimeSpan.FromSeconds(10));
+
+        File.ReadAllBytes(await task).ShouldBe(_body);
+        _handler.Calls.ShouldBe(8);
+    }
+
     // ---- stalls ---------------------------------------------------------------------------------------------
 
     [Fact]
