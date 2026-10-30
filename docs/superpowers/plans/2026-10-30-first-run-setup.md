@@ -512,7 +512,7 @@ Expected: PASS.
   { public bool ShouldReport(DownloadProgress progress); }   // first report, whole percent changed, Retries changed, or ≥ 1 s since the last
   ```
 
-`WhisperEngine` works as follows (the transcription code and the digital-silence check move into `WhisperModelLoader`'s loaded model; the silence check stays in the engine):
+`WhisperEngine` works as follows (the transcription code moves into `WhisperModelLoader`'s loaded model; the digital-silence check stays in `WhisperEngine.TranscribeAsync`, before the loaded model is called):
 
 - **Initialize:**
   1. Take `gpu.Report`. Compute `canUseCuda = GpuAdvisor.CanUseCuda(report)`. Look for the CUDA runtime only when `canUseCuda` is true.
