@@ -47,6 +47,88 @@ public sealed class JsonStoresTests : IDisposable
     }
 
     [Fact]
+    public void SettingsService_LoadVersion10File_DefaultsTheNewFields()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(
+            _paths.SettingsFile,
+            "{\"hotkey\":{\"virtualKey\":163,\"modifiers\":\"none\",\"displayName\":\"Right Ctrl\"},\"microphoneId\":null,"
+            + "\"soundCues\":true,\"startWithWindows\":false,\"keepAudio\":false}");
+
+        var loaded = new SettingsService(_paths).Load();
+
+        loaded.Hotkey.ShouldBe(HotkeyDefinition.Default);
+        loaded.SpeechModel.ShouldBeNull();
+        loaded.SetupStep.ShouldBeNull();
+        loaded.SetupCompleted.ShouldBeFalse();
+        loaded.CudaTipDismissed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SettingsService_SaveThenLoad_RoundTripsTheNewFields()
+    {
+        var service = new SettingsService(_paths);
+        service.Save(MurmurSettings.Default with
+        {
+            SpeechModel = SpeechModelId.SmallEn,
+            SetupStep = SetupStep.TryIt,
+            SetupCompleted = true,
+            CudaTipDismissed = true,
+        });
+
+        var loaded = new SettingsService(_paths).Load();
+
+        loaded.SpeechModel.ShouldBe(SpeechModelId.SmallEn);
+        loaded.SetupStep.ShouldBe(SetupStep.TryIt);
+        loaded.SetupCompleted.ShouldBeTrue();
+        loaded.CudaTipDismissed.ShouldBeTrue();
+        var json = File.ReadAllText(_paths.SettingsFile);
+        json.ShouldContain("\"speechModel\":\"smallEn\"");
+        json.ShouldContain("\"setupStep\":\"tryIt\"");
+    }
+
+    [Fact]
+    public async Task SettingsService_UpdateFromManyThreads_LosesNoChange()
+    {
+        var service = new SettingsService(_paths);
+
+        await Task.WhenAll(Enumerable.Range(0, 50).Select(_ => Task.Run(() =>
+            service.Update(s => s with { MicrophoneId = (int.Parse(s.MicrophoneId ?? "0") + 1).ToString() }))));
+
+        service.Load().MicrophoneId.ShouldBe("50");
+    }
+
+    [Fact]
+    public void SettingsService_Update_SavesAndReturnsTheChangedSettings()
+    {
+        var service = new SettingsService(_paths);
+
+        var returned = service.Update(s => s with { SoundCues = false, SetupStep = SetupStep.Microphone });
+
+        returned.SoundCues.ShouldBeFalse();
+        returned.SetupStep.ShouldBe(SetupStep.Microphone);
+        new SettingsService(_paths).Load().ShouldBe(returned);
+    }
+
+    [Fact]
+    public void SettingsService_UpdateOverAnInvalidStoredHotkey_HandsTheChangeTheRepairedHotkey()
+    {
+        var service = new SettingsService(_paths);
+        service.Save(MurmurSettings.Default with { Hotkey = new HotkeyDefinition(0x41, HotkeyModifiers.None, "A") });
+        HotkeyDefinition? seen = null;
+
+        var returned = service.Update(s =>
+        {
+            seen = s.Hotkey;
+            return s with { KeepAudio = true };
+        });
+
+        seen.ShouldBe(HotkeyDefinition.Default);
+        returned.Hotkey.ShouldBe(HotkeyDefinition.Default);
+        new SettingsService(_paths).Load().Hotkey.ShouldBe(HotkeyDefinition.Default);
+    }
+
+    [Fact]
     public void Settings_CorruptFile_ReturnsDefaults()
     {
         Directory.CreateDirectory(_root);

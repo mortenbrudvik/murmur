@@ -40,16 +40,59 @@ public sealed record HotkeyDefinition(int VirtualKey, HotkeyModifiers Modifiers,
             || Modifiers != HotkeyModifiers.None);
 }
 
+public enum SpeechModelId
+{
+    LargeV3Turbo,
+    SmallEn
+}
+
+public enum SetupStep
+{
+    SpeechModel,
+    Microphone,
+    TryIt
+}
+
+public enum GpuAdviceState
+{
+    NotApplicable,
+    CudaInUse,
+    InstallCuda,
+    UpdateDriver
+}
+
+public enum LinkTarget
+{
+    CudaDownload,
+    NvidiaDriver,
+    MicrophonePrivacy
+}
+
+public enum MicTestState
+{
+    Listening,
+    AccessDenied,
+    Failed
+}
+
 /// <param name="StartWithWindows">
 /// Off by default: Murmur must not register itself for sign-in without being asked, which the Microsoft Store expects.
 /// A saved settings file always carries the value, so this only decides it for a first run.
 /// </param>
+/// <param name="SpeechModel">The chosen speech model; null until it is first resolved.</param>
+/// <param name="SetupStep">The setup step the user stopped at; null until the first-run decision is made.</param>
+/// <param name="SetupCompleted">Setup was finished or skipped, so it is not shown again.</param>
+/// <param name="CudaTipDismissed">The user closed the tip about installing CUDA for a faster GPU.</param>
 public sealed record MurmurSettings(
     HotkeyDefinition Hotkey,
     string? MicrophoneId = null,
     bool SoundCues = true,
     bool StartWithWindows = false,
-    bool KeepAudio = false)
+    bool KeepAudio = false,
+    SpeechModelId? SpeechModel = null,
+    SetupStep? SetupStep = null,
+    bool SetupCompleted = false,
+    bool CudaTipDismissed = false)
 {
     public static MurmurSettings Default { get; } = new(HotkeyDefinition.Default);
 }
@@ -82,3 +125,29 @@ public sealed record EngineStatus(
     string? Error = null);
 
 public sealed record TranscriptionResult(string Text, float MaxNoSpeechProbability);
+
+/// <param name="Retries">Consecutive failed attempts of the current download; 0 while bytes flow.</param>
+public sealed record DownloadProgress(
+    string ModelName,
+    long BytesReceived,
+    long TotalBytes,
+    double BytesPerSecond,
+    double? SecondsRemaining,
+    int Retries)
+{
+    /// <summary>Serialized so the web can show "Reconnecting" without knowing the retry rules.</summary>
+    public bool Reconnecting => Retries > 0;
+}
+
+public sealed record GpuAdvice(GpuAdviceState State, string? GpuName)
+{
+    public static GpuAdvice None { get; } = new(GpuAdviceState.NotApplicable, null);
+}
+
+public sealed record SetupState(bool ShowSetup, SetupStep Step, bool CudaTipDismissed, string? OpenPage);
+
+public sealed record SpeechModelOption(SpeechModelId Id, string Label, long SizeBytes);
+
+public sealed record ModelChoice(SpeechModelId Selected, SpeechModelId Recommended, IReadOnlyList<SpeechModelOption> Options);
+
+public sealed record MicTestResult(MicTestState State, string? Error = null);

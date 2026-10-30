@@ -25,9 +25,15 @@ public sealed class SettingsHandlerTests
     private readonly IAudioRecorder _recorder = Substitute.For<IAudioRecorder>();
     private readonly FakeTimeProvider _time = new();
 
+    // What the settings substitute holds, and what the last Update call stored.
+    private MurmurSettings _stored = new(Previous, "mic-1", SoundCues: false, StartWithWindows: true, KeepAudio: true);
+    private MurmurSettings? _saved;
+
     public SettingsHandlerTests()
     {
-        _settings.Load().Returns(new MurmurSettings(Previous, "mic-1", SoundCues: false, StartWithWindows: true, KeepAudio: true));
+        _settings.Load().Returns(_ => _stored);
+        _settings.Update(Arg.Any<Func<MurmurSettings, MurmurSettings>>())
+            .Returns(ci => _saved = ci.Arg<Func<MurmurSettings, MurmurSettings>>()(_stored));
     }
 
     private static UpdateSettingsRequest Update(
@@ -56,7 +62,7 @@ public sealed class SettingsHandlerTests
 
         var expected = new MurmurSettings(CtrlShiftSpace, "mic-2", SoundCues: true, StartWithWindows: false, KeepAudio: false);
         result.ShouldBe(expected);
-        _settings.Received(1).Save(expected);
+        _saved.ShouldBe(expected);
     }
 
     [Fact]
@@ -68,7 +74,9 @@ public sealed class SettingsHandlerTests
             CancellationToken.None);
 
         result.Hotkey.ShouldBe(Previous);
-        _settings.Received(1).Save(Arg.Is<MurmurSettings>(s => s.Hotkey == Previous && s.SoundCues));
+        var saved = _saved.ShouldNotBeNull();
+        saved.Hotkey.ShouldBe(Previous);
+        saved.SoundCues.ShouldBeTrue();
     }
 
     [Fact]
@@ -93,6 +101,24 @@ public sealed class SettingsHandlerTests
     }
 
     [Fact]
+    public async Task Handle_KeepsSetupAndModelFields()
+    {
+        _stored = new MurmurSettings(
+            Previous, "mic-1", SoundCues: true, StartWithWindows: false, KeepAudio: false,
+            SpeechModel: SpeechModelId.SmallEn, SetupStep: SetupStep.Microphone, SetupCompleted: true, CudaTipDismissed: true);
+
+        var result = await UpdateHandler().Handle(Update(hotkey: Previous, microphoneId: "mic-1", soundCues: false), CancellationToken.None);
+
+        var saved = _saved.ShouldNotBeNull();
+        saved.SoundCues.ShouldBeFalse();
+        saved.SpeechModel.ShouldBe(SpeechModelId.SmallEn);
+        saved.SetupStep.ShouldBe(SetupStep.Microphone);
+        saved.SetupCompleted.ShouldBeTrue();
+        saved.CudaTipDismissed.ShouldBeTrue();
+        result.ShouldBe(saved);
+    }
+
+    [Fact]
     public async Task UpdateSettings_PublishesSettingsUpdated()
     {
         var result = await UpdateHandler().Handle(Update(), CancellationToken.None);
@@ -105,7 +131,7 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task UpdateSettings_SaveFails_DoesNotPublish()
     {
-        _settings.When(s => s.Save(Arg.Any<MurmurSettings>())).Throw(new IOException("disk full"));
+        _settings.When(s => s.Update(Arg.Any<Func<MurmurSettings, MurmurSettings>>())).Throw(new IOException("disk full"));
 
         await Should.ThrowAsync<IOException>(() => UpdateHandler().Handle(Update(), CancellationToken.None));
 
