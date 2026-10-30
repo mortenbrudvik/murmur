@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeDownload, formatBytes, formatRemaining, formatSpeed } from "../formatDownload";
+import { describeDownload, formatBytes, formatDownloadLine, formatRemaining, formatSpeed } from "../formatDownload";
 import type { DownloadProgress } from "../../../types/domain";
 
 const d: DownloadProgress = {
@@ -100,5 +100,23 @@ describe("describeDownload", () => {
     expect(describeDownload({ ...d, totalBytes: 0 }).percent).toBe(0);
     expect(describeDownload({ ...d, bytesReceived: 2_000_000_000 }).percent).toBe(100);
     expect(describeDownload({ ...d, bytesReceived: -1 }).percent).toBe(0);
+  });
+});
+
+describe("formatDownloadLine", () => {
+  it("joins the amount, the speed and the time left", () => {
+    expect(formatDownloadLine({ ...d, bytesReceived: 612_000_000, bytesPerSecond: 18_000_000, secondsRemaining: 56 })).toBe(
+      "612 MB of 1.6 GB · 18 MB/s · less than a minute left",
+    );
+  });
+
+  it("is only the amount when neither the speed nor the time left is known", () => {
+    expect(formatDownloadLine({ ...d, bytesReceived: 612_000_000 })).toBe("612 MB of 1.6 GB");
+  });
+
+  it("is only the amount while reconnecting, because the status text says so", () => {
+    expect(formatDownloadLine({ ...d, bytesReceived: 612_000_000, bytesPerSecond: 18_000_000, retries: 2, reconnecting: true })).toBe(
+      "612 MB of 1.6 GB",
+    );
   });
 });

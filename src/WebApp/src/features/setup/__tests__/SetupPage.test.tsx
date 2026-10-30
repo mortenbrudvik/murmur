@@ -218,10 +218,54 @@ describe("SetupPage", () => {
       expect(screen.getByRole("alert").textContent).toBe("Not enough disk space: 1.7 GB needed");
     });
 
-    it("tells the user the window can be closed", () => {
-      renderPage();
+    describe("the note that the window can be closed", () => {
+      const CLOSE_NOTE = "You can close this window — Murmur keeps downloading.";
 
-      expect(screen.getByText("You can close this window — Murmur keeps downloading.")).toBeTruthy();
+      it("is shown while the model downloads", () => {
+        renderPage({ engineStatus: downloading });
+
+        expect(screen.getByText(CLOSE_NOTE)).toBeTruthy();
+      });
+
+      it("is shown before the engine has reported, and while the download has not started", () => {
+        const { unmount } = renderPage({ engineStatus: null });
+        expect(screen.getByText(CLOSE_NOTE)).toBeTruthy();
+        unmount();
+
+        renderPage({ engineStatus: { ...loading, state: "notStarted" } });
+        expect(screen.getByText(CLOSE_NOTE)).toBeTruthy();
+      });
+
+      it("is gone once the model is ready", () => {
+        renderPage({ engineStatus: ready });
+
+        expect(screen.getByText("✓ Speech model ready")).toBeTruthy();
+        expect(screen.queryByText(CLOSE_NOTE)).toBeNull();
+        expect(screen.queryByText(/keeps downloading/)).toBeNull();
+      });
+
+      it("is gone while the model loads", () => {
+        renderPage({ engineStatus: loading });
+
+        expect(screen.queryByText(CLOSE_NOTE)).toBeNull();
+      });
+
+      it("is gone when the model failed", () => {
+        renderPage({ engineStatus: { ...ready, state: "error", runtime: null, error: "Not enough disk space: 1.7 GB needed" } });
+
+        expect(screen.queryByText(CLOSE_NOTE)).toBeNull();
+      });
+
+      it("leaves Next where it is when the note is gone", () => {
+        renderPage({ engineStatus: ready });
+
+        const next = screen.getByRole("button", { name: "Next" });
+        const footer = next.parentElement as HTMLElement;
+        // The note's place stays as an empty first child, so the button keeps its place at the end of the footer.
+        expect(footer.children).toHaveLength(2);
+        expect(footer.firstElementChild?.textContent).toBe("");
+        expect(footer.lastElementChild).toBe(next);
+      });
     });
 
     it("Next on step 1 saves the microphone step", async () => {

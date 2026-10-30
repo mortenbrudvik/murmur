@@ -111,6 +111,27 @@ describe("App engine status banner", () => {
     pushStatus({ ...ready, state: "error", runtime: null, error: "Model file is corrupt" });
     expect((await screen.findByRole("alert")).textContent).toBe("Model file is corrupt");
   });
+
+  it("shows a model switch's download above every page while the old model stays ready, and drops it when it is over", async () => {
+    mockServer(ready);
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "History" });
+    expect(screen.queryByRole("status")).toBeNull();
+
+    pushStatus({ ...ready, download: { ...download, modelName: "Whisper small (English)" } });
+    expect(await screen.findByText("Downloading Whisper small (English)… 25%")).toBeTruthy();
+    expect(screen.getByRole("status").className).toBe("engine-banner");
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("25");
+
+    fireEvent.click(screen.getByRole("button", { name: "Vocabulary" }));
+    expect(await screen.findByRole("heading", { name: "Vocabulary" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Downloading Whisper small (English)… 25%");
+
+    pushStatus(ready);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
 });
 
 describe("App first-run setup", () => {

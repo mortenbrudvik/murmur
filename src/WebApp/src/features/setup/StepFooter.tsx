@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 interface Props {
-  /** The small print on the left. */
+  /** The small print on the left; may be empty, the button stays on the right. */
   note: string;
   /** The label of the button on the right. */
   action: string;

@@ -1,22 +1,10 @@
 import "./EngineStatus.css";
-import type { EngineStatus } from "../../types/domain";
-import { describeEngineStatus } from "./engineStatusText";
-import { describeDownload } from "./formatDownload";
+import type { DownloadProgress, EngineStatus } from "../../types/domain";
+import { describeEngineStatus, describeModelSwitch, type EngineStatusView } from "./engineStatusText";
+import { formatDownloadLine } from "./formatDownload";
 
-/** "612 MB of 1.6 GB · 18 MB/s · about 1 minute left" for the first download; null at any other time. */
-function downloadDetail(status: EngineStatus): string | null {
-  if (status.state !== "downloading" || !status.download) return null;
-
-  const { amount, detail } = describeDownload(status.download);
-  // While reconnecting the status text already says so.
-  return detail && !status.download.reconnecting ? `${amount} · ${detail}` : amount;
-}
-
-/** The engine's status text, with a progress bar while the model downloads. Shared by the card and the banner. */
-export default function EngineStatusLine({ status }: { status: EngineStatus }) {
-  const view = describeEngineStatus(status);
-  const detail = downloadDetail(status);
-
+/** The progress bar, the text and the size, speed and time left of one status. */
+function StatusLine({ view, detail }: { view: EngineStatusView; detail: string | null }) {
   return (
     <div className="engine-status">
       {view.progress !== null && (
@@ -35,4 +23,16 @@ export default function EngineStatusLine({ status }: { status: EngineStatus }) {
       {detail && <span className="engine-status-detail">{detail}</span>}
     </div>
   );
+}
+
+/** The engine's status text, with a progress bar and the amount downloaded while the first download runs. Shared by the card and the banner. */
+export default function EngineStatusLine({ status }: { status: EngineStatus }) {
+  const detail = status.state === "downloading" && status.download ? formatDownloadLine(status.download) : null;
+
+  return <StatusLine view={describeEngineStatus(status)} detail={detail} />;
+}
+
+/** A model switch's download, which runs in the background while the old model stays ready. Shown by the banner. */
+export function ModelSwitchLine({ download }: { download: DownloadProgress }) {
+  return <StatusLine view={describeModelSwitch(download)} detail={formatDownloadLine(download)} />;
 }

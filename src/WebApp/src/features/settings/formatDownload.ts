@@ -55,3 +55,12 @@ export function describeDownload(download: DownloadProgress): DownloadDescriptio
 
   return { amount: `${formatBytes(bytesReceived)} of ${formatBytes(totalBytes)}`, detail, percent };
 }
+
+/**
+ * "612 MB of 1.6 GB · 18 MB/s · about 1 minute left" for the status line next to the bar. While reconnecting only the
+ * amount is given: the status text beside it already says "Reconnecting…".
+ */
+export function formatDownloadLine(download: DownloadProgress): string {
+  const { amount, detail } = describeDownload(download);
+  return detail && !download.reconnecting ? `${amount} · ${detail}` : amount;
+}

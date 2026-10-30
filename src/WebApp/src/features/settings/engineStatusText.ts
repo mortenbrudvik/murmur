@@ -1,4 +1,4 @@
-import type { EngineStatus } from "../../types/domain";
+import type { DownloadProgress, EngineStatus } from "../../types/domain";
 import { describeDownload } from "./formatDownload";
 
 export type EngineTone = "progress" | "info" | "ready" | "error";
@@ -22,16 +22,23 @@ function runtimeLabel(runtime: string): string {
   }
 }
 
+/** "Downloading <name>… 38%", or "Reconnecting…" with the bar where it was; an empty bar before the download reports. */
+function describeProgress(download: DownloadProgress | null, name: string): EngineStatusView {
+  const percent = download ? describeDownload(download).percent : 0;
+  const text = download?.reconnecting ? "Reconnecting…" : `Downloading ${name}… ${percent}%`;
+  return { text, tone: "progress", progress: percent };
+}
+
+/** The line for a model switch: the other model downloads in the background while the engine stays ready. */
+export function describeModelSwitch(download: DownloadProgress): EngineStatusView {
+  return describeProgress(download, download.modelName);
+}
+
 /** The one status line shared by the Settings engine card and the banner above every page. */
 export function describeEngineStatus(status: EngineStatus): EngineStatusView {
   switch (status.state) {
-    case "downloading": {
-      // The bar keeps its place while the download reconnects.
-      const download = status.download;
-      const percent = download ? describeDownload(download).percent : 0;
-      const text = download?.reconnecting ? "Reconnecting…" : `Downloading speech model… ${percent}%`;
-      return { text, tone: "progress", progress: percent };
-    }
+    case "downloading":
+      return describeProgress(status.download, "speech model");
     case "ready":
       return { text: status.runtime ? `Ready · ${runtimeLabel(status.runtime)}` : "Ready", tone: "ready", progress: null };
     case "error":

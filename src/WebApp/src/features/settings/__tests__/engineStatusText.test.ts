@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeEngineStatus } from "../engineStatusText";
+import { describeEngineStatus, describeModelSwitch } from "../engineStatusText";
 import type { DownloadProgress, EngineStatus } from "../../../types/domain";
 
 function status(overrides: Partial<EngineStatus>): EngineStatus {
@@ -80,5 +80,21 @@ describe("describeEngineStatus", () => {
       progress: null,
     });
     expect(describeEngineStatus(status({ state: "error", error: null })).text).toBe("The speech model could not be loaded.");
+  });
+});
+
+describe("describeModelSwitch", () => {
+  it("names the model being downloaded, with the rounded percent and the progress value", () => {
+    expect(
+      describeModelSwitch(download({ modelName: "Whisper small (English)", bytesReceived: 380_000_000 })),
+    ).toEqual({ text: "Downloading Whisper small (English)… 38%", tone: "progress", progress: 38 });
+  });
+
+  it("says Reconnecting… while the download reconnects, and keeps the bar where it was", () => {
+    expect(describeModelSwitch(download({ bytesReceived: 380_000_000, retries: 1, reconnecting: true }))).toEqual({
+      text: "Reconnecting…",
+      tone: "progress",
+      progress: 38,
+    });
   });
 });
