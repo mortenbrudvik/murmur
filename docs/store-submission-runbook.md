@@ -119,7 +119,8 @@ prompt to.
   - Hold a hotkey (Right Ctrl by default, configurable), talk, release: the text is pasted into
     whatever app has focus: a terminal, a browser, an editor, mail, chat.
   - Tap the hotkey for hands-free dictation; tap again to finish. Esc cancels.
-  - Accurate English dictation with OpenAI's Whisper large-v3-turbo model, running on your own PC.
+  - Accurate English dictation with OpenAI's Whisper model (large-v3-turbo on a capable graphics
+    card, a smaller English model otherwise), running on your own PC.
   - Vocabulary: hint words for names and jargon, and replacement rules ("web view two" →
     "WebView2").
   - History of every dictation, searchable, with one-click copy. Nothing is lost, even when a paste
@@ -134,9 +135,9 @@ prompt to.
   - **Cannot dictate into apps running as administrator.** While an elevated window has focus,
     Windows (UIPI) keeps the hotkey from reaching Murmur and blocks the paste; if focus moves to
     one mid-dictation, the text is left on the clipboard and in the history instead.
-  - **Best speed needs an NVIDIA GPU with the CUDA 13 toolkit installed**. Without it Murmur uses
-    Vulkan or the CPU, which is slower; on Vulkan the first dictation after starting can take many
-    seconds while the GPU code is prepared.
+  - **Best speed needs an NVIDIA GPU (RTX 30-series or newer) with the CUDA 13 toolkit
+    installed**. Without it Murmur uses Vulkan or the CPU, which is slower; on Vulkan the first
+    dictation after starting can take many seconds while the GPU code is prepared.
   - **First run shows a short setup and downloads a speech model of about 1.6 GB** (488 MB on PCs
     without a capable graphics card) from huggingface.co; it resumes if interrupted. Dictation is
     available once it has finished.
