@@ -5,16 +5,16 @@ using Murmur.Core.Services;
 namespace Murmur.Core.Features.Vocabulary;
 
 public record UpdateVocabularyRequest(IReadOnlyList<string> HintWords, IReadOnlyList<ReplacementRule> Replacements)
-    : IRequest<Models.Vocabulary>;
+    : IRequest<Murmur.Core.Models.Vocabulary>;
 
 /// <summary>
 /// Saves the vocabulary after tidying what the editor sent: hint words are trimmed, blanks dropped and duplicates
 /// removed ignoring case (the first spelling wins); rules with a blank spoken text are dropped.
 /// </summary>
 public class UpdateVocabularyHandler(IVocabularyService vocabularyService)
-    : IRequestHandler<UpdateVocabularyRequest, Models.Vocabulary>
+    : IRequestHandler<UpdateVocabularyRequest, Murmur.Core.Models.Vocabulary>
 {
-    public Task<Models.Vocabulary> Handle(UpdateVocabularyRequest request, CancellationToken ct)
+    public Task<Murmur.Core.Models.Vocabulary> Handle(UpdateVocabularyRequest request, CancellationToken ct)
     {
         var hintWords = (request.HintWords ?? [])
             .Select(w => w?.Trim() ?? "")
@@ -28,7 +28,7 @@ public class UpdateVocabularyHandler(IVocabularyService vocabularyService)
             .Select(r => new ReplacementRule(r.Spoken.Trim(), r.Written ?? ""))
             .ToList();
 
-        var vocabulary = new Models.Vocabulary(hintWords, replacements);
+        var vocabulary = new Murmur.Core.Models.Vocabulary(hintWords, replacements);
         vocabularyService.Save(vocabulary);
         return Task.FromResult(vocabulary);
     }

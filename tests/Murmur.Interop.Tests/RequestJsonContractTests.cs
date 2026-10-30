@@ -1,6 +1,9 @@
 using Murmur.Common;
+using Murmur.Core.Features.App;
 using Murmur.Core.Features.History;
+using Murmur.Core.Features.Models;
 using Murmur.Core.Features.Settings;
+using Murmur.Core.Features.Setup;
 using Murmur.Core.Features.Vocabulary;
 using Murmur.Core.Models;
 using Shouldly;
@@ -126,6 +129,70 @@ public class RequestJsonContractTests
         json.ShouldContain("\"download\":{\"modelName\":\"Whisper small (English)\",\"bytesReceived\":100,\"totalBytes\":1000,"
             + "\"bytesPerSecond\":50,\"secondsRemaining\":18,\"retries\":1,\"reconnecting\":true}");
         json.ShouldContain("\"gpu\":{\"state\":\"installCuda\",\"gpuName\":\"NVIDIA GeForce RTX 3060\"}");
+    }
+
+    [Fact]
+    public void UpdateSetupStateRequest_ReadsTheStepAsACamelCaseString()
+    {
+        const string json = """{"step":"tryIt","cudaTipDismissed":null,"completed":null}""";
+
+        var request = (UpdateSetupStateRequest?)JsonUtils.Deserialize(json, typeof(UpdateSetupStateRequest));
+
+        request.ShouldBe(new UpdateSetupStateRequest(SetupStep.TryIt, null, null));
+    }
+
+    [Fact]
+    public void UpdateSetupStateRequest_AbsentFieldsStayNull()
+    {
+        var request = (UpdateSetupStateRequest?)JsonUtils.Deserialize("""{"completed":true}""", typeof(UpdateSetupStateRequest));
+
+        request.ShouldBe(new UpdateSetupStateRequest(null, null, true));
+    }
+
+    [Fact]
+    public void SetModelChoiceRequest_ReadsTheModelAsACamelCaseString()
+    {
+        var request = (SetModelChoiceRequest?)JsonUtils.Deserialize("""{"model":"smallEn"}""", typeof(SetModelChoiceRequest));
+
+        request.ShouldBe(new SetModelChoiceRequest(SpeechModelId.SmallEn));
+    }
+
+    [Theory]
+    [InlineData("cudaDownload", LinkTarget.CudaDownload)]
+    [InlineData("nvidiaDriver", LinkTarget.NvidiaDriver)]
+    [InlineData("microphonePrivacy", LinkTarget.MicrophonePrivacy)]
+    public void OpenLinkRequest_ReadsTheTargetAsACamelCaseString(string name, LinkTarget expected)
+    {
+        var request = (OpenLinkRequest?)JsonUtils.Deserialize($$"""{"target":"{{name}}"}""", typeof(OpenLinkRequest));
+
+        request.ShouldBe(new OpenLinkRequest(expected));
+    }
+
+    [Fact]
+    public void ParameterlessSetupRequests_DeserializeFromAnEmptyObject()
+    {
+        JsonUtils.Deserialize("{}", typeof(GetSetupStateRequest)).ShouldBe(new GetSetupStateRequest());
+        JsonUtils.Deserialize("{}", typeof(GetModelChoiceRequest)).ShouldBe(new GetModelChoiceRequest());
+        JsonUtils.Deserialize("{}", typeof(RestartAppRequest)).ShouldBe(new RestartAppRequest());
+    }
+
+    [Fact]
+    public void SetupState_SerializesTheStepAsACamelCaseString()
+    {
+        var json = JsonUtils.Serialize(new SetupState(true, SetupStep.SpeechModel, false, "settings"));
+
+        json.ShouldBe("""{"showSetup":true,"step":"speechModel","cudaTipDismissed":false,"openPage":"settings"}""");
+    }
+
+    [Fact]
+    public void ModelChoice_SerializesTheModelsAsCamelCaseStringsWithTheOptions()
+    {
+        var choice = new ModelChoice(SpeechModelId.SmallEn, SpeechModelId.LargeV3Turbo,
+            [new SpeechModelOption(SpeechModelId.LargeV3Turbo, "Best accuracy (large, 1.6 GB)", 1_624_555_275)]);
+
+        var json = JsonUtils.Serialize(choice);
+
+        json.ShouldBe("""{"selected":"smallEn","recommended":"largeV3Turbo","options":[{"id":"largeV3Turbo","label":"Best accuracy (large, 1.6 GB)","sizeBytes":1624555275}]}""");
     }
 
     [Fact]

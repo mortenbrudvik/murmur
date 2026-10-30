@@ -1,5 +1,11 @@
 using Autofac;
+using MediatR;
+using Murmur.Core.Features.App;
+using Murmur.Core.Features.Models;
+using Murmur.Core.Features.Setup;
+using Murmur.Core.Models;
 using Murmur.Core.Services;
+using Murmur.Core.Setup;
 using NSubstitute;
 using Shouldly;
 
@@ -40,5 +46,34 @@ public sealed class AppModuleTests
 
         using var container = builder.Build();
         container.Resolve<IPackageIdentity>().ShouldBeSameAs(identity);
+    }
+
+    /// <summary>
+    /// The IPC requests the setup page sends are registered with the bridge by hand, but their handlers and what they
+    /// need come from the container; one that cannot be built would only fail when the page first calls it.
+    /// </summary>
+    [Fact]
+    public void Bootstrap_ResolvesTheSetupModelChoiceAndAppHandlers()
+    {
+        using var container = AutofacBootstrapper.Bootstrap();
+
+        container.Resolve<IRequestHandler<GetSetupStateRequest, SetupState>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<UpdateSetupStateRequest, SetupState>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<GetModelChoiceRequest, ModelChoice>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<SetModelChoiceRequest, ModelChoice>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<OpenLinkRequest>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<RestartAppRequest>>().ShouldNotBeNull();
+    }
+
+    /// <summary>App listens to the lifecycle's event while the handler calls it through the interface: one instance.</summary>
+    [Fact]
+    public void Bootstrap_SharesOneInstanceOfTheSetupServices()
+    {
+        using var container = AutofacBootstrapper.Bootstrap();
+
+        container.Resolve<IAppLifecycle>().ShouldBeSameAs(container.Resolve<AppLifecycle>());
+        container.Resolve<ILinkOpener>().ShouldBeOfType<ShellLinkOpener>();
+        container.Resolve<SetupCoordinator>().ShouldBeSameAs(container.Resolve<SetupCoordinator>());
+        container.Resolve<LaunchOptions>().ShouldBeSameAs(container.Resolve<LaunchOptions>());
     }
 }

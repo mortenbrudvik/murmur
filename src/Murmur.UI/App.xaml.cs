@@ -5,13 +5,18 @@ using Autofac;
 using MediatR;
 using Murmur.Common;
 using Murmur.Core.Dictation;
+using Murmur.Core.Features.App;
 using Murmur.Core.Features.Engine;
 using Murmur.Core.Features.History;
+using Murmur.Core.Features.Models;
 using Murmur.Core.Features.Settings;
+using Murmur.Core.Features.Setup;
 using Murmur.Core.Features.Vocabulary;
+using Murmur.Core.Hardware;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
 using Murmur.Core.Services;
+using Murmur.Core.Setup;
 using Murmur.Core.Speech;
 using Murmur.Interop;
 using Murmur.UI.Pill;
@@ -119,6 +124,12 @@ public partial class App : Application
         registry.Register<CaptureHotkeyRequest>("settings", "captureHotkey");
         registry.Register<GetMicrophonesRequest>("settings", "getMicrophones");
         registry.Register<GetEngineStatusRequest>("engine", "getStatus");
+        registry.Register<GetSetupStateRequest>("setup", "getState");
+        registry.Register<UpdateSetupStateRequest>("setup", "update");
+        registry.Register<GetModelChoiceRequest>("models", "getChoice");
+        registry.Register<SetModelChoiceRequest>("models", "setChoice");
+        registry.Register<OpenLinkRequest>("app", "openLink");
+        registry.Register<RestartAppRequest>("app", "restart");
 
         // 6. The theme is fixed to dark and applied before any window is created to avoid a flicker.
         ApplicationThemeManager.Apply(ApplicationTheme.Dark);
@@ -143,13 +154,13 @@ public partial class App : Application
         _tray.QuitRequested += Quit;
         _tray.Show();
 
-        // 10. Speech engine: downloads the model if needed, loads it and warms it up in the background. Its status
-        // changes reach the main window as a notification; subscribed first, so even the Downloading and Loading
-        // statuses are reported.
+        // 10. Speech engine: after the first-run decision, downloads the model if needed, loads it and warms it up in
+        // the background. Its status changes reach the main window as a notification; subscribed first, so even the
+        // Downloading and Loading statuses are reported.
         var engine = _container.Resolve<ISpeechEngine>();
         var mediator = _container.Resolve<IMediator>();
         engine.StatusChanged += status => mediator.Publish(new EngineStatusChangedNotification(status)).FireAndForget();
-        engine.InitializeAsync(_appCts.Token).FireAndForget();
+        StartSpeechAsync(engine, _container.Resolve<IGpuInfo>(), _container.Resolve<SetupCoordinator>()).FireAndForget();
 
         // 11. Start with Windows
         ApplyStartupRegistration(_container);
@@ -160,6 +171,30 @@ public partial class App : Application
         // 13. Started at sign-in, Murmur stays in the tray.
         if (!IsSignInStart(args, identity))
             ShowMainWindow();
+    }
+
+    /// <summary>
+    /// Decides first-run setup, then starts the speech engine, which would otherwise pick the model before setup has
+    /// looked at what is on disk. Both the GPU detection (its first read starts the CUDA driver) and the decision read
+    /// files and drivers, so they run off the UI thread, and the detection first, so that a later model-choice request
+    /// finds it done. A failed decision is logged and never keeps the engine from starting.
+    /// </summary>
+    private async Task StartSpeechAsync(ISpeechEngine engine, IGpuInfo gpu, SetupCoordinator setup)
+    {
+        try
+        {
+            await Task.Run(() =>
+            {
+                _ = gpu.Report;
+                setup.Initialize();
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "The first-run decision failed; starting the speech engine anyway");
+        }
+
+        await engine.InitializeAsync(_appCts.Token);
     }
 
     /// <summary>

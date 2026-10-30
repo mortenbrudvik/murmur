@@ -6,6 +6,7 @@ using Murmur.Core.Hardware;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
 using Murmur.Core.Services;
+using Murmur.Core.Setup;
 using Murmur.Core.Speech;
 using Murmur.Core.Text;
 using Murmur.Interop;
@@ -71,6 +72,11 @@ public class AppModule : Module
         builder.RegisterType<GpuInfo>().As<IGpuInfo>().SingleInstance();
         builder.RegisterType<CudaRuntimeLocator>().As<ICudaRuntimeLocator>().SingleInstance();
         builder.RegisterType<ModelSelection>().SingleInstance();
+        builder.RegisterType<LaunchOptions>().SingleInstance();
+        builder.RegisterType<SetupCoordinator>().SingleInstance();
+        builder.RegisterType<ShellLinkOpener>().As<ILinkOpener>().SingleInstance();
+        // Also as itself, so that App can subscribe to RestartRequested, which the interface does not carry.
+        builder.RegisterType<AppLifecycle>().AsSelf().As<IAppLifecycle>().SingleInstance();
         builder.RegisterType<WhisperModelLoader>().As<IWhisperModelLoader>().SingleInstance();
         // Never disposed by the container: disposing the native Whisper factory while a transcription may still be
         // running can crash the process, and process exit frees the GPU memory anyway.
