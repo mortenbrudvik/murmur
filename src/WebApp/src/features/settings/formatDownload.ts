@@ -39,14 +39,15 @@ export interface DownloadDescription {
   amount: string;
   /** "Reconnecting…", or the speed and the time left ("18 MB/s · about 1 minute left"); null when neither is known. */
   detail: string | null;
-  /** 0..100, rounded; 0 until the total size is known. */
+  /** 0..100, cut to a whole number like the pill's and the tray's, so never 100 early; 0 until the total is known. */
   percent: number;
 }
 
 export function describeDownload(download: DownloadProgress): DownloadDescription {
   const { bytesReceived, totalBytes } = download;
-  const fraction = totalBytes > 0 ? bytesReceived / totalBytes : 0;
-  const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+  // Whole bytes times 100, then divided, as the pill and the tray do: 0.29 * 100 is 28.999… in floating point.
+  const received = Math.min(totalBytes, Math.max(0, bytesReceived));
+  const percent = totalBytes > 0 ? Math.floor((received * 100) / totalBytes) : 0;
 
   const parts = [formatSpeed(download.bytesPerSecond), formatRemaining(download.secondsRemaining)].filter(
     (part): part is string => part !== null,

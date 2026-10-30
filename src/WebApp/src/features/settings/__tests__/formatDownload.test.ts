@@ -77,10 +77,19 @@ describe("formatRemaining", () => {
 });
 
 describe("describeDownload", () => {
-  it("gives the amount, the speed with the time left, and the rounded percent", () => {
+  it("gives the amount, the speed with the time left, and the whole percent", () => {
+    // 37.7%: cut, not rounded, like the pill and the tray.
     expect(
       describeDownload({ ...d, bytesReceived: 612_000_000, bytesPerSecond: 18_000_000, secondsRemaining: 56 }),
-    ).toEqual({ amount: "612 MB of 1.6 GB", detail: "18 MB/s · less than a minute left", percent: 38 });
+    ).toEqual({ amount: "612 MB of 1.6 GB", detail: "18 MB/s · less than a minute left", percent: 37 });
+  });
+
+  it("cuts the percent to a whole number like the pill and the tray, so it never shows 100 before the end", () => {
+    const of1000 = (bytesReceived: number) => describeDownload({ ...d, bytesReceived, totalBytes: 1000 }).percent;
+    expect(of1000(999)).toBe(99);
+    expect(of1000(1000)).toBe(100);
+    expect(of1000(290)).toBe(29); // 0.29 * 100 is 28.999… in floating point
+    expect(of1000(5)).toBe(0);
   });
 
   it("says Reconnecting… instead of the speed while reconnecting", () => {

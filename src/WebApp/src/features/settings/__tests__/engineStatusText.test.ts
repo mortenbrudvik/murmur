@@ -20,7 +20,15 @@ function download(overrides: Partial<DownloadProgress>): DownloadProgress {
 }
 
 describe("describeEngineStatus", () => {
-  it("shows the rounded download percentage taken from the bytes, with a progress value", () => {
+  it("shows the whole download percentage, cut like the pill's and the tray's", () => {
+    expect(describeEngineStatus(status({ state: "downloading", download: download({ bytesReceived: 999_999_999 }) }))).toEqual({
+      text: "Downloading speech model… 99%",
+      tone: "progress",
+      progress: 99,
+    });
+  });
+
+  it("shows the download percentage taken from the bytes, with a progress value", () => {
     expect(
       describeEngineStatus(status({ state: "downloading", download: download({ bytesReceived: 380_000_000 }) })),
     ).toEqual({
@@ -90,7 +98,7 @@ describe("describeEngineStatus", () => {
 });
 
 describe("describeModelSwitch", () => {
-  it("names the model being downloaded, with the rounded percent and the progress value", () => {
+  it("names the model being downloaded, with the percent and the progress value", () => {
     expect(
       describeModelSwitch(download({ modelName: "Whisper small (English)", bytesReceived: 380_000_000 })),
     ).toEqual({ text: "Downloading Whisper small (English)… 38%", tone: "progress", progress: 38 });
