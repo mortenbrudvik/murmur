@@ -2,6 +2,7 @@ using System.Net.Http;
 using Autofac;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
+using Murmur.Core.Hardware;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
 using Murmur.Core.Services;
@@ -67,6 +68,8 @@ public class AppModule : Module
 
         builder.RegisterType<DiskSpace>().As<IDiskSpace>().SingleInstance();
         builder.RegisterType<ModelManager>().As<IModelManager>().SingleInstance();
+        builder.RegisterType<GpuInfo>().As<IGpuInfo>().SingleInstance();
+        builder.RegisterType<ModelSelection>().SingleInstance();
         // Never disposed by the container: disposing the native Whisper factory while a transcription may still be
         // running can crash the process, and process exit frees the GPU memory anyway.
         builder.RegisterType<WhisperEngine>().As<ISpeechEngine>().SingleInstance().ExternallyOwned();

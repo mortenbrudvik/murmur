@@ -245,4 +245,10 @@ internal static partial class NativeMethods
     /// </summary>
     [LibraryImport("kernel32.dll")]
     internal static unsafe partial int GetCurrentPackageFullName(ref uint packageFullNameLength, char* packageFullName);
+
+    // ---- DXGI (display adapters) ----
+
+    /// <param name="riid">The IID of <see cref="IDXGIFactory1"/>.</param>
+    [LibraryImport("dxgi.dll")]
+    internal static partial int CreateDXGIFactory1(in Guid riid, out IDXGIFactory1 factory);
 }

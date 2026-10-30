@@ -13,4 +13,7 @@ public sealed class MurmurPaths(string root)
     public string ModelVerificationFile { get; } = Path.Combine(root, "models", "verified.json");
     public string AudioDirectory { get; } = Path.Combine(root, "audio");
     public string LogsDirectory { get; } = Path.Combine(root, "Logs");
+
+    /// <summary>Debug builds only: while this file exists, GPU detection reports no GPU at all.</summary>
+    public string SimulateNoGpuFile { get; } = Path.Combine(root, "simulate-no-gpu");
 }
