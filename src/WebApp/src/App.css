@@ -41,31 +41,127 @@
   outline-offset: -2px;
 }
 
+.main-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 .content {
   flex: 1;
   min-width: 0;
   min-height: 0;
 }
 
-.coming-soon {
-  padding: 20px 24px;
+/* Shown above every page while the speech engine is not ready (first-run download, loading, failure). */
+.engine-banner {
+  flex: none;
+  padding: 6px 24px;
+  font-size: 12px;
+  background: rgba(143, 179, 255, 0.1);
+  border-bottom: 1px solid var(--border-faint);
 }
 
-.coming-soon h1 {
+.engine-banner-error {
+  background: rgba(255, 107, 107, 0.1);
+}
+
+/* Shared chrome of the Vocabulary and Settings pages: they scroll as a whole, History scrolls its list. */
+.page {
+  height: 100%;
+  padding: 20px 24px 28px;
+  overflow-y: auto;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.page h1 {
   font-size: 20px;
   font-weight: 600;
   color: var(--text-strong);
 }
 
-.coming-soon p {
-  margin-top: 8px;
+.page-help {
+  margin-top: 4px;
+  font-size: 13px;
   color: var(--muted);
+}
+
+.page-section {
+  margin-top: 20px;
+}
+
+.page-section h2 {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.page-muted {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.page-error {
+  margin-top: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--error);
+  background: rgba(255, 107, 107, 0.1);
+  border-radius: 6px;
+}
+
+.text-input {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+
+.text-input::placeholder {
+  color: var(--dim);
+}
+
+.text-input:focus {
+  border-color: var(--accent);
+}
+
+.page button:focus-visible,
+.page .text-input:focus-visible,
+.page input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* A narrow window: the pages move to a bar along the top. */
 @media (max-width: 560px) {
   .shell {
     flex-direction: column;
+  }
+
+  .engine-banner {
+    padding: 6px 14px;
+  }
+
+  .page {
+    padding: 14px 14px 24px;
   }
 
   .sidebar {
