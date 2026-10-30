@@ -12,7 +12,8 @@ internal sealed record TrayNotice(string Title, string Message);
 /// <para>
 /// A notification is for something the user cannot see: none is made while the main window is the active window, and
 /// one that was skipped for that reason is not used up. Ready is announced only after a download, so an ordinary
-/// sign-in start, which only loads a model that is already there, stays silent.
+/// sign-in start, which only loads a model that is already there, stays silent; and never with an error, which is a
+/// model switch that failed.
 /// </para>
 /// </summary>
 internal sealed class TrayNotifier
@@ -36,8 +37,9 @@ internal sealed class TrayNotifier
 
         if (status.State == EngineState.Ready && !downloading)
         {
-            // Used up by this Ready, whether or not it was announced.
-            var announce = _downloaded && !windowActive;
+            // Used up by this Ready, whether or not it was announced. A Ready with an error is a switch that failed and
+            // stayed on the previous model: the download led to nothing, so there is nothing to announce.
+            var announce = _downloaded && !windowActive && string.IsNullOrEmpty(status.Error);
             _downloaded = false;
             return announce ? new TrayNotice("Murmur is ready", $"Hold {hotkeyName} to talk.") : null;
         }

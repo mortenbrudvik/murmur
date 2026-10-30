@@ -69,6 +69,26 @@ public sealed class TrayNotifierTests
         notice.ShouldBe(new TrayNotice("Murmur is ready", "Hold Right Ctrl to talk."));
     }
 
+    /// <summary>A switch whose download or load failed stays Ready on the previous model, with the error: nothing became ready.</summary>
+    [Fact]
+    public void OnStatus_ReadyWithAnErrorAfterASwitchDownload_NoNotice()
+    {
+        _notifier.OnStatus(ReadyWhileSwitching(), windowActive: false, Hotkey).ShouldBeNull();
+
+        _notifier.OnStatus(Ready() with { Error = "Could not switch to Whisper small (English): 404" }, windowActive: false, Hotkey)
+            .ShouldBeNull();
+    }
+
+    [Fact]
+    public void OnStatus_ReadyWithAnErrorAfterADownload_UsesUpTheDownload()
+    {
+        _notifier.OnStatus(Downloading(retries: 0), windowActive: false, Hotkey);
+        _notifier.OnStatus(Ready() with { Error = "Could not switch to Whisper small (English): 404" }, windowActive: false, Hotkey)
+            .ShouldBeNull();
+
+        _notifier.OnStatus(Ready(), windowActive: false, Hotkey).ShouldBeNull();
+    }
+
     [Fact]
     public void OnStatus_ErrorWithTheWindowInactive_SaysSo()
     {
