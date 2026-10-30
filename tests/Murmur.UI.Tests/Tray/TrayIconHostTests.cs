@@ -421,6 +421,15 @@ public sealed class TrayIconHostTests
             .ShouldBe("Murmur — the hotkey isn't working");
     }
 
+    /// <summary>The old model dictates while the next one loads, so the hotkey not working is the news then too.</summary>
+    [Fact]
+    public void FormatToolTip_HookUnavailableWhileSwitchingModels_SaysTheHotkeyIsOff()
+    {
+        var status = new EngineStatus(EngineState.Loading, "Whisper small (English)", "Cuda", Switching: true);
+
+        TrayIconHost.FormatToolTip(status, "Right Ctrl", hookInstalled: false).ShouldBe("Murmur — the hotkey isn't working");
+    }
+
     /// <summary>Only the line that advertises the hotkey changes; what the engine is doing is still the news.</summary>
     [Fact]
     public void FormatToolTip_HookUnavailableWhileTheEngineLoads_StillSaysLoading()

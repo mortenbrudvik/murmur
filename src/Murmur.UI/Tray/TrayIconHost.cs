@@ -207,15 +207,15 @@ public sealed partial class TrayIconHost : IDisposable
     /// <summary>
     /// The tooltip for an engine state; long error messages are cut to fit. Ready stays Ready while a model switch
     /// downloads the next model: the current one keeps dictating meanwhile, and the download shows in Settings. The
-    /// load of the next model is not "loading model…" either, for the same reason. Without the keyboard hook, the one
-    /// line that advertises the hotkey says it is not working instead.
+    /// load of the next model is not "loading model…" either, for the same reason. Without the keyboard hook, whenever
+    /// the engine could dictate (Ready, or the load of a switch) the tooltip says the hotkey is not working instead.
     /// </summary>
     internal static string FormatToolTip(EngineStatus status, string hotkeyName, bool hookInstalled = true)
     {
         var text = status.State switch
         {
+            _ when !hookInstalled && ShowsReadyIcon(status) => "Murmur — the hotkey isn't working",
             _ when status.Switching => $"Murmur — switching to {status.ModelName}…",
-            EngineState.Ready when !hookInstalled => "Murmur — the hotkey isn't working",
             EngineState.Ready => $"Murmur — hold {hotkeyName} to talk",
             EngineState.Downloading when status.Download is { Reconnecting: true } => "Murmur — reconnecting to download the speech model…",
             EngineState.Downloading => $"Murmur — downloading speech model {WholeFraction(status.Download):P0}",
