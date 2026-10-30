@@ -15,6 +15,9 @@ public sealed class HotkeyCaptureTests
     private const int Escape = 0x1B;
     private const int KeyA = 0x41;
     private const int F13 = 0x7C;
+    private const int LeftAlt = 0xA4;
+    private const int Tab = 0x09;
+    private const int F4 = 0x73;
 
     private static readonly TimeSpan CaptureTimeout = TimeSpan.FromSeconds(10);
 
@@ -120,6 +123,41 @@ public sealed class HotkeyCaptureTests
     }
 
     [Fact]
+    public void AltTab_CancelsInsteadOfCapturing()
+    {
+        var session = Feed(Down(LeftAlt), Down(Tab));
+
+        session.IsComplete.ShouldBeTrue();
+        session.Result.ShouldBeNull();
+    }
+
+    [Fact]
+    public void AltF4_CancelsInsteadOfCapturing()
+    {
+        var session = Feed(Down(LeftAlt), Down(F4));
+
+        session.IsComplete.ShouldBeTrue();
+        session.Result.ShouldBeNull();
+    }
+
+    [Fact]
+    public void WinTab_CancelsInsteadOfCapturing()
+    {
+        var session = Feed(Down(LeftWin), Down(Tab));
+
+        session.IsComplete.ShouldBeTrue();
+        session.Result.ShouldBeNull();
+    }
+
+    [Fact]
+    public void CtrlTab_IsCaptured()
+    {
+        var session = Feed(Down(LeftCtrl), Down(Tab));
+
+        session.Result.ShouldBe(new HotkeyDefinition(0x09, HotkeyModifiers.Ctrl, "Ctrl+Tab"));
+    }
+
+    [Fact]
     public void Escape_Cancels()
     {
         var session = Feed(Down(LeftCtrl), Down(Escape));
@@ -188,6 +226,19 @@ public sealed class HotkeyCaptureTests
 
         (await capture).ShouldBeNull();
         coordinator.TryHandle(Up(Escape)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Coordinator_AltTab_ReturnsNullAndStopsCapturing()
+    {
+        var coordinator = new HotkeyCaptureCoordinator(new FakeTimeProvider());
+        var capture = coordinator.CaptureAsync(CaptureTimeout, TestContext.Current.CancellationToken);
+
+        coordinator.TryHandle(Down(LeftAlt)).ShouldBeTrue();
+        coordinator.TryHandle(Down(Tab)).ShouldBeTrue();
+
+        (await capture).ShouldBeNull();
+        coordinator.TryHandle(Down(Tab)).ShouldBeFalse();
     }
 
     [Fact]

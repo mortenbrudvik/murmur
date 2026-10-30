@@ -9,6 +9,8 @@ namespace Murmur.Core.Input;
 /// <item>A non-modifier key-down → that key plus the modifiers currently held, accepted only if
 /// <see cref="HotkeyDefinition.IsValid"/>; otherwise it is ignored and the session keeps waiting.</item>
 /// <item>Esc cancels (<see cref="Result"/> stays null).</item>
+/// <item>A reserved shell shortcut (<see cref="HotkeyDefinition.IsReservedShortcut"/>, e.g. Alt+Tab) also cancels,
+/// so reaching for Alt+Tab mid-capture ends the capture instead of becoming the hotkey.</item>
 /// </list>
 /// Injected input is ignored. Not thread-safe.
 /// </summary>
@@ -52,7 +54,9 @@ public sealed class HotkeyCaptureSession
         _soloModifier = 0;
         var mods = _modifiers.Current();
         var candidate = new HotkeyDefinition(vk, mods, KeyNames.Describe(vk, mods));
-        if (candidate.IsValid)
+        if (candidate.IsReservedShortcut)
+            Complete(null);
+        else if (candidate.IsValid)
             Complete(candidate);
     }
 

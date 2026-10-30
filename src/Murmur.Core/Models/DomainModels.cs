@@ -22,12 +22,22 @@ public sealed record HotkeyDefinition(int VirtualKey, HotkeyModifiers Modifiers,
         Modifiers == HotkeyModifiers.None
         && (VirtualKey is >= 0xA0 and <= 0xA5 or 0x5B or 0x5C);
 
-    /// <summary>Modifier-only, an F1-F24 key, or any key combined with at least one modifier.</summary>
+    /// <summary>
+    /// A Windows shell shortcut that Murmur must never take over: Alt+Tab, Win+Tab (with any extra modifiers)
+    /// and Alt+F4. The hotkey's main key is swallowed system-wide, so one of these would break window switching.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsReservedShortcut =>
+        (VirtualKey == 0x09 && (Modifiers & (HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0)
+        || (VirtualKey == 0x73 && Modifiers.HasFlag(HotkeyModifiers.Alt));
+
+    /// <summary>Modifier-only, an F1-F24 key, or any key combined with at least one modifier — never a reserved shortcut.</summary>
     [JsonIgnore]
     public bool IsValid =>
-        IsModifierOnly
-        || VirtualKey is >= 0x70 and <= 0x87
-        || Modifiers != HotkeyModifiers.None;
+        !IsReservedShortcut
+        && (IsModifierOnly
+            || VirtualKey is >= 0x70 and <= 0x87
+            || Modifiers != HotkeyModifiers.None);
 }
 
 public sealed record MurmurSettings(
