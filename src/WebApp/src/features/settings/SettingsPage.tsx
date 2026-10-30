@@ -2,6 +2,7 @@ import { useState } from "react";
 import "./SettingsPage.css";
 import CudaTip from "./CudaTip";
 import EngineStatusLine from "./EngineStatusLine";
+import MicrophoneSelect from "./MicrophoneSelect";
 import SpeechModelSection from "./SpeechModelSection";
 import { useMicrophones } from "./useMicrophones";
 import { useSettings } from "./useSettings";
@@ -54,9 +55,7 @@ export default function SettingsPage({ engineStatus }: Props) {
       </p>
     ) : null;
 
-  // A saved microphone that is not in the list stays selectable, so saving something else does not change it.
   const savedMicrophone = settings?.microphoneId ?? null;
-  const microphoneMissing = savedMicrophone !== null && !microphones.some((m) => m.id === savedMicrophone);
 
   return (
     <section className="page settings">
@@ -93,27 +92,15 @@ export default function SettingsPage({ engineStatus }: Props) {
                 <label htmlFor="settings-microphone">Microphone</label>
               </div>
               <div className="settings-control">
-                <select
+                <MicrophoneSelect
                   id="settings-microphone"
                   className="text-input settings-select"
-                  value={savedMicrophone ?? ""}
-                  onFocus={() => void refreshMicrophones()}
-                  onChange={(e) => {
-                    // Read now: the event's target is put back to the saved value before the save runs.
-                    const microphoneId = e.target.value || null;
-                    change("microphone", (current) => ({ ...current, microphoneId }));
-                  }}
-                >
-                  <option value="">Windows default</option>
-                  {microphones.map((mic) => (
-                    <option key={mic.id} value={mic.id}>
-                      {mic.name}
-                    </option>
-                  ))}
-                  {microphoneMissing && (
-                    <option value={savedMicrophone}>{microphonesLoaded ? "Unavailable microphone" : "Loading…"}</option>
-                  )}
-                </select>
+                  value={savedMicrophone}
+                  microphones={microphones}
+                  microphonesLoaded={microphonesLoaded}
+                  onOpen={() => void refreshMicrophones()}
+                  onChange={(microphoneId) => change("microphone", (current) => ({ ...current, microphoneId }))}
+                />
               </div>
             </div>
             {microphonesLoaded && microphones.length === 0 && <p className="settings-hint">No microphones found</p>}

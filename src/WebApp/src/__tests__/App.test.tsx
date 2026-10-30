@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { apiClient } from "../interop/WebViewApiClient";
-import type { DownloadProgress, EngineStatus, MurmurSettings, Vocabulary } from "../types/domain";
+import type { DownloadProgress, EngineStatus, MurmurSettings, SetupState, Vocabulary } from "../types/domain";
 
 vi.mock("../interop/WebViewApiClient", () => ({
   apiClient: {
@@ -30,9 +30,13 @@ const download: DownloadProgress = {
 };
 const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo", runtime: "Cuda", error: null, download: null, gpu: null };
 
-function mockServer(status: EngineStatus) {
+const setupDone: SetupState = { showSetup: false, step: "speechModel", cudaTipDismissed: false, openPage: null };
+const firstRun: SetupState = { ...setupDone, showSetup: true };
+
+function mockServer(status: EngineStatus, setup: SetupState = setupDone) {
   vi.mocked(apiClient.call).mockImplementation(async (service, method) => {
     const key = `${service}.${method}`;
+    if (key === "setup.getState") return setup;
     if (key === "engine.getStatus") return status;
     if (key === "settings.get") return settings;
     if (key === "vocabulary.get") return vocabulary;
@@ -106,6 +110,110 @@ describe("App engine status banner", () => {
 
     pushStatus({ ...ready, state: "error", runtime: null, error: "Model file is corrupt" });
     expect((await screen.findByRole("alert")).textContent).toBe("Model file is corrupt");
+  });
+});
+
+describe("App first-run setup", () => {
+  beforeEach(() => {
+    vi.mocked(apiClient.call).mockReset();
+    vi.mocked(apiClient.on).mockClear();
+  });
+
+  it("shows nothing until the setup state is known", async () => {
+    vi.mocked(apiClient.call).mockImplementation(() => new Promise(() => undefined));
+
+    const { container } = render(<App />);
+    await waitFor(() => expect(callsTo("setup.getState")).toHaveLength(1));
+
+    expect(container.textContent).toBe("");
+  });
+
+  it("shows setup without the sidebar on first run", async () => {
+    mockServer({ ...ready, state: "downloading", runtime: null, download }, firstRun);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Getting Murmur ready" })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Pages" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
+    // The engine banner would repeat what the setup page shows: it carries the status role, the page does not.
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Downloading speech model")).toBeTruthy();
+  });
+
+  it("shows the sidebar when setup is complete", async () => {
+    mockServer(ready);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "History" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Getting Murmur ready" })).toBeNull();
+  });
+
+  it("opens Settings when asked at launch", async () => {
+    mockServer(ready, { ...setupDone, openPage: "settings" });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "History" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("lets the user leave the page that was opened at launch", async () => {
+    mockServer(ready, { ...setupDone, openPage: "settings" });
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Vocabulary" }));
+
+    expect(await screen.findByRole("heading", { name: "Vocabulary" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
+  });
+
+  it("falls back to the normal window when the setup state cannot be read", async () => {
+    mockServer(ready);
+    const answer = vi.mocked(apiClient.call).getMockImplementation()!;
+    vi.mocked(apiClient.call).mockImplementation(async (service, method, params) => {
+      if (service === "setup" && method === "getState") throw new Error("bridge down");
+      return answer(service, method, params);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "History" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
+  });
+
+  it("goes to History with the sidebar when setup is done", async () => {
+    mockServer(ready, { ...firstRun, step: "tryIt" });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+
+    expect(await screen.findByRole("heading", { name: "History" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
+    expect(callsTo("setup.update").map(([, , params]) => params)).toEqual([{ completed: true }]);
+  });
+
+  it("goes to History after setup even if Settings was asked for at launch", async () => {
+    mockServer(ready, { ...firstRun, step: "tryIt", openPage: "settings" });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+
+    expect(await screen.findByRole("heading", { name: "History" })).toBeTruthy();
+  });
+
+  it("saves the step when Next is pressed, and moves on to it", async () => {
+    mockServer({ ...ready, state: "loading", runtime: null }, firstRun);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+
+    expect(await screen.findByRole("heading", { name: "Check your microphone" })).toBeTruthy();
+    expect(callsTo("setup.update").map(([, , params]) => params)).toEqual([{ step: "microphone" }]);
   });
 });
 
