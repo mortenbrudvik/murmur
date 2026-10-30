@@ -25,10 +25,16 @@ internal sealed class TrayNotifier
     private bool _errorNotified;
     private bool _offlineNotified;
 
+    /// <summary>What a Windows notification says when the keyboard hook could not be installed: dictation is off.</summary>
+    internal static readonly TrayNotice HotkeyUnavailable = new(
+        "Murmur can't use the hotkey",
+        "Windows didn't let Murmur watch the keyboard, so dictation is off. Restart Murmur to try again.");
+
     /// <summary>The notification to show for <paramref name="status"/>, or null for none.</summary>
     /// <param name="windowActive">Whether the main window is the active window.</param>
     /// <param name="hotkeyName">Names the hotkey in the ready notice; it is only used then.</param>
-    public TrayNotice? OnStatus(EngineStatus status, bool windowActive, string hotkeyName)
+    /// <param name="hookInstalled">False if the keyboard hook failed: the ready notice then does not advertise the hotkey.</param>
+    public TrayNotice? OnStatus(EngineStatus status, bool windowActive, string hotkeyName, bool hookInstalled = true)
     {
         // A download in progress, also the one of a model switch that runs while the current model is Ready.
         var downloading = status.State == EngineState.Downloading || status.Download is not null;
@@ -41,7 +47,10 @@ internal sealed class TrayNotifier
             // stayed on the previous model: the download led to nothing, so there is nothing to announce.
             var announce = _downloaded && !windowActive && string.IsNullOrEmpty(status.Error);
             _downloaded = false;
-            return announce ? new TrayNotice("Murmur is ready", $"Hold {hotkeyName} to talk.") : null;
+            if (!announce)
+                return null;
+
+            return new TrayNotice("Murmur is ready", hookInstalled ? $"Hold {hotkeyName} to talk." : "Restart Murmur to use the hotkey.");
         }
 
         if (status.State == EngineState.Error && !windowActive && !_errorNotified)

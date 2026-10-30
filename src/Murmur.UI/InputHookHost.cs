@@ -16,13 +16,17 @@ namespace Murmur.UI;
 /// removes a hook whose callback takes longer than LowLevelHooksTimeout. The UI thread can stall for that long
 /// (opening a Bluetooth microphone, WebView2 work, a garbage collection); this thread only ever runs the callbacks.
 /// </para>
+/// <para>
+/// Not sealed, with <see cref="Start"/> and <see cref="Dispose"/> virtual, only so that <see cref="InputHookStarter"/>
+/// can be tested without installing a real hook.
+/// </para>
 /// </summary>
 /// <param name="onSignal">
 /// Receives every signal other than <see cref="HotkeySignal.None"/>, on the hook thread, with the time the hook saw it
 /// (from <paramref name="time"/>), so tap and hold are timed from the key events themselves, not from whenever the
 /// UI thread handles them. It must return at once, so it should only post the signal elsewhere.
 /// </param>
-public sealed partial class InputHookHost(
+public partial class InputHookHost(
     HotkeyMatcher matcher, HotkeyCaptureCoordinator coordinator, IKeyboardSender keyboard, TimeProvider time,
     Action<HotkeySignal, DateTimeOffset> onSignal)
     : IDisposable
@@ -45,7 +49,7 @@ public sealed partial class InputHookHost(
 
     /// <summary>Starts the hook thread and waits until the keyboard hook is installed.</summary>
     /// <exception cref="Win32Exception">The keyboard hook could not be installed.</exception>
-    public void Start()
+    public virtual void Start()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_thread is not null)
@@ -69,7 +73,7 @@ public sealed partial class InputHookHost(
     }
 
     /// <summary>Removes the hooks on their own thread, ends its message loop and waits briefly for it to exit.</summary>
-    public void Dispose()
+    public virtual void Dispose()
     {
         if (_disposed)
             return;

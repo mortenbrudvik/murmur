@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { apiClient } from "../interop/WebViewApiClient";
-import type { DownloadProgress, EngineStatus, MurmurSettings, SetupState, Vocabulary } from "../types/domain";
+import type { DownloadProgress, EngineStatus, InputStatus, MurmurSettings, SetupState, Vocabulary } from "../types/domain";
 
 vi.mock("../interop/WebViewApiClient", () => ({
   apiClient: {
@@ -33,11 +33,15 @@ const ready: EngineStatus = { state: "ready", modelName: "Whisper large-v3-turbo
 const setupDone: SetupState = { showSetup: false, step: "speechModel", cudaTipDismissed: false, openPage: null };
 const firstRun: SetupState = { ...setupDone, showSetup: true };
 
-function mockServer(status: EngineStatus, setup: SetupState = setupDone) {
+const hookInstalled: InputStatus = { hookInstalled: true, error: null };
+const hookRefused: InputStatus = { hookInstalled: false, error: "Access is denied" };
+
+function mockServer(status: EngineStatus, setup: SetupState = setupDone, input: InputStatus = hookInstalled) {
   vi.mocked(apiClient.call).mockImplementation(async (service, method) => {
     const key = `${service}.${method}`;
     if (key === "setup.getState") return setup;
     if (key === "engine.getStatus") return status;
+    if (key === "app.getInputStatus") return input;
     if (key === "settings.get") return settings;
     if (key === "vocabulary.get") return vocabulary;
     if (key === "settings.getMicrophones" || key === "history.get") return [];
@@ -50,6 +54,15 @@ function pushStatus(status: EngineStatus) {
   const callbacks = vi.mocked(apiClient.on).mock.calls
     .filter(([name]) => name === "engine.statusChanged")
     .map(([, callback]) => callback as (status: EngineStatus) => void);
+  expect(callbacks.length).toBeGreaterThan(0);
+  act(() => callbacks.forEach((callback) => callback(status)));
+}
+
+/** Delivers an app.inputStatusChanged push to everything that subscribed to it. */
+function pushInputStatus(status: InputStatus) {
+  const callbacks = vi.mocked(apiClient.on).mock.calls
+    .filter(([name]) => name === "app.inputStatusChanged")
+    .map(([, callback]) => callback as (status: InputStatus) => void);
   expect(callbacks.length).toBeGreaterThan(0);
   act(() => callbacks.forEach((callback) => callback(status)));
 }
@@ -131,6 +144,97 @@ describe("App engine status banner", () => {
     pushStatus(ready);
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+});
+
+describe("App hotkey alert", () => {
+  const ALERT = "Windows didn't let Murmur watch the keyboard, so dictation is off. Restart Murmur to try again.";
+
+  beforeEach(() => {
+    vi.mocked(apiClient.call).mockReset();
+    vi.mocked(apiClient.on).mockClear();
+  });
+
+  it("shows above the engine banner and the History page when Windows refused the keyboard hook", async () => {
+    mockServer({ ...ready, state: "loading", runtime: null }, setupDone, hookRefused);
+
+    render(<App />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(ALERT);
+    expect(screen.getByRole("button", { name: "Restart Murmur" })).toBeTruthy();
+    const engine = screen.getByRole("status");
+    const history = screen.getByRole("heading", { name: "History" });
+    expect(alert.compareDocumentPosition(engine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alert.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(callsTo("app.getInputStatus")).toHaveLength(1);
+  });
+
+  it("stays above every page", async () => {
+    mockServer(ready, setupDone, hookRefused);
+
+    render(<App />);
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(ALERT);
+  });
+
+  it("is not there when the keyboard hook works", async () => {
+    mockServer(ready);
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "History" });
+    await waitFor(() => expect(callsTo("app.getInputStatus")).toHaveLength(1));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restart Murmur" })).toBeNull();
+  });
+
+  /** The hook is still being retried when the window loads and asks; the failure arrives as a push. */
+  it("appears when the failure is pushed after the window asked", async () => {
+    mockServer(ready);
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "History" });
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    pushInputStatus(hookRefused);
+
+    expect((await screen.findByRole("alert")).textContent).toContain(ALERT);
+  });
+
+  it("restarts Murmur from its button", async () => {
+    mockServer(ready, setupDone, hookRefused);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart Murmur" }));
+
+    expect(callsTo("app.restart")).toHaveLength(1);
+  });
+
+  it("shows on the setup page too, where Try it cannot work without the hook", async () => {
+    mockServer(ready, firstRun, hookRefused);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Getting Murmur ready" })).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toContain(ALERT);
+    expect(screen.getByRole("button", { name: "Restart Murmur" })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Pages" })).toBeNull();
+  });
+
+  it("does not restart the setup page when the alert appears", async () => {
+    mockServer(ready, { ...firstRun, step: "microphone" });
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Check your microphone" })).toBeTruthy();
+
+    pushInputStatus(hookRefused);
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Check your microphone" })).toBeTruthy();
   });
 });
 

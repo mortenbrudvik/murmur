@@ -5,6 +5,7 @@ using Murmur.Core.Features.Models;
 using Murmur.Core.Features.Settings;
 using Murmur.Core.Features.Setup;
 using Murmur.Core.Features.Vocabulary;
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Shouldly;
 
@@ -175,6 +176,15 @@ public class RequestJsonContractTests
         JsonUtils.Deserialize("{}", typeof(GetSetupStateRequest)).ShouldBe(new GetSetupStateRequest());
         JsonUtils.Deserialize("{}", typeof(GetModelChoiceRequest)).ShouldBe(new GetModelChoiceRequest());
         JsonUtils.Deserialize("{}", typeof(RestartAppRequest)).ShouldBe(new RestartAppRequest());
+        JsonUtils.Deserialize("{}", typeof(GetInputStatusRequest)).ShouldBe(new GetInputStatusRequest());
+    }
+
+    [Fact]
+    public void InputStatus_SerializesAsHookInstalledAndError()
+    {
+        JsonUtils.Serialize(new InputStatus()).ShouldBe("""{"hookInstalled":true,"error":null}""");
+        JsonUtils.Serialize(new InputStatus { HookInstalled = false, Error = "Access is denied" })
+            .ShouldBe("""{"hookInstalled":false,"error":"Access is denied"}""");
     }
 
     [Fact]

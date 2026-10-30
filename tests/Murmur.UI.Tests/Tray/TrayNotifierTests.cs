@@ -22,6 +22,25 @@ public sealed class TrayNotifierTests
         notice.ShouldBe(new TrayNotice("Murmur is ready", "Hold Right Ctrl to talk."));
     }
 
+    /// <summary>With no hook the hotkey does nothing, so the notice must not tell the user to hold it.</summary>
+    [Fact]
+    public void OnStatus_ReadyWithTheHookUnavailable_DoesNotAdvertiseTheHotkey()
+    {
+        _notifier.OnStatus(Downloading(retries: 0), windowActive: false, Hotkey, hookInstalled: false).ShouldBeNull();
+
+        var notice = _notifier.OnStatus(Ready(), windowActive: false, Hotkey, hookInstalled: false);
+
+        notice.ShouldBe(new TrayNotice("Murmur is ready", "Restart Murmur to use the hotkey."));
+    }
+
+    [Fact]
+    public void HotkeyUnavailable_SaysWhyDictationIsOffAndWhatToDo()
+    {
+        TrayNotifier.HotkeyUnavailable.ShouldBe(new TrayNotice(
+            "Murmur can't use the hotkey",
+            "Windows didn't let Murmur watch the keyboard, so dictation is off. Restart Murmur to try again."));
+    }
+
     /// <summary>An ordinary sign-in start loads a model that is already there, and stays silent.</summary>
     [Fact]
     public void OnStatus_ReadyWithoutADownloadThisRun_NoNotice()

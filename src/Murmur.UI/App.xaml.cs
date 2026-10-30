@@ -146,6 +146,7 @@ public partial class App : Application
         registry.Register<SetModelChoiceRequest>("models", "setChoice");
         registry.Register<OpenLinkRequest>("app", "openLink");
         registry.Register<RestartAppRequest>("app", "restart");
+        registry.Register<GetInputStatusRequest>("app", "getInputStatus");
 
         // 6. The theme is fixed to dark and applied before any window is created to avoid a flicker.
         ApplicationThemeManager.Apply(ApplicationTheme.Dark);
@@ -159,16 +160,17 @@ public partial class App : Application
         var pill = _container.Resolve<PillWindow>();
         new WindowInteropHelper(pill).EnsureHandle();
 
-        // 8. Dictation. The controller is created here, on the UI thread, because it captures this thread's
-        // SynchronizationContext; hook signals reach it through the dispatcher.
-        var controller = _container.Resolve<DictationController>();
-        StartInputHooks(_container, controller);
-
-        // 9. Tray
+        // 8. Tray. Before the hotkey hooks, so that a hook failure always has an icon to report through.
         _tray = _container.Resolve<TrayIconHost>();
         _tray.OpenRequested += ShowMainWindow;
         _tray.QuitRequested += Quit;
         _tray.Show();
+
+        // 9. Dictation. The controller is created here, on the UI thread, because it captures this thread's
+        // SynchronizationContext; hook signals reach it through the dispatcher. The hook starts in the background
+        // from here on, because a refused hook is tried once more after a short wait.
+        var controller = _container.Resolve<DictationController>();
+        StartInputHooksAsync(_container, controller).FireAndForget();
 
         // "Restart Murmur" is asked for by an IPC handler, on a pool thread.
         _container.Resolve<AppLifecycle>().RestartRequested += () => Dispatcher.BeginInvoke(Restart);
@@ -185,7 +187,8 @@ public partial class App : Application
         // UI thread, where the icon is.
         var notifier = new TrayNotifier();
         var settings = _container.Resolve<ISettingsService>();
-        engine.StatusChanged += status => Dispatcher.BeginInvoke(() => NotifyTray(notifier, settings, status));
+        var input = _container.Resolve<InputStatus>();
+        engine.StatusChanged += status => Dispatcher.BeginInvoke(() => NotifyTray(notifier, settings, input, status));
 
         StartSpeechAsync(engine, _container.Resolve<IGpuInfo>(), _container.Resolve<SetupCoordinator>()).FireAndForget();
 
@@ -259,14 +262,14 @@ public partial class App : Application
     }
 
     /// <summary>Shows what <see cref="TrayNotifier"/> finds worth a notification. Runs on the UI thread.</summary>
-    private void NotifyTray(TrayNotifier notifier, ISettingsService settings, EngineStatus status)
+    private void NotifyTray(TrayNotifier notifier, ISettingsService settings, InputStatus input, EngineStatus status)
     {
         if (IsQuitting)
             return;
 
         // Only a ready notice names the hotkey, so the file is not read for every download progress update.
         var hotkeyName = status.State == EngineState.Ready ? ReadHotkeyName(settings) : HotkeyDefinition.Default.DisplayName;
-        var notice = notifier.OnStatus(status, _mainWindow?.IsActive == true, hotkeyName);
+        var notice = notifier.OnStatus(status, _mainWindow?.IsActive == true, hotkeyName, input.HookInstalled);
         if (notice is not null)
             _tray?.ShowNotification(notice.Title, notice.Message);
     }
@@ -342,25 +345,56 @@ public partial class App : Application
             .CreateLogger();
     }
 
-    private void StartInputHooks(IContainer container, DictationController controller)
+    /// <summary>
+    /// Starts the keyboard hook, which <see cref="InputHookStarter"/> tries twice: the first attempt runs here, the wait
+    /// and the second attempt do not hold up the UI thread. What the hook needs is resolved before the first attempt,
+    /// so a service that cannot be built still fails the start-up instead of passing for a refused hook.
+    /// </summary>
+    private Task StartInputHooksAsync(IContainer container, DictationController controller)
     {
         var dispatcher = Dispatcher;
-        _inputHooks = new InputHookHost(
-            container.Resolve<HotkeyMatcher>(),
-            container.Resolve<HotkeyCaptureCoordinator>(),
-            container.Resolve<IKeyboardSender>(),
-            container.Resolve<TimeProvider>(),
-            (signal, at) => dispatcher.BeginInvoke(() => controller.HandleSignal(signal, at)));
+        var matcher = container.Resolve<HotkeyMatcher>();
+        var coordinator = container.Resolve<HotkeyCaptureCoordinator>();
+        var keyboard = container.Resolve<IKeyboardSender>();
+        var time = container.Resolve<TimeProvider>();
+        var starter = new InputHookStarter(
+            () => new InputHookHost(
+                matcher, coordinator, keyboard, time,
+                (signal, at) => dispatcher.BeginInvoke(() => controller.HandleSignal(signal, at))),
+            time);
 
-        try
+        return KeepInputHooksAsync(starter, container.Resolve<InputStatus>(), container.Resolve<IMediator>());
+    }
+
+    /// <summary>
+    /// Keeps the host that <paramref name="starter"/> started for as long as Murmur runs. If the hook cannot be installed,
+    /// Murmur keeps running (history, settings) but the hotkey cannot work, so it says so: the tray tooltip and a
+    /// notification, and the main window's alert (through <see cref="InputStatus"/>, and a push for a window that
+    /// asked before the second attempt ended).
+    /// </summary>
+    private async Task KeepInputHooksAsync(InputHookStarter starter, InputStatus input, IMediator mediator)
+    {
+        // Resumes on the UI thread, where Quit also runs.
+        var hooks = await starter.StartAsync();
+        if (IsQuitting)
         {
-            _inputHooks.Start();
+            // Murmur began to quit during the wait, after StopInputAndTray found no hooks to remove.
+            hooks?.Dispose();
+            return;
         }
-        catch (Exception ex)
+
+        if (hooks is not null)
         {
-            // Murmur still runs (history, settings), but the hotkey cannot work.
-            Log.Error(ex, "Could not install the keyboard hook; dictation is unavailable");
+            _inputHooks = hooks;
+            return;
         }
+
+        input.Error = starter.Failure?.Message;
+        input.HookInstalled = false;
+
+        _tray?.Refresh();
+        _tray?.ShowNotification(TrayNotifier.HotkeyUnavailable.Title, TrayNotifier.HotkeyUnavailable.Message);
+        mediator.Publish(new InputStatusChangedNotification(input)).FireAndForget();
     }
 
     private static void ApplyStartupRegistration(IContainer container)

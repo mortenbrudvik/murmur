@@ -1,7 +1,9 @@
+using Murmur.Core.Features.App;
 using Murmur.Core.Features.Engine;
 using Murmur.Common;
 using Murmur.Core.Features.History;
 using Murmur.Core.Features.Setup;
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Interop;
 using Murmur.Interop.Handlers;
@@ -34,6 +36,16 @@ public class EventHandlerTests
         await new EngineStatusEventHandler(_events).Handle(new EngineStatusChangedNotification(status), CancellationToken.None);
 
         _events.Received(1).Publish("engine.statusChanged", status);
+    }
+
+    [Fact]
+    public async Task InputStatusEventHandler_PublishesInputStatusChangedWithTheStatus()
+    {
+        var status = new InputStatus { HookInstalled = false, Error = "Access is denied" };
+
+        await new InputStatusEventHandler(_events).Handle(new InputStatusChangedNotification(status), CancellationToken.None);
+
+        _events.Received(1).Publish("app.inputStatusChanged", status);
     }
 
     [Fact]

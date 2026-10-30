@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using H.NotifyIcon;
 using H.NotifyIcon.Core;
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
@@ -21,7 +22,8 @@ namespace Murmur.UI.Tray;
 /// <para>
 /// Adding the icon fails while Explorer's taskbar is not ready yet, which is likely right after sign-in, exactly when
 /// Murmur starts with Windows. That is never fatal: the icon is retried every few seconds for a while, and again
-/// whenever Explorer announces a new taskbar (H.NotifyIcon's own TaskbarCreated handling).
+/// whenever Explorer announces a new taskbar (H.NotifyIcon's own TaskbarCreated handling). A notification asked for
+/// meanwhile waits for the icon.
 /// </para>
 /// </summary>
 public sealed partial class TrayIconHost : IDisposable
@@ -42,11 +44,15 @@ public sealed partial class TrayIconHost : IDisposable
     private readonly ILogger _logger = Log.ForContext<TrayIconHost>();
     private readonly ISpeechEngine _engine;
     private readonly ISettingsService _settings;
+    private readonly InputStatus _input;
     private readonly Action<TaskbarIcon> _create;
+    private readonly Func<TaskbarIcon, string, string, bool> _show;
     private readonly TimeSpan _retryInterval;
     private readonly int _maxCreateAttempts;
 
     private TaskbarIcon? _icon;
+    private bool _iconAdded;
+    private (string Title, string Message)? _pendingNotice;
     private DispatcherTimer? _retryTimer;
     private int _createAttempts;
     private bool? _showingReadyIcon;
@@ -54,20 +60,26 @@ public sealed partial class TrayIconHost : IDisposable
     private DateTime _hotkeyReadAt = DateTime.MinValue;
     private bool _disposed;
 
-    public TrayIconHost(ISpeechEngine engine, ISettingsService settings)
+    public TrayIconHost(ISpeechEngine engine, ISettingsService settings, InputStatus input)
         // Efficiency Mode (H.NotifyIcon's default) would run all of Murmur at idle priority, which delays the keyboard
         // hook and slows transcription.
-        : this(engine, settings, static icon => icon.ForceCreate(enablesEfficiencyMode: false), DefaultRetryInterval, DefaultMaxCreateAttempts)
+        : this(engine, settings, input, static icon => icon.ForceCreate(enablesEfficiencyMode: false), DefaultRetryInterval, DefaultMaxCreateAttempts)
     {
     }
 
-    /// <summary>Test seam: lets tests make adding the icon fail, and retry quickly.</summary>
+    /// <summary>
+    /// Test seam: lets tests make adding the icon fail, retry quickly and keep notifications off the screen
+    /// (<paramref name="show"/> shows one and says whether it could; null shows the real balloon).
+    /// </summary>
     internal TrayIconHost(
-        ISpeechEngine engine, ISettingsService settings, Action<TaskbarIcon> create, TimeSpan retryInterval, int maxCreateAttempts)
+        ISpeechEngine engine, ISettingsService settings, InputStatus input, Action<TaskbarIcon> create, TimeSpan retryInterval,
+        int maxCreateAttempts, Func<TaskbarIcon, string, string, bool>? show = null)
     {
         _engine = engine;
         _settings = settings;
+        _input = input;
         _create = create;
+        _show = show ?? ShowBalloon;
         _retryInterval = retryInterval;
         _maxCreateAttempts = maxCreateAttempts;
     }
@@ -107,28 +119,63 @@ public sealed partial class TrayIconHost : IDisposable
 
     /// <summary>
     /// Shows a Windows notification (a balloon, which Windows 10 and 11 present as a toast) through the icon; clicking it
-    /// raises <see cref="OpenRequested"/>. Call on the UI thread. Does nothing, and says so in the debug log, while the
-    /// icon is not in the notification area (before <see cref="Show"/>, while the taskbar is not ready, after
-    /// <see cref="Dispose"/>). Never throws: a notification is not worth a crash.
+    /// raises <see cref="OpenRequested"/>. Call on the UI thread. While the icon is not in the notification area yet
+    /// (before <see cref="Show"/>, or while the taskbar is not ready) the notification waits and is shown right after the
+    /// icon is added; only the newest one waits. Does nothing after <see cref="Dispose"/>. Never throws: a notification
+    /// is not worth a crash.
     /// </summary>
     public void ShowNotification(string title, string message)
     {
-        var icon = _icon;
-        if (_disposed || icon is not { IsCreated: true })
+        if (_disposed)
         {
             _logger.Debug("No tray icon to show the notification \"{Title}\" with", title);
             return;
         }
 
+        if (!TryShow(title, message))
+        {
+            _pendingNotice = (title, message);
+            _logger.Debug("The tray icon is not there yet; the notification \"{Title}\" waits for it", title);
+        }
+    }
+
+    /// <summary>
+    /// Re-reads the engine status and the hook state into the icon and tooltip, for when the hook state changes. Call on
+    /// the UI thread. (Hovering the icon refreshes the tooltip as well.)
+    /// </summary>
+    public void Refresh() => Update(rereadHotkey: false);
+
+    /// <summary>
+    /// Shows the notification if the icon is in the notification area. Returns false if it is not, and so the
+    /// notification is still to be shown; one that fails to show is logged and counts as shown.
+    /// </summary>
+    private bool TryShow(string title, string message)
+    {
+        if (_icon is not { } icon || !_iconAdded)
+            return false;
+
         try
         {
-            icon.ShowNotification(title, message, NotificationIcon.Info);
+            if (!_show(icon, title, message))
+                return false;
+
             _logger.Information("Tray notification: {Title}", title);
         }
         catch (Exception ex)
         {
             _logger.Warning(ex, "Could not show the tray notification \"{Title}\"", title);
         }
+
+        return true;
+    }
+
+    private static bool ShowBalloon(TaskbarIcon icon, string title, string message)
+    {
+        if (!icon.IsCreated)
+            return false;
+
+        icon.ShowNotification(title, message, NotificationIcon.Info);
+        return true;
     }
 
     /// <summary>The tooltip currently shown, or null before <see cref="Show"/>.</summary>
@@ -147,12 +194,16 @@ public sealed partial class TrayIconHost : IDisposable
 
     /// <summary>
     /// The tooltip for an engine state; long error messages are cut to fit. Ready stays Ready while a model switch
-    /// downloads the next model: the current one keeps dictating meanwhile, and the download shows in Settings.
+    /// downloads the next model: the current one keeps dictating meanwhile, and the download shows in Settings. The
+    /// load of the next model is not "loading model…" either, for the same reason. Without the keyboard hook, the one
+    /// line that advertises the hotkey says it is not working instead.
     /// </summary>
-    internal static string FormatToolTip(EngineStatus status, string hotkeyName)
+    internal static string FormatToolTip(EngineStatus status, string hotkeyName, bool hookInstalled = true)
     {
         var text = status.State switch
         {
+            _ when status.Switching => $"Murmur — switching to {status.ModelName}…",
+            EngineState.Ready when !hookInstalled => "Murmur — the hotkey isn't working",
             EngineState.Ready => $"Murmur — hold {hotkeyName} to talk",
             EngineState.Downloading when status.Download is { Reconnecting: true } => "Murmur — reconnecting to download the speech model…",
             EngineState.Downloading => $"Murmur — downloading speech model {WholeFraction(status.Download):P0}",
@@ -162,6 +213,12 @@ public sealed partial class TrayIconHost : IDisposable
 
         return text.Length <= MaxToolTipLength ? text : string.Concat(text.AsSpan(0, MaxToolTipLength - 1), "…");
     }
+
+    /// <summary>
+    /// The gradient dot: the engine can dictate, which includes the load of a switched-to model (its status is Loading,
+    /// but the previous model is still there to dictate with).
+    /// </summary>
+    internal static bool ShowsReadyIcon(EngineStatus status) => status.State == EngineState.Ready || status.Switching;
 
     /// <summary>The share downloaded, cut to a whole percent so the tooltip never shows 100% before the end.</summary>
     private static double WholeFraction(DownloadProgress? download)
@@ -203,9 +260,23 @@ public sealed partial class TrayIconHost : IDisposable
             return;
         }
 
+        _iconAdded = true;
         _retryTimer?.Stop();
         if (_createAttempts > 1)
             _logger.Information("Tray icon added on attempt {Attempt}", _createAttempts);
+
+        ShowPendingNotice();
+    }
+
+    /// <summary>Shows the notification that was asked for before the icon was added, once.</summary>
+    private void ShowPendingNotice()
+    {
+        if (_pendingNotice is not var (title, message))
+            return;
+
+        _pendingNotice = null;
+        if (!TryShow(title, message))
+            _pendingNotice = (title, message);
     }
 
     private DispatcherTimer CreateRetryTimer()
@@ -229,10 +300,10 @@ public sealed partial class TrayIconHost : IDisposable
             return;
 
         var status = _engine.Status;
-        var ready = status.State == EngineState.Ready;
-        if (ready && (rereadHotkey || DateTime.UtcNow - _hotkeyReadAt >= HotkeyRefreshInterval))
+        if (status.State == EngineState.Ready && (rereadHotkey || DateTime.UtcNow - _hotkeyReadAt >= HotkeyRefreshInterval))
             _hotkeyName = ReadHotkeyName();
 
+        var ready = ShowsReadyIcon(status);
         if (_showingReadyIcon != ready)
         {
             // The TaskbarIcon owns the icon it is given and disposes it when it is replaced, so it gets a fresh one
@@ -241,7 +312,7 @@ public sealed partial class TrayIconHost : IDisposable
             _showingReadyIcon = ready;
         }
 
-        var toolTip = FormatToolTip(status, _hotkeyName);
+        var toolTip = FormatToolTip(status, _hotkeyName, _input.HookInstalled);
         if (toolTip != _icon.ToolTipText)
         {
             _icon.ToolTipText = toolTip;

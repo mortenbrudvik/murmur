@@ -80,6 +80,12 @@ export interface EngineStatus {
   switching: boolean;
 }
 
+/** Whether Windows let Murmur install the keyboard hook the hotkey needs; `error` is why not, for support. */
+export interface InputStatus {
+  hookInstalled: boolean;
+  error: string | null;
+}
+
 export type Page = "history" | "vocabulary" | "settings";
 
 export interface SetupState {

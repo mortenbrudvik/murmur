@@ -1,4 +1,5 @@
 using System.Globalization;
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
@@ -27,7 +28,7 @@ public sealed class TrayIconHostTests
 
         StaHost.Run(() =>
         {
-            using var host = new TrayIconHost(engine, settings);
+            using var host = new TrayIconHost(engine, settings, new InputStatus());
             host.Show();
             host.ToolTipText.ShouldBe("Murmur — loading model…");
 
@@ -37,6 +38,7 @@ public sealed class TrayIconHostTests
                 new(EngineState.Error, Model, Error: "boom"),
                 new(EngineState.Ready, Model, "Cuda"),
                 new(EngineState.Loading, Model),
+                new(EngineState.Loading, "Whisper small (English)", Switching: true),
                 new(EngineState.Ready, Model, "Cuda"),
             ];
             foreach (var change in changes)
@@ -110,7 +112,7 @@ public sealed class TrayIconHostTests
     }
 
     [Fact]
-    public void ShowNotification_BeforeShow_DoesNothing()
+    public void ShowNotification_BeforeShow_DoesNotThrow()
     {
         StaHost.Run(() =>
         {
@@ -133,16 +135,165 @@ public sealed class TrayIconHostTests
         });
     }
 
-    /// <summary>Right after sign-in the taskbar may not be ready; the icon is then still to be added.</summary>
+    /// <summary>Right after sign-in the taskbar may not be ready; the notice waits for the icon instead of being lost.</summary>
     [Fact]
-    public void ShowNotification_IconNotAddedYet_DoesNotThrow()
+    public void ShowNotification_IconNotAddedYet_IsShownOnceTheIconIsAdded()
     {
+        var shown = new List<(string Title, string Message)>();
+        var attempts = 0;
         StaHost.Run(() =>
         {
-            using var host = NewHostWithCreator(_ => throw new InvalidOperationException("TryCreate failed."), maxCreateAttempts: 1);
+            using var host = NewHostWithCreator(
+                _ =>
+                {
+                    if (++attempts < 3)
+                        throw new InvalidOperationException("TryCreate failed.");
+                },
+                maxCreateAttempts: 10,
+                show: (_, title, message) =>
+                {
+                    shown.Add((title, message));
+                    return true;
+                });
+            host.Show();
+
+            host.ShowNotification("Murmur can't use the hotkey", "Restart Murmur to try again.");
+
+            shown.ShouldBeEmpty();
+            StaHost.PumpUntil(() => shown.Count > 0, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+            shown.ShouldBe([("Murmur can't use the hotkey", "Restart Murmur to try again.")]);
+            attempts.ShouldBe(3);
+        });
+    }
+
+    /// <summary>Only the newest waits: a notice that is overtaken is stale by the time the icon is there.</summary>
+    [Fact]
+    public void ShowNotification_SeveralBeforeTheIconIsAdded_ShowsOnlyTheLatest()
+    {
+        var shown = new List<string>();
+        var attempts = 0;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(
+                _ =>
+                {
+                    if (++attempts < 2)
+                        throw new InvalidOperationException("TryCreate failed.");
+                },
+                maxCreateAttempts: 10,
+                show: (_, title, _) =>
+                {
+                    shown.Add(title);
+                    return true;
+                });
+            host.Show();
+
+            host.ShowNotification("first", "one");
+            host.ShowNotification("second", "two");
+
+            StaHost.PumpUntil(() => shown.Count > 0, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+            shown.ShouldBe(["second"]);
+        });
+    }
+
+    [Fact]
+    public void ShowNotification_IconAlreadyAdded_ShowsAtOnceAndOnlyOnce()
+    {
+        var shown = new List<string>();
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(
+                _ => { },
+                maxCreateAttempts: 1,
+                show: (_, title, _) =>
+                {
+                    shown.Add(title);
+                    return true;
+                });
+            host.Show();
+
+            host.ShowNotification("Murmur is ready", "Hold Right Ctrl to talk.");
+            StaHost.Pump(TimeSpan.FromMilliseconds(100));
+
+            shown.ShouldBe(["Murmur is ready"]);
+        });
+    }
+
+    [Fact]
+    public void ShowNotification_IconNeverAdded_ShowsNothingAndDoesNotThrow()
+    {
+        var shown = 0;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(
+                _ => throw new InvalidOperationException("TryCreate failed."),
+                maxCreateAttempts: 1,
+                show: (_, _, _) =>
+                {
+                    shown++;
+                    return true;
+                });
             host.Show();
 
             Should.NotThrow(() => host.ShowNotification("Murmur needs your attention", "boom"));
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+
+            shown.ShouldBe(0);
+        });
+    }
+
+    [Fact]
+    public void ShowNotification_DisposedBeforeTheIconIsAdded_DropsTheNotice()
+    {
+        var shown = 0;
+        var attempts = 0;
+        StaHost.Run(() =>
+        {
+            var host = NewHostWithCreator(
+                _ =>
+                {
+                    if (++attempts < 2)
+                        throw new InvalidOperationException("TryCreate failed.");
+                },
+                maxCreateAttempts: 10,
+                show: (_, _, _) =>
+                {
+                    shown++;
+                    return true;
+                });
+            host.Show();
+            host.ShowNotification("Murmur needs your attention", "boom");
+
+            host.Dispose();
+            StaHost.Pump(TimeSpan.FromMilliseconds(200));
+
+            shown.ShouldBe(0);
+        });
+    }
+
+    /// <summary>Showing a balloon is not worth a crash, and a failure is not retried: the notice would only repeat.</summary>
+    [Fact]
+    public void ShowNotification_ShowingFails_DoesNotThrowAndIsNotKept()
+    {
+        var attempts = 0;
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(
+                _ => { },
+                maxCreateAttempts: 1,
+                show: (_, _, _) =>
+                {
+                    attempts++;
+                    throw new InvalidOperationException("Shell_NotifyIcon failed.");
+                });
+            host.Show();
+
+            Should.NotThrow(() => host.ShowNotification("Murmur needs your attention", "boom"));
+            StaHost.Pump(TimeSpan.FromMilliseconds(100));
+
+            attempts.ShouldBe(1);
         });
     }
 
@@ -168,6 +319,42 @@ public sealed class TrayIconHostTests
     {
         TrayIconHost.FormatToolTip(new EngineStatus(EngineState.Ready, Model, "Cuda"), "Right Ctrl")
             .ShouldBe("Murmur — hold Right Ctrl to talk");
+    }
+
+    [Fact]
+    public void FormatToolTip_HookUnavailable_SaysTheHotkeyIsOff()
+    {
+        TrayIconHost.FormatToolTip(new EngineStatus(EngineState.Ready, Model, "Cuda"), "Right Ctrl", hookInstalled: false)
+            .ShouldBe("Murmur — the hotkey isn't working");
+    }
+
+    /// <summary>Only the line that advertises the hotkey changes; what the engine is doing is still the news.</summary>
+    [Fact]
+    public void FormatToolTip_HookUnavailableWhileTheEngineLoads_StillSaysLoading()
+    {
+        TrayIconHost.FormatToolTip(new EngineStatus(EngineState.Loading, Model), "Right Ctrl", hookInstalled: false)
+            .ShouldBe("Murmur — loading model…");
+    }
+
+    /// <summary>The old model keeps dictating while the next one loads, so this is not "loading model…".</summary>
+    [Fact]
+    public void FormatToolTip_SwitchingModels_NamesTheModelBeingLoaded()
+    {
+        var status = new EngineStatus(EngineState.Loading, "Whisper small (English)", "Cuda", Switching: true);
+
+        TrayIconHost.FormatToolTip(status, "Right Ctrl").ShouldBe("Murmur — switching to Whisper small (English)…");
+    }
+
+    [Theory]
+    [InlineData(EngineState.Ready, false, true)]
+    [InlineData(EngineState.Loading, true, true)] // a switch: the previous model still dictates
+    [InlineData(EngineState.Loading, false, false)]
+    [InlineData(EngineState.NotStarted, false, false)]
+    [InlineData(EngineState.Downloading, false, false)]
+    [InlineData(EngineState.Error, false, false)]
+    public void ShowsReadyIcon_FollowsWhetherTheEngineCanDictate(EngineState state, bool switching, bool expected)
+    {
+        TrayIconHost.ShowsReadyIcon(new EngineStatus(state, Model, Switching: switching)).ShouldBe(expected);
     }
 
     [Theory]
@@ -249,10 +436,13 @@ public sealed class TrayIconHostTests
         text.ShouldEndWith("…");
     }
 
-    private static TrayIconHost NewHostWithCreator(Action<H.NotifyIcon.TaskbarIcon> create, int maxCreateAttempts)
+    private static TrayIconHost NewHostWithCreator(
+        Action<H.NotifyIcon.TaskbarIcon> create, int maxCreateAttempts, Func<H.NotifyIcon.TaskbarIcon, string, string, bool>? show = null)
     {
         var engine = Substitute.For<ISpeechEngine>();
         engine.Status.Returns(new EngineStatus(EngineState.Loading, Model));
-        return new TrayIconHost(engine, Substitute.For<ISettingsService>(), create, TimeSpan.FromMilliseconds(20), maxCreateAttempts);
+        // Without a show seam a notice would be a real balloon, which a test must never put on the owner's screen.
+        show ??= static (_, _, _) => true;
+        return new TrayIconHost(engine, Substitute.For<ISettingsService>(), new InputStatus(), create, TimeSpan.FromMilliseconds(20), maxCreateAttempts, show);
     }
 }

@@ -5,6 +5,7 @@ using Murmur.Core.Audio;
 using Murmur.Core.Features.App;
 using Murmur.Core.Features.Models;
 using Murmur.Core.Features.Setup;
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Setup;
@@ -65,6 +66,7 @@ public sealed class AppModuleTests
         container.Resolve<IRequestHandler<SetModelChoiceRequest, ModelChoice>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<OpenLinkRequest>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<RestartAppRequest>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<GetInputStatusRequest, InputStatus>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StartMicTestRequest, MicTestResult>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StopMicTestRequest>>().ShouldNotBeNull();
     }
@@ -95,5 +97,17 @@ public sealed class AppModuleTests
         container.Resolve<ILinkOpener>().ShouldBeOfType<ShellLinkOpener>();
         container.Resolve<SetupCoordinator>().ShouldBeSameAs(container.Resolve<SetupCoordinator>());
         container.Resolve<LaunchOptions>().ShouldBeSameAs(container.Resolve<LaunchOptions>());
+    }
+
+    /// <summary>App writes the hook's outcome; the tray and the web app's request handler read it: one instance.</summary>
+    [Fact]
+    public void Bootstrap_SharesOneInputStatusThatStartsOutInstalled()
+    {
+        using var container = AutofacBootstrapper.Bootstrap();
+
+        var status = container.Resolve<InputStatus>();
+
+        status.ShouldBeSameAs(container.Resolve<InputStatus>());
+        status.HookInstalled.ShouldBeTrue();
     }
 }

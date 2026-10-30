@@ -1,0 +1,47 @@
+/* The strip above every page (and the setup) while Windows refuses Murmur's keyboard hook: same footing as the engine banner. */
+.hotkey-banner {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 6px 24px;
+  font-size: 12px;
+  background: rgba(255, 107, 107, 0.1);
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.hotkey-banner-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hotkey-banner-button {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 6px;
+}
+
+.hotkey-banner-button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.hotkey-banner-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hotkey-banner-error {
+  color: var(--error);
+}
+
+@media (max-width: 560px) {
+  .hotkey-banner {
+    padding: 6px 14px;
+  }
+}
