@@ -775,6 +775,29 @@ public sealed class WhisperEngineTests : IDisposable
     }
 
     /// <summary>
+    /// The choice cannot be saved: the returned task has already failed with the reason when the call returns, and
+    /// nothing is switched, so whoever asked can say so at once.
+    /// </summary>
+    [Fact]
+    public async Task SwitchModelAsync_TheChoiceCannotBeSaved_ReturnsAFaultedTaskAndSwitchesNothing()
+    {
+        await ReadyOnLargeAsync();
+        var statuses = Statuses().Count;
+        _settings.Update(Arg.Any<Func<MurmurSettings, MurmurSettings>>())
+            .Returns(_ => throw new IOException("The settings file is locked."));
+
+        var switching = _engine.SwitchModelAsync(SpeechModelId.SmallEn);
+
+        switching.IsFaulted.ShouldBeTrue();
+        switching.Exception!.InnerException.ShouldBeOfType<IOException>().Message.ShouldBe("The settings file is locked.");
+        await Task.Delay(50, Ct); // room for a switch to start if it would
+        await _models.DidNotReceive().EnsureModelAsync(SpeechModelCatalog.SmallEn, Arg.Any<IProgress<DownloadProgress>>(), Arg.Any<CancellationToken>());
+        _loader.LoadCount.ShouldBe(1);
+        Statuses().Count.ShouldBe(statuses);
+        _engine.Status.ModelName.ShouldBe(Large);
+    }
+
+    /// <summary>
     /// ApiBridge runs each request on the thread pool, so a request can save its choice and then reach the operation
     /// gate after a later request. Running the older switch last would leave a model running that is not the choice.
     /// </summary>
@@ -782,8 +805,8 @@ public sealed class WhisperEngineTests : IDisposable
     public async Task SwitchModelAsync_OlderChoiceReachesTheGateLast_EndsOnTheNewerChoice()
     {
         await ReadyOnLargeAsync();
-        _engine.TrySaveChoice(SpeechModelId.LargeV3Turbo, out var large, out var largeVersion).ShouldBeTrue();
-        _engine.TrySaveChoice(SpeechModelId.SmallEn, out var small, out var smallVersion).ShouldBeTrue();
+        var (large, largeVersion) = _engine.SaveChoice(SpeechModelId.LargeV3Turbo);
+        var (small, smallVersion) = _engine.SaveChoice(SpeechModelId.SmallEn);
 
         await _engine.SwitchToChoiceAsync(small, smallVersion).WaitAsync(Patience, Ct);
         await _engine.SwitchToChoiceAsync(large, largeVersion).WaitAsync(Patience, Ct);
@@ -799,8 +822,8 @@ public sealed class WhisperEngineTests : IDisposable
     public async Task SwitchModelAsync_OlderSwitchAwayReachesTheGateLast_StaysOnTheNewerChoice()
     {
         await ReadyOnLargeAsync();
-        _engine.TrySaveChoice(SpeechModelId.SmallEn, out var small, out var smallVersion).ShouldBeTrue();
-        _engine.TrySaveChoice(SpeechModelId.LargeV3Turbo, out var large, out var largeVersion).ShouldBeTrue();
+        var (small, smallVersion) = _engine.SaveChoice(SpeechModelId.SmallEn);
+        var (large, largeVersion) = _engine.SaveChoice(SpeechModelId.LargeV3Turbo);
 
         await _engine.SwitchToChoiceAsync(large, largeVersion).WaitAsync(Patience, Ct);
         await _engine.SwitchToChoiceAsync(small, smallVersion).WaitAsync(Patience, Ct);

@@ -76,4 +76,17 @@ public sealed class ModelChoiceHandlerTests
         choice.Selected.ShouldBe(SpeechModelId.SmallEn);
         switching.Task.IsCompleted.ShouldBeFalse();
     }
+
+    /// <summary>The engine could not save the choice: the call fails, so the web says so instead of showing it as made.</summary>
+    [Fact]
+    public async Task SetModelChoice_TheChoiceCannotBeSaved_Throws()
+    {
+        _engine.SwitchModelAsync(SpeechModelId.SmallEn)
+            .Returns(Task.FromException(new IOException("The settings file is locked.")));
+
+        var ex = await Should.ThrowAsync<IOException>(() => new SetModelChoiceHandler(_engine, Selection())
+            .Handle(new SetModelChoiceRequest(SpeechModelId.SmallEn), CancellationToken.None));
+
+        ex.Message.ShouldBe("The settings file is locked.");
+    }
 }

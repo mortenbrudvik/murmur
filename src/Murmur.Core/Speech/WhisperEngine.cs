@@ -128,9 +128,9 @@ public sealed class WhisperEngine(
 
     public async Task SwitchModelAsync(SpeechModelId model)
     {
-        // Before the first await, so whoever asked for the switch reads the new choice straight back.
-        if (!TrySaveChoice(model, out var target, out var choiceVersion))
-            return;
+        // Before the first await, so whoever asked for the switch reads the new choice straight back. A failure to save
+        // it is thrown before the first await too, so the returned task has already failed and nothing switches.
+        var (target, choiceVersion) = SaveChoice(model);
 
         await SwitchToChoiceAsync(target, choiceVersion).ConfigureAwait(false);
     }
@@ -199,12 +199,14 @@ public sealed class WhisperEngine(
     /// <summary>
     /// The first half of <see cref="SwitchModelAsync"/>: saves <paramref name="model"/> as the choice and numbers it.
     /// Internal, with <see cref="SwitchToChoiceAsync"/>, so a test can interleave two switches the way the thread pool can.
+    /// What keeps the choice from being saved is logged and thrown, and nothing is numbered then.
     /// </summary>
-    internal bool TrySaveChoice(SpeechModelId model, out SpeechModelInfo target, out int choiceVersion)
+    internal (SpeechModelInfo Target, int ChoiceVersion) SaveChoice(SpeechModelId model)
     {
         try
         {
-            target = SpeechModelCatalog.Get(model);
+            var target = SpeechModelCatalog.Get(model);
+            int choiceVersion;
             lock (_choiceLock)
             {
                 settings.Update(s => s with { SpeechModel = model });
@@ -212,18 +214,16 @@ public sealed class WhisperEngine(
             }
 
             _logger.Information("Speech model chosen: {Model}", target.DisplayName);
-            return true;
+            return (target, choiceVersion);
         }
         catch (Exception ex)
         {
             _logger.Error(ex, "Could not save {Model} as the speech model", model);
-            target = null!;
-            choiceVersion = 0;
-            return false;
+            throw;
         }
     }
 
-    /// <summary>The second half of <see cref="SwitchModelAsync"/>: switches to a choice <see cref="TrySaveChoice"/> saved.</summary>
+    /// <summary>The second half of <see cref="SwitchModelAsync"/>: switches to a choice <see cref="SaveChoice"/> saved.</summary>
     internal async Task SwitchToChoiceAsync(SpeechModelInfo target, int choiceVersion)
     {
         Task switching;
