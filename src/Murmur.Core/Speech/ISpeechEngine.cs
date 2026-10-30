@@ -17,7 +17,9 @@ public interface ISpeechEngine
 
     /// <summary>
     /// Downloads the chosen model if missing, loads it, warms it up and ends in Ready. Failures end in Error; it never
-    /// throws. Cancelling <paramref name="ct"/> also cancels any later <see cref="SwitchModelAsync"/>.
+    /// throws. When the chosen model is missing but another model's file is there (Murmur quit during a switch), it is
+    /// Ready on that one first and then switches to the chosen one as <see cref="SwitchModelAsync"/> does, completing
+    /// when that switch has ended. Cancelling <paramref name="ct"/> also cancels any later <see cref="SwitchModelAsync"/>.
     /// </summary>
     Task InitializeAsync(CancellationToken ct);
 

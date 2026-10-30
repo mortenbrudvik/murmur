@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Authentication;
 using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Hardware;
 using Murmur.Core.Models;
@@ -22,6 +23,9 @@ public sealed class WhisperEngineTests : IDisposable
     private const string Large = "Whisper large-v3-turbo";
     private const string Small = "Whisper small (English)";
     private const string CudaDirectory = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64";
+
+    private const string SecureConnectionMessage =
+        "Murmur couldn't make a secure connection to huggingface.co. A proxy, firewall or antivirus that inspects HTTPS may be blocking it.";
 
     private static readonly GpuReport Rtx3060 = new(
         [new GpuAdapter("NVIDIA GeForce RTX 3060", GpuAdvisor.NvidiaVendorId, 12_884_901_888, 1)],
@@ -62,6 +66,7 @@ public sealed class WhisperEngineTests : IDisposable
         _models.EnsureModelAsync(Arg.Any<SpeechModelInfo>(), Arg.Any<IProgress<DownloadProgress>>(), Arg.Any<CancellationToken>())
             .Returns(ci => EnsureAsync(ci.Arg<SpeechModelInfo>(), ci.Arg<IProgress<DownloadProgress>>(), ci.Arg<CancellationToken>()));
         _models.When(m => m.Delete(Arg.Any<SpeechModelInfo>())).Do(ci => Log($"delete:{ci.Arg<SpeechModelInfo>().Id}"));
+        _models.VerifyAsync(Arg.Any<SpeechModelInfo>(), Arg.Any<CancellationToken>()).Returns(ci => Verify(ci.Arg<SpeechModelInfo>()));
 
         _loader = new FakeLoader(Log);
         _engine = new WhisperEngine(_models, new ModelSelection(_settings, _gpu, _models), _gpu, _cuda, _loader, _settings, _time);
@@ -220,6 +225,17 @@ public sealed class WhisperEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeAsync_TlsFailure_EndsInErrorNamingTheSecureConnection()
+    {
+        _downloads[SpeechModelId.LargeV3Turbo] = (_, _) => Task.FromException<string>(TlsFailure());
+
+        await _engine.InitializeAsync(Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Error);
+        _engine.Status.Error.ShouldBe(SecureConnectionMessage);
+    }
+
+    [Fact]
     public async Task InitializeAsync_LoadFails_NamesTheModelFile()
     {
         _loader.Failure = new InvalidOperationException("Failed to load the model.");
@@ -327,12 +343,13 @@ public sealed class WhisperEngineTests : IDisposable
         _cuda.DidNotReceive().FindRuntimeDirectory();
     }
 
-    /// <summary>Murmur quit while a switch downloaded: the next start loads the new choice and deletes the previous model.</summary>
+    /// <summary>Murmur quit after a switch's download but before its sweep: the next start loads the new choice and deletes the previous model.</summary>
     [Fact]
     public async Task InitializeAsync_AnotherModelOnDisk_IsDeletedOnceReady()
     {
         _stored = _stored with { SpeechModel = SpeechModelId.SmallEn };
         _models.HasExpectedFile(SpeechModelCatalog.LargeV3Turbo).Returns(true);
+        _models.HasExpectedFile(SpeechModelCatalog.SmallEn).Returns(true);
         EngineState? stateWhenDeleted = null;
         _models.When(m => m.Delete(SpeechModelCatalog.LargeV3Turbo)).Do(_ => stateWhenDeleted = _engine.Status.State);
 
@@ -344,6 +361,162 @@ public sealed class WhisperEngineTests : IDisposable
         _models.DidNotReceive().Delete(SpeechModelCatalog.SmallEn);
         Index("delete:LargeV3Turbo").ShouldBeGreaterThan(Index("load:ggml-small.en.bin"));
         stateWhenDeleted.ShouldBe(EngineState.Ready);
+    }
+
+    /// <summary>
+    /// Murmur quit while a switch from large to small downloaded: the next start is Ready on large, which is on disk,
+    /// and carries on with the switch from small's partial download, the same way as a switch from Settings.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_ChosenModelMissingButPreviousOnDisk_ReadyOnThePreviousThenSwitches()
+    {
+        StartAfterACutShortSwitch();
+        _partLengths[SpeechModelId.SmallEn] = 200_000_000;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _downloads[SpeechModelId.SmallEn] = async (_, ct) =>
+        {
+            await release.Task.WaitAsync(ct);
+            return PathOf(SpeechModelCatalog.SmallEn);
+        };
+
+        var initializing = _engine.InitializeAsync(Ct);
+        await WaitUntilAsync(() => _engine.Status.Download is not null, "the switch's download");
+
+        var status = _engine.Status;
+        status.State.ShouldBe(EngineState.Ready);
+        status.ModelName.ShouldBe(Large);
+        status.Runtime.ShouldBe("Vulkan");
+        status.Download!.ModelName.ShouldBe(Small);
+        status.Download.BytesReceived.ShouldBe(200_000_000);
+        _engine.CanTranscribe.ShouldBeTrue();
+        (await _engine.TranscribeAsync(Speech(), "", Ct)).Text.ShouldBe("from ggml-large-v3-turbo.bin");
+        _models.DidNotReceive().Delete(SpeechModelCatalog.SmallEn);
+        await _models.Received(1).VerifyAsync(SpeechModelCatalog.LargeV3Turbo, Arg.Any<CancellationToken>());
+        await _models.DidNotReceive().EnsureModelAsync(SpeechModelCatalog.LargeV3Turbo, Arg.Any<IProgress<DownloadProgress>>(), Arg.Any<CancellationToken>());
+
+        release.SetResult();
+        await initializing.WaitAsync(Patience, Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Small);
+        (await _engine.TranscribeAsync(Speech(), "", Ct)).Text.ShouldBe("from ggml-small.en.bin");
+        _loader.ModelAt(0).Disposed.ShouldBeTrue();
+        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
+        _models.DidNotReceive().Delete(SpeechModelCatalog.SmallEn);
+        Index("delete:LargeV3Turbo").ShouldBeGreaterThan(Index("load:ggml-small.en.bin"));
+        _stored.SpeechModel.ShouldBe(SpeechModelId.SmallEn);
+        Phases().ShouldBe([
+            (EngineState.Loading, Large, false, false),
+            (EngineState.Ready, Large, false, false),
+            (EngineState.Ready, Large, true, false),
+            (EngineState.Loading, Small, false, true),
+            (EngineState.Ready, Small, false, false),
+        ]);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_ChosenModelMissingAndItsDownloadFails_StaysReadyOnThePreviousAndRestoresTheChoice()
+    {
+        StartAfterACutShortSwitch();
+        _downloads[SpeechModelId.SmallEn] = (_, _) => Task.FromException<string>(
+            new HttpRequestException("Response status code does not indicate success: 404 (Not Found).", null, HttpStatusCode.NotFound));
+
+        await _engine.InitializeAsync(Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Large);
+        _engine.Status.Download.ShouldBeNull();
+        _engine.Status.Error.ShouldNotBeNull().ShouldStartWith("Could not switch to Whisper small (English): ");
+        _stored.SpeechModel.ShouldBe(SpeechModelId.LargeV3Turbo);
+        _models.DidNotReceive().Delete(Arg.Any<SpeechModelInfo>());
+        (await _engine.TranscribeAsync(Speech(), "", Ct)).Text.ShouldBe("from ggml-large-v3-turbo.bin");
+    }
+
+    /// <summary>Quitting again keeps it all as it was, so the start after that does the same.</summary>
+    [Fact]
+    public async Task InitializeAsync_QuitWhileSwitchingFromThePreviousModel_KeepsBothModelsAndTheChoice()
+    {
+        StartAfterACutShortSwitch();
+        _downloads[SpeechModelId.SmallEn] = async (_, ct) =>
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("not cancelled");
+        };
+        using var quit = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        var initializing = _engine.InitializeAsync(quit.Token);
+        await WaitUntilAsync(() => _engine.Status.Download is not null, "the switch's download");
+        await quit.CancelAsync();
+        await initializing.WaitAsync(Patience, Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Large);
+        _engine.Status.Download.ShouldBeNull();
+        _stored.SpeechModel.ShouldBe(SpeechModelId.SmallEn);
+        _models.DidNotReceive().Delete(Arg.Any<SpeechModelInfo>());
+    }
+
+    [Fact]
+    public async Task SwitchModelAsync_ToThePreviousModelWhileTheStartSwitches_CancelsTheDownloadAndStaysReady()
+    {
+        StartAfterACutShortSwitch();
+        _downloads[SpeechModelId.SmallEn] = async (_, ct) =>
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("not cancelled");
+        };
+        var initializing = _engine.InitializeAsync(Ct);
+        await WaitUntilAsync(() => _engine.Status.Download is not null, "the switch's download");
+
+        await _engine.SwitchModelAsync(SpeechModelId.LargeV3Turbo).WaitAsync(Patience, Ct);
+        await initializing.WaitAsync(Patience, Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Large);
+        _engine.Status.Download.ShouldBeNull();
+        _models.Received(1).Delete(SpeechModelCatalog.SmallEn);
+        Index("delete:SmallEn").ShouldBeGreaterThan(Index("ensured:SmallEn"), "the download let go of its .part first");
+        _models.DidNotReceive().Delete(SpeechModelCatalog.LargeV3Turbo);
+        _loader.LoadCount.ShouldBe(1);
+        _stored.SpeechModel.ShouldBe(SpeechModelId.LargeV3Turbo);
+    }
+
+    /// <summary>The model on disk is only ever verified, never downloaded: when it is damaged, the start downloads the choice.</summary>
+    [Fact]
+    public async Task InitializeAsync_PreviousModelOnDiskFailsVerification_DownloadsTheChosenModel()
+    {
+        StartAfterACutShortSwitch();
+        _models.VerifyAsync(SpeechModelCatalog.LargeV3Turbo, Arg.Any<CancellationToken>()).Returns(false);
+
+        await _engine.InitializeAsync(Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Small);
+        _loader.Calls.Single().Path.ShouldBe(PathOf(SpeechModelCatalog.SmallEn));
+        await _models.DidNotReceive().EnsureModelAsync(SpeechModelCatalog.LargeV3Turbo, Arg.Any<IProgress<DownloadProgress>>(), Arg.Any<CancellationToken>());
+        Collapse(Statuses()).ShouldBe([EngineState.Loading, EngineState.Downloading, EngineState.Loading, EngineState.Ready]);
+        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
+        _models.DidNotReceive().Delete(SpeechModelCatalog.SmallEn);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_PreviousModelOnDiskFailsToLoad_DownloadsTheChosenModel()
+    {
+        StartAfterACutShortSwitch();
+        _loader.Failure = new InvalidOperationException("Out of video memory.");
+        _downloads[SpeechModelId.SmallEn] = (_, _) =>
+        {
+            _loader.Failure = null;
+            return Task.FromResult(PathOf(SpeechModelCatalog.SmallEn));
+        };
+
+        await _engine.InitializeAsync(Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Small);
+        _engine.Status.Error.ShouldBeNull();
+        _loader.Calls.Select(c => c.Path).ShouldBe([PathOf(SpeechModelCatalog.LargeV3Turbo), PathOf(SpeechModelCatalog.SmallEn)]);
+        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
     }
 
     [Fact]
@@ -554,6 +727,20 @@ public sealed class WhisperEngineTests : IDisposable
         _loader.ModelAt(0).Disposed.ShouldBeFalse();
         _models.DidNotReceive().Delete(SpeechModelCatalog.LargeV3Turbo);
         (await _engine.TranscribeAsync(Speech(), "", Ct)).Text.ShouldBe("from ggml-large-v3-turbo.bin");
+    }
+
+    [Fact]
+    public async Task SwitchModelAsync_TlsFailure_NamesTheSecureConnection()
+    {
+        await ReadyOnLargeAsync();
+        _downloads[SpeechModelId.SmallEn] = (_, _) => Task.FromException<string>(TlsFailure());
+
+        await _engine.SwitchModelAsync(SpeechModelId.SmallEn).WaitAsync(Patience, Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Large);
+        _engine.Status.Error.ShouldBe($"Could not switch to Whisper small (English): {SecureConnectionMessage}");
+        _stored.SpeechModel.ShouldBe(SpeechModelId.LargeV3Turbo);
     }
 
     [Fact]
@@ -819,6 +1006,27 @@ public sealed class WhisperEngineTests : IDisposable
         }
     }
 
+    private Task<bool> Verify(SpeechModelInfo model)
+    {
+        Log($"verify:{model.Id}");
+        return Task.FromResult(_models.HasExpectedFile(model));
+    }
+
+    /// <summary>
+    /// What Murmur leaves behind when it quits during a switch from large to small: small is the saved choice, large's
+    /// file is complete and small's is not.
+    /// </summary>
+    private void StartAfterACutShortSwitch()
+    {
+        _stored = _stored with { SpeechModel = SpeechModelId.SmallEn };
+        _models.HasExpectedFile(SpeechModelCatalog.LargeV3Turbo).Returns(true);
+    }
+
+    /// <summary>What the manager throws once TLS handshakes against an untrusted root certificate have failed four times in a row.</summary>
+    private static HttpRequestException TlsFailure() => new(HttpRequestError.SecureConnectionError,
+        "The SSL connection could not be established, see inner exception.",
+        new AuthenticationException("The remote certificate is invalid because of errors in the certificate chain: UntrustedRoot"));
+
     private static string PathOf(SpeechModelInfo model) => Path.Combine(@"C:\Murmur\models", model.FileName);
 
     /// <summary>A second of a 440 Hz tone: loud enough to be no digital silence.</summary>
@@ -842,6 +1050,20 @@ public sealed class WhisperEngineTests : IDisposable
         }
 
         return states;
+    }
+
+    /// <summary>State, model, whether a download shows and whether it is a switch, each run of the same counted once.</summary>
+    private List<(EngineState State, string ModelName, bool Downloading, bool Switching)> Phases()
+    {
+        var phases = new List<(EngineState State, string ModelName, bool Downloading, bool Switching)>();
+        foreach (var status in Statuses())
+        {
+            var phase = (status.State, status.ModelName, status.Download is not null, status.Switching);
+            if (phases.Count == 0 || phases[^1] != phase)
+                phases.Add(phase);
+        }
+
+        return phases;
     }
 
     private void Log(string entry)

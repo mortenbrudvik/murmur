@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
@@ -10,7 +11,8 @@ namespace Murmur.Core.Speech;
 /// <summary>
 /// Finds the Whisper model files on disk and downloads them. A download is resumable (HTTP Range, kept across
 /// restarts), survives a flaky connection by retrying without end, and counts only once its SHA-256 matches the
-/// catalog's pin. A model file that was verified once is trusted again while its size and timestamp are unchanged.
+/// catalog's pin. Only a connection that cannot be made secure stops it, after <see cref="SecureConnectionRetries"/>
+/// retries. A model file that was verified once is trusted again while its size and timestamp are unchanged.
 /// </summary>
 public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvider time, IDiskSpace disk) : IModelManager
 {
@@ -25,6 +27,13 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
     private readonly JsonFileStore<Dictionary<string, VerifiedFile>> _verified = new(paths.ModelVerificationFile, new Dictionary<string, VerifiedFile>());
     private readonly Lock _verifiedLock = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>
+    /// How many secure-connection failures in a row (<see cref="DownloadFailures.IsSecureConnectionFailure"/>) are
+    /// retried before the download fails: a captive portal breaks TLS for a moment, while a proxy that inspects HTTPS
+    /// with a certificate Windows does not trust breaks it every time.
+    /// </summary>
+    public const int SecureConnectionRetries = 3;
 
     /// <summary>How long a download may receive no bytes before it is aborted and resumed.</summary>
     public static TimeSpan StallTimeout { get; } = TimeSpan.FromSeconds(30);
@@ -61,6 +70,21 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
         try
         {
             return await EnsureCoreAsync(model, progress, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<bool> VerifyAsync(SpeechModelInfo model, CancellationToken ct)
+    {
+        // Behind any download, like EnsureModelAsync, which may be replacing this very file.
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var modelPath = PathFor(model);
+            return File.Exists(modelPath) && await IsVerifiedAsync(model, modelPath, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -167,6 +191,17 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
             }
             catch (TransientDownloadException ex)
             {
+                if (!DownloadFailures.IsSecureConnectionFailure(ex.InnerException))
+                {
+                    state.SecureConnectionFailures = 0;
+                }
+                else if (++state.SecureConnectionFailures > SecureConnectionRetries)
+                {
+                    _logger.Warning("The {Model} download could not make a secure connection {Count} times in a row, so it stops retrying",
+                        model.DisplayName, state.SecureConnectionFailures);
+                    ExceptionDispatchInfo.Throw(ex.InnerException!);
+                }
+
                 state.Retries++;
                 var delay = RetryDelay(state.Retries);
                 _logger.Warning(ex.InnerException, "The {Model} download was interrupted ({Reason}); retry {Retry} in {Delay:N0} s",
@@ -241,6 +276,7 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
             received += read;
             attemptBytes += read;
             state.Retries = 0;
+            state.SecureConnectionFailures = 0;
 
             var speed = meter.Add(attemptBytes);
             progress.Report(new DownloadProgress(model.DisplayName, received, model.SizeBytes, speed,
@@ -347,10 +383,13 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
     /// <summary>What the verification cache remembers about a model file; it is trusted while size and timestamp stay the same.</summary>
     private sealed record VerifiedFile(long Size, DateTime LastWriteUtc, string Sha256);
 
-    /// <summary>What the retry loop shares with the attempts: the count of failures in a row.</summary>
+    /// <summary>What the retry loop shares with the attempts: the counts of failures in a row, reset when bytes arrive.</summary>
     private sealed class DownloadState
     {
         public int Retries { get; set; }
+
+        /// <summary>Secure-connection failures with no other failure between them.</summary>
+        public int SecureConnectionFailures { get; set; }
     }
 
     /// <summary>A failure that is worth another attempt: the connection, the server or a stall, not the disk or a refusal.</summary>

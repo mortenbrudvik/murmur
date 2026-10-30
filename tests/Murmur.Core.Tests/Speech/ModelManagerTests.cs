@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Models;
@@ -330,6 +331,84 @@ public sealed class ModelManagerTests : IDisposable
         _progress.Reports.ShouldAllBe(r => r.Retries == 0);
     }
 
+    // ---- secure-connection failures -------------------------------------------------------------------------
+
+    /// <summary>A proxy that inspects HTTPS with a certificate Windows does not trust fails every handshake.</summary>
+    [Fact]
+    public async Task EnsureModelAsync_TlsFailure_FailsAfterThreeRetries()
+    {
+        var manager = CreateManager(_ => throw TlsFailure());
+
+        var task = Start(manager);
+        await AdvanceUntilAsync(() => task.IsCompleted, TimeSpan.FromSeconds(1));
+
+        var ex = await Should.ThrowAsync<HttpRequestException>(() => task);
+        ex.HttpRequestError.ShouldBe(HttpRequestError.SecureConnectionError);
+        ex.InnerException.ShouldBeOfType<AuthenticationException>();
+        _handler.Calls.ShouldBe(4);
+        _progress.Reports.Where(r => r.Retries > 0).Select(r => r.Retries).ShouldBe([1, 2, 3]);
+        File.Exists(ModelPath).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(HttpRequestError.ProxyTunnelError)]
+    [InlineData(HttpRequestError.UserAuthenticationError)]
+    public async Task EnsureModelAsync_ProxyFailure_FailsAfterThreeRetries(HttpRequestError error)
+    {
+        var manager = CreateManager(_ => throw new HttpRequestException(error, "The proxy tunnel request to proxy 'http://proxy.test/' failed with status code '407'."));
+
+        var task = Start(manager);
+        await AdvanceUntilAsync(() => task.IsCompleted, TimeSpan.FromSeconds(1));
+
+        (await Should.ThrowAsync<HttpRequestException>(() => task)).HttpRequestError.ShouldBe(error);
+        _handler.Calls.ShouldBe(4);
+    }
+
+    /// <summary>A captive portal breaks TLS only until the user has signed in to it.</summary>
+    [Fact]
+    public async Task EnsureModelAsync_TlsFailureThenSuccess_Downloads()
+    {
+        var manager = CreateManager(call => call <= 2 ? throw TlsFailure() : Ok(_body));
+
+        var task = Start(manager);
+        await AdvanceUntilAsync(() => task.IsCompleted, TimeSpan.FromSeconds(1));
+
+        File.ReadAllBytes(await task).ShouldBe(_body);
+        _handler.Calls.ShouldBe(3);
+        _progress.Reports.Where(r => r.Retries > 0).Select(r => r.Retries).ShouldBe([1, 2]);
+    }
+
+    [Fact]
+    public async Task EnsureModelAsync_TlsFailureMidBody_FailsAfterThreeRetries()
+    {
+        var manager = CreateManager(_ => Ok(new ScriptedStream(_body, chunkSize: 100, beforeRead: (_, _) => throw TlsFailure())));
+
+        var task = Start(manager);
+        await AdvanceUntilAsync(() => task.IsCompleted, TimeSpan.FromSeconds(1));
+
+        (await Should.ThrowAsync<HttpRequestException>(() => task)).HttpRequestError.ShouldBe(HttpRequestError.SecureConnectionError);
+        _handler.Calls.ShouldBe(4);
+    }
+
+    /// <summary>Only failures in a row count: bytes arriving between them prove the connection works.</summary>
+    [Fact]
+    public async Task EnsureModelAsync_TlsFailuresWithBytesBetween_KeepRetrying()
+    {
+        var manager = CreateManager(call => call switch
+        {
+            <= 3 or 5 or 6 => throw TlsFailure(),
+            4 => Ok(new ScriptedStream(_body, chunkSize: 100, beforeRead: (offset, _) =>
+                offset >= 100 ? throw TlsFailure() : ValueTask.CompletedTask)),
+            _ => Partial(_body[100..]),
+        });
+
+        var task = Start(manager);
+        await AdvanceUntilAsync(() => task.IsCompleted, TimeSpan.FromSeconds(1));
+
+        File.ReadAllBytes(await task).ShouldBe(_body);
+        _handler.Calls.ShouldBe(7);
+    }
+
     // ---- stalls ---------------------------------------------------------------------------------------------
 
     [Fact]
@@ -505,6 +584,43 @@ public sealed class ModelManagerTests : IDisposable
         again.ShouldBe(path);
         _handler.Calls.ShouldBe(1);
         File.ReadAllBytes(path).ShouldBe(_body);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FileMatches_IsTrueAndRemembered()
+    {
+        WriteModel(_body);
+        var manager = CreateManager(_ => throw new InvalidOperationException("the network must not be touched"));
+
+        (await manager.VerifyAsync(_model, TestContext.Current.CancellationToken)).ShouldBeTrue();
+
+        _handler.Calls.ShouldBe(0);
+        File.ReadAllText(_paths.ModelVerificationFile).ShouldContain("test.bin");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FileWithWrongContent_IsFalseAndNeitherDownloadsNorDeletes()
+    {
+        var garbage = RandomBytes(_body.Length, seed: 9);
+        WriteModel(garbage);
+        var manager = CreateManager(_ => throw new InvalidOperationException("the network must not be touched"));
+
+        (await manager.VerifyAsync(_model, TestContext.Current.CancellationToken)).ShouldBeFalse();
+
+        _handler.Calls.ShouldBe(0);
+        File.ReadAllBytes(ModelPath).ShouldBe(garbage);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_Missing_IsFalse()
+    {
+        WritePart(_body);
+        var manager = CreateManager(_ => throw new InvalidOperationException("the network must not be touched"));
+
+        (await manager.VerifyAsync(_model, TestContext.Current.CancellationToken)).ShouldBeFalse();
+
+        _handler.Calls.ShouldBe(0);
+        File.Exists(PartPath).ShouldBeTrue("a complete partial download is not the model file");
     }
 
     // ---- cancellation and progress --------------------------------------------------------------------------
@@ -703,6 +819,11 @@ public sealed class ModelManagerTests : IDisposable
         new(HttpStatusCode.PartialContent) { Content = new StreamContent(body) };
 
     private static HttpResponseMessage Status(HttpStatusCode status) => new(status);
+
+    /// <summary>What a TLS handshake against an untrusted root certificate throws.</summary>
+    private static HttpRequestException TlsFailure() => new(HttpRequestError.SecureConnectionError,
+        "The SSL connection could not be established, see inner exception.",
+        new AuthenticationException("The remote certificate is invalid because of errors in the certificate chain: UntrustedRoot"));
 
     /// <summary>Polls in real time for something another thread is about to do.</summary>
     private static async Task WaitUntilAsync(Func<bool> condition)

@@ -17,8 +17,13 @@ namespace Murmur.Core.Speech;
 /// running operation and waits for it to end before it touches any model file, because a download holds its .part file
 /// open. Transcriptions use the loaded model under <c>_modelGate</c>, which an operation also takes to swap models, so
 /// a model is never disposed while it transcribes. Whenever an operation reaches Ready on a model, it deletes every other
-/// catalog model's files, so a switch that never finished (Murmur quit during its download, or its first load failed)
-/// cannot leave a model on disk for good.
+/// catalog model's files but those of a model it goes on to switch to, so a switch that never finished (its first load
+/// failed, or its download failed) cannot leave a model on disk for good.
+/// </para>
+/// <para>
+/// A start whose chosen model has no complete file while another model has one (Murmur quit during a switch's download)
+/// is Ready on that one first, verified but never downloaded, and then carries on with the switch like a switch from
+/// Settings, so dictation works while the choice downloads.
 /// </para>
 /// </summary>
 public sealed class WhisperEngine(
@@ -34,6 +39,10 @@ public sealed class WhisperEngine(
 
     /// <summary>Far below any real microphone's noise floor (about -70 dBFS), so only a dead input falls under it.</summary>
     private const float DigitalSilenceDbfs = -80f;
+
+    /// <summary>The error, at the start or after "Could not switch to …", when the model manager gave up on a secure connection.</summary>
+    private const string SecureConnectionFailure =
+        "Murmur couldn't make a secure connection to huggingface.co. A proxy, firewall or antivirus that inspects HTTPS may be blocking it.";
 
     /// <summary>How long <see cref="Dispose"/> waits for a running transcription before it leaves the model to process exit.</summary>
     private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
@@ -98,9 +107,16 @@ public sealed class WhisperEngine(
 
             _started = true;
             _lifetime = ct;
+
+            // A start can end in a switch (LoadFirstModelAsync), and a failed switch restores the choice only while
+            // no newer one was made.
+            int choiceVersion;
+            lock (_choiceLock)
+                choiceVersion = _choiceVersion;
+
             running = _operation is { Task.IsCompleted: false } operation
                 ? operation.Task
-                : Start(target: null, choiceVersion: 0);
+                : Start(target: null, choiceVersion);
         }
         finally
         {
@@ -326,17 +342,27 @@ public sealed class WhisperEngine(
         try
         {
             hardware = Hardware();
+            // A start resolves the saved choice; a switch made while no model was loaded brings its own target.
+            var starting = operation.Target is null;
             model = operation.Target ??= SpeechModelCatalog.Get(selection.ResolveActive());
-            var loadingStatus = new EngineStatus(EngineState.Loading, model.DisplayName, Gpu: hardware.Advice);
 
-            var target = model;
-            var path = await EnsureModelAsync(model,
-                download => new EngineStatus(EngineState.Downloading, target.DisplayName, Download: download, Gpu: hardware.Advice),
-                whileVerifying: loadingStatus, ct).ConfigureAwait(false);
+            if (starting && await TryLoadAnotherModelOnDiskAsync(model, hardware, ct).ConfigureAwait(false) is { } onDisk)
+            {
+                next = onDisk;
+            }
+            else
+            {
+                var loadingStatus = new EngineStatus(EngineState.Loading, model.DisplayName, Gpu: hardware.Advice);
+                var target = model;
+                var path = await EnsureModelAsync(model,
+                    download => new EngineStatus(EngineState.Downloading, target.DisplayName, Download: download, Gpu: hardware.Advice),
+                    whileVerifying: loadingStatus, ct).ConfigureAwait(false);
 
-            loading = true;
-            SetStatus(loadingStatus);
-            next = await LoadAsync(model, path, hardware, ct).ConfigureAwait(false);
+                loading = true;
+                SetStatus(loadingStatus);
+                next = await LoadAsync(model, path, hardware, ct).ConfigureAwait(false);
+            }
+
             if (hardware.RuntimeDirectory is not null && next.Model.Runtime?.StartsWith("Cuda", StringComparison.Ordinal) != true)
             {
                 _logger.Warning("The CUDA 13 runtime is in {Directory}, but the speech engine runs on {Runtime}",
@@ -364,7 +390,54 @@ public sealed class WhisperEngine(
 
         // Outside the try: nothing after Ready may turn it into an Error.
         SetStatus(next.ReadyStatus);
-        DeleteModelsOtherThan(next.Info);
+        if (next.Info == model)
+        {
+            DeleteModelsOtherThan(next.Info);
+            return;
+        }
+
+        // Ready on the model that was on disk. Now the switch to the choice that was cut short, the same as a switch
+        // from Settings; it resumes the choice's partial download, so the sweep keeps that.
+        DeleteModelsOtherThan(next.Info, switchingTo: model);
+        _logger.Information("Switching the speech model to {Model}", model.DisplayName);
+        await SwitchFromAsync(operation, next).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// When <paramref name="chosen"/> has no complete file but another catalog model has one (Murmur quit during a
+    /// switch's download), loads that one, so dictation works while the start switches to the choice. It is only
+    /// verified, never downloaded: null when there is no such model or it fails to verify or to load, and the start
+    /// then downloads the choice as usual.
+    /// </summary>
+    private async Task<LoadedModel?> TryLoadAnotherModelOnDiskAsync(SpeechModelInfo chosen, HardwareFacts hardware, CancellationToken ct)
+    {
+        if (models.HasExpectedFile(chosen))
+            return null;
+
+        var onDisk = Enum.GetValues<SpeechModelId>()
+            .Where(id => id != chosen.Id)
+            .Select(SpeechModelCatalog.Get)
+            .FirstOrDefault(models.HasExpectedFile);
+        if (onDisk is null)
+            return null;
+
+        _logger.Information("{Chosen} is not downloaded yet, so the speech engine starts on {OnDisk} and then switches",
+            chosen.DisplayName, onDisk.DisplayName);
+        SetStatus(new EngineStatus(EngineState.Loading, onDisk.DisplayName, Gpu: hardware.Advice));
+        try
+        {
+            if (await models.VerifyAsync(onDisk, ct).ConfigureAwait(false))
+                return await LoadAsync(onDisk, models.PathFor(onDisk), hardware, ct).ConfigureAwait(false);
+
+            _logger.Warning("The {Model} file does not match its expected SHA-256, so the speech engine downloads {Chosen} instead of starting on it",
+                onDisk.DisplayName, chosen.DisplayName);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.Warning(ex, "Could not start the speech engine on {Model}; downloading {Chosen} instead", onDisk.DisplayName, chosen.DisplayName);
+        }
+
+        return null;
     }
 
     private async Task SwitchFromAsync(Operation operation, LoadedModel from)
@@ -498,15 +571,16 @@ public sealed class WhisperEngine(
     }
 
     /// <summary>
-    /// Deletes the files of every catalog model but <paramref name="active"/>, which has just become Ready: the previous
-    /// model after a switch, and whatever an unfinished switch or a failed first load left behind. Only from inside an
-    /// operation, so no download of another model can be running.
+    /// Deletes the files of every catalog model but <paramref name="active"/>, which has just become Ready, and
+    /// <paramref name="switchingTo"/>, whose partial download the operation goes on to resume: the previous model after
+    /// a switch, and whatever an unfinished switch or a failed first load left behind. Only from inside an operation, so
+    /// no download of another model can be running.
     /// </summary>
-    private void DeleteModelsOtherThan(SpeechModelInfo active)
+    private void DeleteModelsOtherThan(SpeechModelInfo active, SpeechModelInfo? switchingTo = null)
     {
         foreach (var id in Enum.GetValues<SpeechModelId>())
         {
-            if (id != active.Id)
+            if (id != active.Id && id != switchingTo?.Id)
                 Delete(SpeechModelCatalog.Get(id));
         }
     }
@@ -550,6 +624,7 @@ public sealed class WhisperEngine(
         InsufficientDiskSpaceException disk =>
             $"Not enough disk space for the speech model: {DescribeShortfall(disk)}. Free some space and restart Murmur.",
         ModelVerificationException => "The speech model download was damaged twice. Restart Murmur to try again.",
+        _ when !loading && DownloadFailures.IsSecureConnectionFailure(ex) => SecureConnectionFailure,
         HttpRequestException when !loading =>
             $"Could not download the speech model: {ex.Message} Check the internet connection and restart Murmur.",
         _ when loading && model is not null =>
@@ -561,6 +636,7 @@ public sealed class WhisperEngine(
     {
         InsufficientDiskSpaceException disk => $"not enough disk space. {DescribeShortfall(disk)}.",
         ModelVerificationException => "the download was damaged twice.",
+        _ when DownloadFailures.IsSecureConnectionFailure(ex) => SecureConnectionFailure,
         HttpRequestException => $"{ex.Message} Check the internet connection and try again.",
         _ => ex.Message,
     };
@@ -601,7 +677,10 @@ public sealed class WhisperEngine(
 
         public CancellationTokenSource Cts => cts;
 
-        /// <summary>The choice that started it; a failed switch restores the previous model only while this is the newest.</summary>
+        /// <summary>
+        /// The choice that started it (for a start, the newest choice then); a failed switch restores the previous model
+        /// only while this is the newest.
+        /// </summary>
         public int ChoiceVersion => choiceVersion;
 
         public Task Task { get; set; } = Task.CompletedTask;
