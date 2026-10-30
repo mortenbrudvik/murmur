@@ -90,7 +90,8 @@ public sealed class SetupCoordinator(ISettingsService settings, ModelSelection s
         }
     }
 
-    // SetupStep is only null when Initialize failed; the first step is where a fresh start begins anyway.
+    // SetupStep is null when setup was marked completed without being run (someone upgrading from 1.0 with the model
+    // already there), where no step is shown, and when Initialize failed; the first step is where a fresh start begins.
     private static SetupState ToState(MurmurSettings s, string? openPage) =>
         new(!s.SetupCompleted, s.SetupStep ?? SetupStep.SpeechModel, s.CudaTipDismissed, openPage);
 }

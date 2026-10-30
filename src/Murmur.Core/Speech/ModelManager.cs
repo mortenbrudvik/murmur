@@ -220,8 +220,10 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
         long attemptBytes = 0;
         var buffer = new byte[BufferSize];
 
-        await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        await using var target = new FileStream(partPath, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, useAsync: true);
+        var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        await using var sourceDisposal = source.ConfigureAwait(false);
+        var target = new FileStream(partPath, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, useAsync: true);
+        await using var targetDisposal = target.ConfigureAwait(false);
 
         using var stall = new CancellationTokenSource(Timeout.InfiniteTimeSpan, time);
         using var readToken = CancellationTokenSource.CreateLinkedTokenSource(ct, stall.Token);
@@ -293,7 +295,8 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
 
     private static async Task<string> HashFileAsync(string path, CancellationToken ct)
     {
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, useAsync: true);
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, useAsync: true);
+        await using var disposal = stream.ConfigureAwait(false);
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false));
     }
 

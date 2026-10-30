@@ -15,7 +15,8 @@ namespace Murmur.Core.Tests.Speech;
 /// folder (<see cref="MurmurPaths.Default"/>), GPU detection, the CUDA runtime search and Whisper.net. The model is the
 /// one the settings choose, which a PC that already has the large model keeps; like the app, it saves that choice when
 /// the settings have none yet. A PC with no model downloads it once (about 1.6 GB for the large one), so later runs and
-/// the app itself reuse it. Never switches models: that would delete one.
+/// the app itself reuse it. Like the app, starting the engine deletes every other catalog model's files in that real
+/// models folder once the chosen one is Ready, so a PC that keeps both models loses the one the settings do not choose.
 /// </summary>
 public sealed class WhisperEngineFixture : IAsyncLifetime
 {
