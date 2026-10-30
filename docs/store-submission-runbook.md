@@ -29,10 +29,10 @@ the order is:
 
 1. Reserve the name in Partner Center.
 2. Read the identity values off **Product management → Product identity**.
-3. Put them in `C:\code\projects\murmur\packaging\msix\AppxManifest.xml` (check the `Publisher`
+3. Put them in `packaging\msix\AppxManifest.xml` (check the `Publisher`
    against it too, rather than assuming it matches Loadstone's), then rebuild:
    ```powershell
-   & 'C:\Program Files\PowerShell\7\pwsh.exe' -File C:\code\projects\murmur\build\build-msix.ps1
+   & 'C:\Program Files\PowerShell\7\pwsh.exe' -File build\build-msix.ps1
    ```
 4. *Then* upload `installer-output\Murmur-<version>-x64.msix`.
 
@@ -89,8 +89,8 @@ inside it before uploading:
 
 ```powershell
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$version = (Get-Content C:\code\projects\murmur\version.json -Raw | ConvertFrom-Json).version
-$z = [System.IO.Compression.ZipFile]::OpenRead("C:\code\projects\murmur\installer-output\Murmur-$version-x64.msix")
+$version = (Get-Content version.json -Raw | ConvertFrom-Json).version
+$z = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path "installer-output\Murmur-$version-x64.msix").Path)
 $e = $z.GetEntry('AppxManifest.xml')
 $r = New-Object System.IO.StreamReader($e.Open())
 if ($r.ReadToEnd() -match 'PLACEHOLDER') { 'PLACEHOLDER BUILD - do not upload' } else { 'identity set - safe to upload' }
@@ -207,7 +207,7 @@ The staged layout was registered with `Add-AppxPackage -Register` and launched f
 
 1. Stop any unpackaged Murmur first (`Stop-Process -Name Murmur.UI`). The single-instance mutex is
    shared across both channels, so a packaged copy started next to it only signals it and exits.
-2. `Add-AppxPackage -Register C:\code\projects\murmur\packaging\msix\staging\AppxManifest.xml`, then
+2. `Add-AppxPackage -Register packaging\msix\staging\AppxManifest.xml`, then
    `(Get-AppxPackage MortenBrudvik.MurmurVoiceTyping).PackageFamilyName` for the AUMID.
 3. Afterwards: stop it, `Get-AppxPackage MortenBrudvik.MurmurVoiceTyping | Remove-AppxPackage`,
    and restart the unpackaged build. A registered layout keeps its staging folder in use, so

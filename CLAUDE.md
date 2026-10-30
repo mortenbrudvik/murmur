@@ -56,7 +56,7 @@ The version lives in `version.json` and `packaging/msix/AppxManifest.xml` (`1.0.
 
 Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Murmur.Interop` -> `Murmur.WebView`, `Murmur.Core`, `Murmur.Common`; `Murmur.Core` -> `Murmur.Common`.
 
-**Reference template:** `C:\code\template-projects\desktop-development-template\wpf-webview-react-development-template.md`
+**Reference template:** the owner's WPF + WebView2 + React desktop template (`wpf-webview-react-development-template.md`), which the `wpf-scaffold` skill scaffolds from
 
 ## Key Conventions
 
