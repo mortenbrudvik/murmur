@@ -462,11 +462,19 @@ public sealed class DictationController : IDisposable
         if (generation != _generation || _timer is null)
             return;
 
-        var physicallyDown = IsHotkeyPhysicallyDown(_matcher.Hotkey);
+        var hotkey = _matcher.Hotkey;
+        var physicallyDown = IsHotkeyPhysicallyDown(hotkey);
 
-        // The release was missed; forget it, or the next press would be dropped as auto-repeat.
         if (!physicallyDown && _matcher.IsHotkeyHeld)
-            _matcher.ResetHeld();
+        {
+            // A lone modifier's release was missed: forget it, or the next press would be dropped as auto-repeat. A combo
+            // whose modifiers are all up may still have its main key down and auto-repeating, which must stay swallowed
+            // until its key-up; the matcher only learns that the combo pressed again is a new press.
+            if (hotkey.IsModifierOnly)
+                _matcher.ResetHeld();
+            else
+                _matcher.NoteModifiersReleased();
+        }
 
         // An armed press held past the arm delay is decided on the engine as it is now, like a signal.
         var now = _time.GetUtcNow();

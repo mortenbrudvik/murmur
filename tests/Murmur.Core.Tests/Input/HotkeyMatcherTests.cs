@@ -15,10 +15,16 @@ public sealed class HotkeyMatcherTests
     private const int Space = 0x20;
     private const int Escape = 0x1B;
     private const int KeyC = 0x43;
+    private const int KeyD = 0x44;
     private const int KeyV = 0x56;
+    private const int F12 = 0x7B;
 
     private static readonly HotkeyDefinition CtrlShiftSpace =
         new(Space, HotkeyModifiers.Ctrl | HotkeyModifiers.Shift, "Ctrl+Shift+Space");
+
+    private static readonly HotkeyDefinition CtrlAltD = new(KeyD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+D");
+
+    private static readonly HotkeyDefinition CtrlSpace = new(Space, HotkeyModifiers.Ctrl, "Ctrl+Space");
 
     private static KeyInput Down(int vk) => new(vk, IsDown: true, IsInjected: false);
 
@@ -27,6 +33,16 @@ public sealed class HotkeyMatcherTests
     private static MatchResult Result(HotkeySignal signal, bool swallow) => new(signal, swallow);
 
     private static HotkeyMatcher NewMatcher() => new(HotkeyDefinition.Default);
+
+    /// <summary>A Ctrl+Alt+D matcher with the hotkey held down.</summary>
+    private static HotkeyMatcher PressCtrlAltD()
+    {
+        var matcher = new HotkeyMatcher(CtrlAltD);
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(LeftAlt));
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+        return matcher;
+    }
 
     [Fact]
     public void ModifierOnly_DownUp()
@@ -221,6 +237,127 @@ public sealed class HotkeyMatcherTests
         matcher.OnKey(Up(LeftCtrl)).ShouldBe(Result(HotkeySignal.None, false));
 
         matcher.OnKey(Up(Space)).ShouldBe(Result(HotkeySignal.HotkeyUp, true));
+    }
+
+    /// <summary>Ctrl and Alt let go before D: D's auto-repeat and its key-up must not reach the app ("ddd").</summary>
+    [Fact]
+    public void Combo_ModifiersReleasedFirst_MainKeyRepeatsAndUpStaySwallowed()
+    {
+        var matcher = PressCtrlAltD();
+        matcher.OnKey(Up(LeftCtrl)).ShouldBe(Result(HotkeySignal.None, false));
+        matcher.OnKey(Up(LeftAlt)).ShouldBe(Result(HotkeySignal.None, false));
+
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.None, true));
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.None, true));
+        matcher.OnKey(Up(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyUp, true));
+
+        matcher.IsHotkeyHeld.ShouldBeFalse();
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(LeftAlt));
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+    }
+
+    /// <summary>Ctrl let go before Space: Space's auto-repeat would type spaces into the app.</summary>
+    [Fact]
+    public void Combo_CtrlSpace_CtrlReleasedFirst_SpaceRepeatsAndUpStaySwallowed()
+    {
+        var matcher = new HotkeyMatcher(CtrlSpace);
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+        matcher.OnKey(Up(LeftCtrl)).ShouldBe(Result(HotkeySignal.None, false));
+
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.None, true));
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.None, true));
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.None, true));
+        matcher.OnKey(Up(Space)).ShouldBe(Result(HotkeySignal.HotkeyUp, true));
+
+        // A Space of its own is typing again.
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.None, false));
+        matcher.OnKey(Up(Space)).ShouldBe(Result(HotkeySignal.None, false));
+    }
+
+    /// <summary>
+    /// The main key's up was never seen, but its modifiers were released since: the combo pressed again is a new press,
+    /// not an auto-repeat to swallow.
+    /// </summary>
+    [Fact]
+    public void Combo_KeyUpMissedAfterTheModifiersWereReleased_ComboPressedAgainIsANewPress()
+    {
+        var matcher = PressCtrlAltD();
+        matcher.OnKey(Up(LeftCtrl));
+        matcher.OnKey(Up(LeftAlt));
+
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(LeftAlt));
+
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.None, true)); // its own auto-repeat again
+        matcher.OnKey(Up(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyUp, true));
+    }
+
+    [Fact]
+    public void Combo_OnlySomeModifiersPressedAgain_MainKeyStillSwallowedWithoutASignal()
+    {
+        var matcher = PressCtrlAltD();
+        matcher.OnKey(Up(LeftCtrl));
+        matcher.OnKey(Up(LeftAlt));
+        matcher.OnKey(Down(LeftCtrl)); // Ctrl, but not Alt
+
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.None, true));
+    }
+
+    [Fact]
+    public void Combo_OneOfTwoModifiersReleasedAndPressedAgain_MainKeyRepeatIsStillTheSameHold()
+    {
+        var matcher = PressCtrlAltD();
+        matcher.OnKey(Up(LeftCtrl)); // Alt stays down: never all of them released
+        matcher.OnKey(Down(LeftCtrl));
+
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.None, true));
+    }
+
+    /// <summary>An F-key hotkey has no modifiers, so "all of them released" never applies: its repeats stay repeats.</summary>
+    [Fact]
+    public void Combo_WithoutModifiers_RepeatsStaySwallowedWhateverOtherModifiersDo()
+    {
+        var matcher = new HotkeyMatcher(new HotkeyDefinition(F12, HotkeyModifiers.None, "F12"));
+        matcher.OnKey(Down(F12)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Up(LeftCtrl));
+
+        matcher.OnKey(Down(F12)).ShouldBe(Result(HotkeySignal.None, true));
+        matcher.OnKey(Down(F12)).ShouldBe(Result(HotkeySignal.None, true));
+    }
+
+    /// <summary>
+    /// The hook missed the modifiers' key-ups too (a secure desktop had the keyboard), so the controller, which reads
+    /// them as up, says so. The main key stays swallowed; the combo pressed again is a new press.
+    /// </summary>
+    [Fact]
+    public void Combo_ModifiersReportedReleased_MainKeyStaysSwallowedAndTheComboPressedAgainIsANewPress()
+    {
+        var matcher = PressCtrlAltD();
+
+        matcher.NoteModifiersReleased();
+
+        matcher.IsHotkeyHeld.ShouldBeTrue();
+        matcher.OnKey(Down(LeftCtrl)); // as far as the matcher knows, Ctrl and Alt never went up
+        matcher.OnKey(Down(LeftAlt));
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+    }
+
+    [Fact]
+    public void NoteModifiersReleased_WhenNotHeld_ChangesNothing()
+    {
+        var matcher = new HotkeyMatcher(CtrlAltD);
+
+        matcher.NoteModifiersReleased();
+
+        matcher.IsHotkeyHeld.ShouldBeFalse();
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(LeftAlt));
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.None, true));
     }
 
     [Fact]

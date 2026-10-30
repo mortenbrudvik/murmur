@@ -24,6 +24,7 @@ public sealed class DictationControllerTests : IDisposable
 {
     private const int RightCtrl = 0xA3;
     private const int GenericCtrl = 0x11, GenericAlt = 0x12, VkD = 0x44;
+    private const int VkLeftCtrl = 0xA2, VkLeftAlt = 0xA4;
     private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(5);
 
     /// <summary>How long the default hotkey (Right Ctrl, a lone modifier) is held before recording starts.</summary>
@@ -1477,7 +1478,8 @@ public sealed class DictationControllerTests : IDisposable
         _time.Advance(TimeSpan.FromMilliseconds(800));
         _machine.State.ShouldBe(DictationState.HoldRecording);
 
-        // The hook never saw the main key come up, but Ctrl and Alt, which are never swallowed, are up.
+        // The hook saw neither the main key nor Ctrl and Alt come up, but the probe reads Ctrl and Alt, which are never
+        // swallowed, as up.
         _ctrlDown = false;
         _altDown = false;
         _matcher.IsHotkeyHeld.ShouldBeTrue();
@@ -1486,9 +1488,71 @@ public sealed class DictationControllerTests : IDisposable
 
         await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
         _history.Received(1).Add("Hello world.", "Notepad", true);
-        _matcher.IsHotkeyHeld.ShouldBeFalse();
         _machine.State.ShouldBe(DictationState.Idle);
         AssertTimerStopped();
+
+        // The next press of the combo is a press, not an auto-repeat to swallow.
+        PressCtrlAltD();
+        _recorder.Received(2).Start(Arg.Any<string?>());
+        _machine.State.ShouldBe(DictationState.HoldRecording);
+    }
+
+    /// <summary>
+    /// Ctrl and Alt let go a moment before D: the tick ends the hold, while D is still down and auto-repeating. Its
+    /// repeats and its key-up stay swallowed (they would type "ddd" into the app, or for Ctrl+F12 open Save As).
+    /// </summary>
+    [Fact]
+    public async Task ComboHotkey_ModifiersReleasedBeforeTheMainKey_EndsTheHoldAndKeepsSwallowingTheMainKey()
+    {
+        PressCtrlAltD();
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        _matcher.OnKey(new KeyInput(VkLeftCtrl, false, false)).ShouldBe(new MatchResult(HotkeySignal.None, false));
+        _matcher.OnKey(new KeyInput(VkLeftAlt, false, false)).ShouldBe(new MatchResult(HotkeySignal.None, false));
+        _ctrlDown = false;
+        _altDown = false;
+
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+        await Finished();
+
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        _machine.State.ShouldBe(DictationState.Idle);
+
+        // D, still held, repeats: swallowed, and no new press.
+        _matcher.OnKey(new KeyInput(VkD, true, false)).ShouldBe(new MatchResult(HotkeySignal.None, true));
+        _matcher.OnKey(new KeyInput(VkD, true, false)).ShouldBe(new MatchResult(HotkeySignal.None, true));
+
+        // D comes up: swallowed too, and its release starts nothing.
+        _matcher.OnKey(new KeyInput(VkD, false, false)).ShouldBe(new MatchResult(HotkeySignal.HotkeyUp, true));
+        Signal(HotkeySignal.HotkeyUp);
+        _machine.State.ShouldBe(DictationState.Idle);
+        _recorder.Received(1).Start(Arg.Any<string?>());
+
+        // A fresh Ctrl+Alt+D is a new press.
+        PressCtrlAltD();
+        _recorder.Received(2).Start(Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task ComboHotkey_CtrlReleasedBeforeSpace_SpaceRepeatsStaySwallowed()
+    {
+        const int vkSpace = 0x20;
+        _matcher.Hotkey = new HotkeyDefinition(vkSpace, HotkeyModifiers.Ctrl, "Ctrl+Space");
+        _ctrlDown = true;
+        _matcher.OnKey(new KeyInput(VkLeftCtrl, true, false));
+        _matcher.OnKey(new KeyInput(vkSpace, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
+        Signal(HotkeySignal.HotkeyDown);
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+
+        _matcher.OnKey(new KeyInput(VkLeftCtrl, false, false));
+        _ctrlDown = false;
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+        await Finished();
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+
+        // Stray spaces in the app otherwise.
+        for (var i = 0; i < 3; i++)
+            _matcher.OnKey(new KeyInput(vkSpace, true, false)).ShouldBe(new MatchResult(HotkeySignal.None, true));
+        _matcher.OnKey(new KeyInput(vkSpace, false, false)).ShouldBe(new MatchResult(HotkeySignal.HotkeyUp, true));
     }
 
     [Fact]
@@ -1638,15 +1702,15 @@ public sealed class DictationControllerTests : IDisposable
     /// </summary>
     private void PressCtrlAltD()
     {
-        const int vkLeftCtrl = 0xA2, vkLeftAlt = 0xA4;
+        var starts = _recorder.ReceivedCalls().Count(call => call.GetMethodInfo().Name == nameof(IAudioRecorder.Start));
         _matcher.Hotkey = new HotkeyDefinition(VkD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+D");
         _ctrlDown = true;
         _altDown = true;
-        _matcher.OnKey(new KeyInput(vkLeftCtrl, true, false));
-        _matcher.OnKey(new KeyInput(vkLeftAlt, true, false));
+        _matcher.OnKey(new KeyInput(VkLeftCtrl, true, false));
+        _matcher.OnKey(new KeyInput(VkLeftAlt, true, false));
         _matcher.OnKey(new KeyInput(VkD, true, false)).Signal.ShouldBe(HotkeySignal.HotkeyDown);
         Signal(HotkeySignal.HotkeyDown);
-        _recorder.Received(1).Start(Arg.Any<string?>()); // no arm delay: the combo is swallowed, so it is no app's shortcut
+        _recorder.Received(starts + 1).Start(Arg.Any<string?>()); // no arm delay: the combo is swallowed, so it is no app's shortcut
     }
 
     /// <summary>Hotkey pressed and held through the arm delay: the tick has started the recording.</summary>

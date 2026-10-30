@@ -23,9 +23,11 @@ public readonly record struct MatchResult(HotkeySignal Signal, bool Swallow);
 /// <item>Modifier-only hotkey (e.g. Right Ctrl): down → <see cref="HotkeySignal.HotkeyDown"/>, up →
 /// <see cref="HotkeySignal.HotkeyUp"/>; never swallowed, so the key keeps working as a modifier.</item>
 /// <item>Combo hotkey: the main key's down while exactly the configured modifiers are held →
-/// <see cref="HotkeySignal.HotkeyDown"/>; its up → <see cref="HotkeySignal.HotkeyUp"/>; both swallowed.</item>
+/// <see cref="HotkeySignal.HotkeyDown"/>; its up → <see cref="HotkeySignal.HotkeyUp"/>; both swallowed, and so is every
+/// down of the main key in between, also once its modifiers are up.</item>
 /// <item>Auto-repeat downs of the held hotkey key are dropped, so <see cref="HotkeySignal.HotkeyDown"/> fires only on
-/// the first down after an up.</item>
+/// the first down after an up. The exception is a combo whose modifiers were all released while its main key was held:
+/// should the key-up never come, the combo pressed again is a new press.</item>
 /// <item>Another key-down while the hotkey is held → <see cref="HotkeySignal.OtherInputWhileHeld"/>, not swallowed.</item>
 /// <item>Esc while <see cref="DictationActive"/> → <see cref="HotkeySignal.Escape"/>, swallowed down and up.</item>
 /// <item>Injected input (such as Murmur's own Ctrl+V) is ignored entirely.</item>
@@ -41,6 +43,11 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
     private readonly ModifierKeyTracker _modifiers = new();
     private HotkeyDefinition _hotkey = hotkey;
     private bool _held;
+
+    // While a combo with modifiers is held: all of its modifiers were seen released since it went down. The main key is
+    // still swallowed (it may be down and auto-repeating), but the combo pressed again is a new press.
+    private bool _modifiersReleased;
+
     private bool _escapeHeld;
     private volatile bool _dictationActive;
 
@@ -58,6 +65,7 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
             {
                 _hotkey = value;
                 _held = false;
+                _modifiersReleased = false;
             }
         }
     }
@@ -80,15 +88,31 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
 
     /// <summary>
     /// Forgets that the hotkey (and a swallowed Esc) is held, without touching the tracked modifiers. Called after a
-    /// missed key release was recovered by polling, and before a hotkey capture starts, so the next press is not
-    /// mistaken for auto-repeat.
+    /// lone modifier's missed release was recovered by polling, when a hold runs into its limit, and before a hotkey
+    /// capture starts, so the next press is not mistaken for auto-repeat. Not for a combo whose modifiers were let go
+    /// first: its main key may still be down, and <see cref="NoteModifiersReleased"/> keeps it swallowed.
     /// </summary>
     public void ResetHeld()
     {
         lock (_gate)
         {
             _held = false;
+            _modifiersReleased = false;
             _escapeHeld = false;
+        }
+    }
+
+    /// <summary>
+    /// The controller read all of a held combo's modifiers as up, though the hook may have missed their key-ups. Like
+    /// seeing them released: the main key stays swallowed until its key-up, but the combo pressed again is a new press.
+    /// Does nothing unless a combo with modifiers is held.
+    /// </summary>
+    public void NoteModifiersReleased()
+    {
+        lock (_gate)
+        {
+            if (_held && HasModifiersToRelease(_hotkey))
+                _modifiersReleased = true;
         }
     }
 
@@ -105,6 +129,15 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
             var modifierRepeat = input.IsDown && _modifiers.IsDown(vk);
             var result = Match(input, modifierRepeat);
             _modifiers.Set(vk, input.IsDown);
+
+            // Modifier events are never swallowed, so the hook sees a held combo's modifiers go up even when the main key
+            // is still down.
+            if (_held && !input.IsDown && ModifierKeyTracker.IsModifier(vk) && HasModifiersToRelease(_hotkey)
+                && (_modifiers.Current(exceptVk: _hotkey.VirtualKey) & _hotkey.Modifiers) == HotkeyModifiers.None)
+            {
+                _modifiersReleased = true;
+            }
+
             return result;
         }
     }
@@ -115,6 +148,10 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
         lock (_gate)
             return _held ? new MatchResult(HotkeySignal.OtherInputWhileHeld, false) : default;
     }
+
+    /// <summary>A combo with modifiers, which can be released before its main key; not a lone modifier or an F-key.</summary>
+    private static bool HasModifiersToRelease(HotkeyDefinition hotkey) =>
+        !hotkey.IsModifierOnly && hotkey.Modifiers != HotkeyModifiers.None;
 
     private MatchResult Match(KeyInput input, bool modifierRepeat)
     {
@@ -184,14 +221,20 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
     {
         if (isDown)
         {
-            if (_held)
+            // Auto-repeat of the held key.
+            if (_held && !_modifiersReleased)
                 return new MatchResult(HotkeySignal.None, true);
 
             // The main key may itself be a modifier key; it must not count towards its own combo.
             if (_modifiers.Current(exceptVk: _hotkey.VirtualKey) != _hotkey.Modifiers)
-                return default;
+            {
+                // Its modifiers were let go first and the key is still down: its repeats stay swallowed until its key-up.
+                return _held ? new MatchResult(HotkeySignal.None, true) : default;
+            }
 
+            // A fresh press, or the combo pressed again after its modifiers were released while the key-up was missed.
             _held = true;
+            _modifiersReleased = false;
             return new MatchResult(HotkeySignal.HotkeyDown, true);
         }
 
@@ -199,6 +242,7 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
             return default;
 
         _held = false;
+        _modifiersReleased = false;
         return new MatchResult(HotkeySignal.HotkeyUp, true);
     }
 }
