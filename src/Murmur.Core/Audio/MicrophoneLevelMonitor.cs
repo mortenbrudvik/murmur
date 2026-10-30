@@ -9,7 +9,8 @@ namespace Murmur.Core.Audio;
 /// <summary>
 /// The microphone test of the first-run setup: opens the microphone on a recorder of its own (so it can never
 /// collide with a dictation) and publishes the level of what it hears as <see cref="MicLevelNotification"/>s, at most
-/// one per 50 ms. It never leaves the microphone open: the test ends on <see cref="Stop"/>, on <see cref="StopForWindow"/>,
+/// one per 50 ms, each the loudest level heard since the one before (so a short peak is not lost to the throttle). It
+/// never leaves the microphone open: the test ends on <see cref="Stop"/>, on <see cref="StopForWindow"/>,
 /// on <see cref="Dispose"/>, when the microphone fails and by itself after <see cref="MaxDuration"/>. A test that ends
 /// without the page asking (all but <see cref="Stop"/> and <see cref="Dispose"/>) publishes a last, ended level of 0, so
 /// the page knows to start it again.
@@ -167,14 +168,19 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
         if (session.Ended)
             return;
 
-        // Only this thread touches the session's publish bookkeeping.
+        // Only this thread touches the session's publish bookkeeping. A chunk that is not published still counts: the
+        // meter shows the loudest level since the last publish, so a short peak is not lost to the 50 ms throttle.
+        session.Peak = Math.Max(session.Peak, LevelFromDbfs(SpeechDetector.RmsDbfs(chunk)));
+
         var now = time.GetTimestamp();
         if (session.HasPublished && time.GetElapsedTime(session.LastPublished, now) < PublishInterval)
             return;
 
         session.HasPublished = true;
         session.LastPublished = now;
-        Publish(LevelFromDbfs(SpeechDetector.RmsDbfs(chunk)), ended: false);
+        var level = session.Peak;
+        session.Peak = 0;
+        Publish(level, ended: false);
     }
 
     /// <summary>
@@ -282,7 +288,7 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
         }
     }
 
-    /// <summary>One run of the test: its recorder, its auto-stop timer and the bookkeeping of the 50 ms throttle.</summary>
+    /// <summary>One run of the test: its recorder, its auto-stop timer and the bookkeeping of the 50 ms throttle and the peak.</summary>
     private sealed class Session
     {
         private readonly MicrophoneLevelMonitor _owner;
@@ -306,10 +312,13 @@ public sealed class MicrophoneLevelMonitor(Func<IAudioRecorder> createRecorder, 
         /// <summary>The auto-stop timer; guarded by the monitor's lock.</summary>
         public ITimer? Timer { get; set; }
 
-        // Only the capture thread reads and writes these two.
+        // Only the capture thread reads and writes these.
         public bool HasPublished { get; set; }
 
         public long LastPublished { get; set; }
+
+        /// <summary>The loudest level (0 to 1) heard since the last publish; 0 for a new test, which has heard nothing.</summary>
+        public double Peak { get; set; }
 
         /// <summary>Marks the session as ended; false when it already was. Call with the monitor's lock held.</summary>
         public bool TryEnd()

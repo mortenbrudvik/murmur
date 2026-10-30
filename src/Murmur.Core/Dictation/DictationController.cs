@@ -63,6 +63,12 @@ public sealed class DictationController : IDisposable
     /// </summary>
     private static readonly TimeSpan ArmPollInterval = TimeSpan.FromMilliseconds(10);
 
+    /// <summary>
+    /// How much audio makes one bar of the pill's waveform: 800 samples, 50 ms at 16 kHz. The capture buffers are about
+    /// 10 ms, which is far too fast for a bar. Counted in samples, not by a clock, so it follows the audio.
+    /// </summary>
+    private const int LevelWindowSamples = 800;
+
     private readonly ILogger _logger = Log.ForContext<DictationController>();
     private readonly DictationStateMachine _machine;
     private readonly HotkeyMatcher _matcher;
@@ -81,6 +87,10 @@ public sealed class DictationController : IDisposable
     private readonly TimeProvider _time;
     private readonly SynchronizationContext? _context;
     private readonly SpeechDetector _detector = new();
+
+    // The audio of the bar being gathered, and how much of it is in. UI thread only, like everything that handles chunks.
+    private readonly float[] _levelWindow = new float[LevelWindowSamples];
+    private int _levelWindowFill;
 
     // Identifies the current dictation. Bumped when one arms, when it starts and when it is abandoned (Esc, microphone
     // failure), so recorder events, ticks and completions that belong to an older one recognise themselves as stale.
@@ -270,6 +280,7 @@ public sealed class DictationController : IDisposable
         _settings = _settingsService.Load();
         var generation = Interlocked.Increment(ref _generation);
         _detector.Reset();
+        _levelWindowFill = 0;
         _stats = new DictationStats(pressedAt);
         _micLive = false;
         _recording = true; // set first: without a synchronization context, chunks arrive even from inside Start
@@ -420,9 +431,30 @@ public sealed class DictationController : IDisposable
                 _machine.OnSpeechDetected();
         }
 
-        var level = SpeechDetector.RmsDbfs(chunk);
-        _stats.PeakDbfs = Math.Max(_stats.PeakDbfs, level);
-        _pill.PushLevel(level);
+        _stats.PeakDbfs = Math.Max(_stats.PeakDbfs, SpeechDetector.RmsDbfs(chunk));
+        PushLevels(chunk);
+    }
+
+    /// <summary>
+    /// Gathers the audio into windows of <see cref="LevelWindowSamples"/> and gives the pill the RMS level of each full
+    /// one. A window may span chunks and a chunk may hold several windows; what is left over when the recording ends is
+    /// never pushed.
+    /// </summary>
+    private void PushLevels(ReadOnlySpan<float> chunk)
+    {
+        while (!chunk.IsEmpty)
+        {
+            var count = Math.Min(chunk.Length, LevelWindowSamples - _levelWindowFill);
+            chunk[..count].CopyTo(_levelWindow.AsSpan(_levelWindowFill));
+            _levelWindowFill += count;
+            chunk = chunk[count..];
+
+            if (_levelWindowFill == LevelWindowSamples)
+            {
+                _levelWindowFill = 0;
+                _pill.PushLevel(SpeechDetector.RmsDbfs(_levelWindow));
+            }
+        }
     }
 
     private void OnTick(int generation)

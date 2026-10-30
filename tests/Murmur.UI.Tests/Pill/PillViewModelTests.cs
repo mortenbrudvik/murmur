@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using Murmur.UI.Pill;
 using Shouldly;
 
@@ -64,6 +65,60 @@ public class PillViewModelTests
         vm.Bars.Count.ShouldBe(8);
         vm.Bars[^1].ShouldBe(0.2 + 0.8 * 36 / 40, 0.001); // the latest push (-24 dBFS)
         vm.Bars[0].ShouldBe(0.2 + 0.8 * 8 / 40, 0.001);   // the 3rd push (-52 dBFS); the first two fell off
+    }
+
+    [Fact]
+    public void PushLevel_ShiftsInPlaceWithoutRemovingItems()
+    {
+        var vm = new PillViewModel();
+        var actions = new List<NotifyCollectionChangedAction>();
+        vm.Bars.CollectionChanged += (_, e) => actions.Add(e.Action);
+
+        for (var i = 0; i < 10; i++)
+        {
+            vm.PushLevel(-60f + 4f * i);
+        }
+
+        actions.ShouldNotBeEmpty();
+        actions.ShouldAllBe(action => action == NotifyCollectionChangedAction.Replace);
+        vm.Bars.Count.ShouldBe(8);
+    }
+
+    [Fact]
+    public void PushLevel_FallsAtMost0_15PerStep()
+    {
+        var vm = new PillViewModel();
+        vm.PushLevel(-20f); // 1.0
+
+        var expected = new[] { 0.85, 0.70, 0.55, 0.40, 0.25, 0.20 }; // silence pulls the bar down 0.15 at a time
+        foreach (var bar in expected)
+        {
+            vm.PushLevel(-60f);
+
+            vm.Bars[^1].ShouldBe(bar, 0.001);
+        }
+    }
+
+    [Fact]
+    public void PushLevel_QuieterByLessThanTheLimit_FollowsTheLevel()
+    {
+        var vm = new PillViewModel();
+        vm.PushLevel(-20f); // 1.0
+
+        vm.PushLevel(-24f); // 0.92, a fall of 0.08
+
+        vm.Bars[^1].ShouldBe(0.92, 0.001);
+    }
+
+    [Fact]
+    public void PushLevel_Louder_RisesAtOnce()
+    {
+        var vm = new PillViewModel();
+        vm.PushLevel(-60f); // 0.2
+
+        vm.PushLevel(-20f);
+
+        vm.Bars[^1].ShouldBe(1.0, 0.001);
     }
 
     [Fact]

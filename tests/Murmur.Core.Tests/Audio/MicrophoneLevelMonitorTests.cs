@@ -131,6 +131,57 @@ public sealed class MicrophoneLevelMonitorTests
     }
 
     [Fact]
+    public void Start_LoudChunkBetweenPublishes_PublishesThePeak()
+    {
+        _monitor.Start(null);
+        Emit(Recorder(), Chunk(0.01f)); // published at once
+        _time.Advance(TimeSpan.FromMilliseconds(10));
+        Emit(Recorder(), Chunk(0.3f)); // a short peak, inside the 50 ms: held back
+        _time.Advance(TimeSpan.FromMilliseconds(10));
+        Emit(Recorder(), Chunk(0.01f));
+        _levels.Count.ShouldBe(1);
+
+        _time.Advance(TimeSpan.FromMilliseconds(30));
+        Emit(Recorder(), Chunk(0.01f)); // 50 ms since the last publish: the loudest chunk since then goes out
+
+        _levels.Count.ShouldBe(2);
+        _levels[1].ShouldBe(MicrophoneLevelMonitor.LevelFromDbfs(20 * Math.Log10(0.3)), 1e-3);
+    }
+
+    [Fact]
+    public void Start_PeakAlreadyPublished_IsNotPublishedAgain()
+    {
+        _monitor.Start(null);
+        Emit(Recorder(), Chunk(0.01f));
+        _time.Advance(TimeSpan.FromMilliseconds(10));
+        Emit(Recorder(), Chunk(0.3f));
+        _time.Advance(TimeSpan.FromMilliseconds(40));
+        Emit(Recorder(), Chunk(0.01f)); // publishes the peak
+
+        _time.Advance(TimeSpan.FromMilliseconds(50));
+        Emit(Recorder(), Chunk(0.01f)); // only the quiet chunk since then
+
+        _levels.Count.ShouldBe(3);
+        _levels[2].ShouldBe(MicrophoneLevelMonitor.LevelFromDbfs(20 * Math.Log10(0.01)), 1e-3);
+    }
+
+    [Fact]
+    public void Start_NewTest_DoesNotInheritThePeakOfThePreviousOne()
+    {
+        _monitor.Start(null);
+        Emit(Recorder(0), Chunk(0.01f));
+        _time.Advance(TimeSpan.FromMilliseconds(10));
+        Emit(Recorder(0), Chunk(0.3f)); // held back when the test is restarted
+
+        _monitor.Start(null);
+        _levels.Clear();
+        Emit(Recorder(1), Chunk(0.01f));
+
+        _levels.Count.ShouldBe(1);
+        _levels[0].ShouldBe(MicrophoneLevelMonitor.LevelFromDbfs(20 * Math.Log10(0.01)), 1e-3);
+    }
+
+    [Fact]
     public void Start_PublishNeverCompletes_DoesNotBlockTheCaptureThread()
     {
         _mediator.Publish(Arg.Any<MicLevelNotification>(), Arg.Any<CancellationToken>())

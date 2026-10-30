@@ -66,8 +66,10 @@
   </Window.Resources>
 
   <!-- The margin is transparent window area that the drop shadow is drawn into. The capsule is 30 DIPs high in every
-       mode, so CornerRadius 15 makes true semicircular ends (WPF scales a huge radius per axis into an ellipse). -->
+       mode, so CornerRadius 15 makes true semicircular ends (WPF scales a huge radius per axis into an ellipse).
+       Layout rounding puts the bars' edges on whole pixels, so they are not anti-aliased differently from frame to frame. -->
   <Border x:Name="Capsule"
+          UseLayoutRounding="True"
           Margin="{x:Static pill:PillWindow.ShadowMargin}"
           Padding="12,6"
           CornerRadius="15"

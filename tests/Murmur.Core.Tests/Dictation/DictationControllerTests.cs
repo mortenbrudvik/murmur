@@ -1325,12 +1325,79 @@ public sealed class DictationControllerTests : IDisposable
     [Fact]
     public void SamplesAvailable_PushesLevelsToThePill()
     {
-        _chunksOnStart = [Sine(milliseconds: 30, amplitude: 1f), Sine(milliseconds: 30, amplitude: 0.01f)];
+        // 50 ms is one window of 800 samples, so each chunk is one level: the RMS of the whole window.
+        _chunksOnStart = [Sine(milliseconds: 50, amplitude: 1f), Sine(milliseconds: 50, amplitude: 0.01f)];
 
         DownPastArmDelay();
 
         _pill.Received(1).PushLevel(Arg.Is<float>(db => Math.Abs(db - -3.01f) < 0.05f));
         _pill.Received(1).PushLevel(Arg.Is<float>(db => Math.Abs(db - -43.01f) < 0.05f));
+    }
+
+    [Fact]
+    public void SamplesAvailable_PushesOneLevelPer50msOfAudio()
+    {
+        _chunksOnStart = [];
+        DownPastArmDelay();
+
+        for (var i = 0; i < 5; i++)
+            RaiseSamples(Sine(milliseconds: 10, amplitude: 0.1f)); // the capture buffers are about this long
+        _pill.ReceivedWithAnyArgs(1).PushLevel(default);
+
+        for (var i = 0; i < 5; i++)
+            RaiseSamples(Sine(milliseconds: 10, amplitude: 0.1f));
+        _pill.ReceivedWithAnyArgs(2).PushLevel(default);
+    }
+
+    [Fact]
+    public void SamplesAvailable_LessThan50msOfAudio_PushesNothing()
+    {
+        _chunksOnStart = [];
+        DownPastArmDelay();
+
+        RaiseSamples(new float[799]);
+
+        _pill.DidNotReceiveWithAnyArgs().PushLevel(default);
+    }
+
+    [Fact]
+    public void SamplesAvailable_ChunkLongerThanTheWindow_PushesALevelPerWindow()
+    {
+        _chunksOnStart = [];
+        DownPastArmDelay();
+
+        RaiseSamples(Sine(milliseconds: 130, amplitude: 0.1f)); // two windows and a partial one
+
+        _pill.ReceivedWithAnyArgs(2).PushLevel(default);
+    }
+
+    [Fact]
+    public void SamplesAvailable_WindowStraddlesTwoChunks_PushesTheRmsOfTheWholeWindow()
+    {
+        _chunksOnStart = [];
+        DownPastArmDelay();
+
+        // Half the window at full scale and half at almost nothing: sqrt(0.5) is -3.01 dBFS.
+        RaiseSamples(Enumerable.Repeat(1f, 400).ToArray());
+        _pill.DidNotReceiveWithAnyArgs().PushLevel(default);
+        RaiseSamples(Enumerable.Repeat(0.001f, 400).ToArray());
+
+        _pill.Received(1).PushLevel(Arg.Is<float>(db => Math.Abs(db - -3.01f) < 0.05f));
+    }
+
+    [Fact]
+    public void SamplesAvailable_NewRecording_StartsAFreshWindow()
+    {
+        _chunksOnStart = [];
+        DownPastArmDelay();
+        RaiseSamples(Sine(milliseconds: 30, amplitude: 0.1f)); // 480 samples: part of a window when the recording ends
+        Signal(HotkeySignal.Escape);
+        Up();
+
+        DownPastArmDelay();
+        RaiseSamples(Sine(milliseconds: 30, amplitude: 0.1f)); // another 480 would complete the old recording's window
+
+        _pill.DidNotReceiveWithAnyArgs().PushLevel(default);
     }
 
     [Fact]
@@ -1472,7 +1539,7 @@ public sealed class DictationControllerTests : IDisposable
         _cues.DidNotReceive().PlayStart();
 
         ui.RunPending();
-        _pill.ReceivedWithAnyArgs(1).PushLevel(default);
+        _pill.ReceivedWithAnyArgs(6).PushLevel(default); // 300 ms of audio is six 50 ms bars
         _cues.Received(1).PlayStart();
 
         _keys.ClearReceivedCalls();

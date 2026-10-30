@@ -22,6 +22,10 @@ public sealed partial class PillViewModel : ObservableObject
     private const float MinDbfs = -60f;
     private const float MaxDbfs = -20f;
 
+    // A bar rises to its level at once but falls by no more than this from the one before, so a loud word dies away
+    // over a few bars instead of dropping to the minimum.
+    private const double MaxFall = 0.15;
+
     [ObservableProperty]
     private PillMode _mode = PillMode.Hidden;
 
@@ -31,11 +35,20 @@ public sealed partial class PillViewModel : ObservableObject
     /// <summary>Bar heights as a fraction (<see cref="MinBar"/> to <see cref="MaxBar"/>) of the full height, oldest first.</summary>
     public ObservableCollection<double> Bars { get; } = new(Enumerable.Repeat(MinBar, BarCount));
 
-    /// <summary>Adds a microphone level (RMS in dBFS) as the newest bar and drops the oldest.</summary>
+    /// <summary>
+    /// Adds a microphone level (RMS in dBFS) as the newest bar and drops the oldest. The bars shift one place in the
+    /// collection itself (it only raises Replace, never Remove and Add, so the view reuses its bar containers), and the
+    /// new bar is at most <see cref="MaxFall"/> lower than the one before.
+    /// </summary>
     public void PushLevel(float rmsDbfs)
     {
-        Bars.RemoveAt(0);
-        Bars.Add(ToBar(rmsDbfs));
+        var newest = Math.Max(ToBar(rmsDbfs), Bars[^1] - MaxFall);
+        for (var i = 0; i < Bars.Count - 1; i++)
+        {
+            Bars[i] = Bars[i + 1];
+        }
+
+        Bars[^1] = newest;
     }
 
     private static double ToBar(float rmsDbfs)
