@@ -11,14 +11,17 @@ Murmur goes on the same Partner Center account as Loadstone (Individual, publish
 
 ## The trap: reserve the name *before* building the package you submit
 
-**Not done yet.** `packaging/msix/AppxManifest.xml` holds one placeholder:
+**Done, 2026-10-30.** "Murmur" was taken, so the reserved name is **Murmur Voice Typing**, and the real
+values are in `packaging/msix/AppxManifest.xml` (both `DisplayName`s equal the reserved name; the tile
+`ShortName` and the app's own UI still say "Murmur"):
 
-| Field | Value now | Where the real value comes from |
-| --- | --- | --- |
-| `Package/Identity/Name` | `PLACEHOLDER.MortenBrudvik.Murmur` | Partner Center, when "Murmur" is reserved |
-| `Package/Identity/Publisher` | `CN=E6ED6F6D-88CB-42AC-BED3-B0FA24EC28DD` | The account's; the same for every app on it, copied from Loadstone |
-| `Package/Properties/PublisherDisplayName` | `Morten Brudvik` | The account's |
-| **Store ID** | none yet | Partner Center, at reservation; needed by `msstore publish` once the app is live |
+| Field | Value |
+| --- | --- |
+| `Package/Identity/Name` | `MortenBrudvik.MurmurVoiceTyping` |
+| `Package/Identity/Publisher` | `CN=E6ED6F6D-88CB-42AC-BED3-B0FA24EC28DD` |
+| `Package/Properties/PublisherDisplayName` | `Morten Brudvik` |
+| Package family name | `MortenBrudvik.MurmurVoiceTyping_x7deb10xce5bj` |
+| **Store ID** | `9N2FVKGMJQ5S` (<https://apps.microsoft.com/detail/9N2FVKGMJQ5S>) — needed by `msstore publish` once the app is live |
 
 Partner Center assigns the real `Name` **when the name is reserved**, and the package must already
 carry it when it is uploaded: a package with the placeholder is rejected on identity mismatch. So
@@ -41,9 +44,9 @@ These block a submission and none of them is Partner Center work:
 
 | Missing | Why it blocks | What it needs |
 | --- | --- | --- |
-| Privacy policy URL | Store policy 10.5.1 makes one mandatory for a desktop app regardless of what is collected, and Murmur uses the microphone | A draft is in `docs/store/privacy.html` (standalone, inline CSS). **Hosting is not decided.** This repository is private, so it cannot serve it; Loadstone's is served from the public `mortenbrudvik/loadstone-site` repo, which is one option. The draft also has a contact address placeholder (`CONTACT-EMAIL-TBD`) to fill before publishing |
+| ~~Privacy policy URL~~ **done** | Store policy 10.5.1 makes one mandatory for a desktop app regardless of what is collected, and Murmur uses the microphone | <https://brudvik.com/murmur/privacy> — live on the owner's homepage (`homepage-brudvik-com` repo, `public/murmur/privacy/index.html`); that file is the only copy, edit it there |
 | At least one screenshot | Every listing requires one | **Not captured.** 1920×1080 PNG, into `docs/store/screenshots/`. They **must not show the owner's real dictation history**: the History page lists every transcript, and the packaged build reads the same `%LOCALAPPDATA%\Murmur` as the unpackaged one, so capture from a clean data folder or with entries made up for the purpose. The pill (recording and transcribing) and the Settings page make good second and third shots |
-| Identity values | See above | Reserve "Murmur" (step 1 below). If it is taken, **stop and ask** |
+| ~~Identity values~~ **done** | See above | Reserved 2026-10-30 as "Murmur Voice Typing" |
 
 ## What to do in Partner Center
 
@@ -142,7 +145,7 @@ prompt to.
   - Requires the Microsoft Edge WebView2 Runtime for the main window. It is part of Windows 11 and
     current Windows 10; Murmur says so if it is missing.
 - **Screenshots:** the ones captured above.
-- **Privacy policy URL:** wherever `docs/store/privacy.html` ends up being hosted.
+- **Privacy policy URL:** `https://brudvik.com/murmur/privacy`
 
 ### 5. Age rating
 
@@ -205,8 +208,8 @@ The staged layout was registered with `Add-AppxPackage -Register` and launched f
 1. Stop any unpackaged Murmur first (`Stop-Process -Name Murmur.UI`). The single-instance mutex is
    shared across both channels, so a packaged copy started next to it only signals it and exits.
 2. `Add-AppxPackage -Register C:\code\projects\murmur\packaging\msix\staging\AppxManifest.xml`, then
-   `(Get-AppxPackage PLACEHOLDER.MortenBrudvik.Murmur).PackageFamilyName` for the AUMID.
-3. Afterwards: stop it, `Get-AppxPackage PLACEHOLDER.MortenBrudvik.Murmur | Remove-AppxPackage`,
+   `(Get-AppxPackage MortenBrudvik.MurmurVoiceTyping).PackageFamilyName` for the AUMID.
+3. Afterwards: stop it, `Get-AppxPackage MortenBrudvik.MurmurVoiceTyping | Remove-AppxPackage`,
    and restart the unpackaged build. A registered layout keeps its staging folder in use, so
    `build-msix.ps1` cannot rebuild until the package is removed.
 

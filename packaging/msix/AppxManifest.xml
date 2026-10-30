@@ -8,18 +8,19 @@
 
   <!-- Name, Publisher and PublisherDisplayName come verbatim from Partner Center's "Product identity" page. They are
        case- and punctuation-sensitive and a mismatch is rejected at upload. Publisher is the account's, shared with
-       Loadstone; Name is a placeholder until "Murmur" is reserved (see docs/store-submission-runbook.md), and
-       build/build-msix.ps1 warns for as long as it is.
+       Loadstone. "Murmur" was taken in the Store, so the reserved name is "Murmur Voice Typing" (reserved
+       2026-10-30, Store ID 9N2FVKGMJQ5S); both DisplayNames must equal it, while the tile ShortName and the app's
+       own UI keep saying "Murmur".
        Version is kept in step with version.json by hand - there is no version-manager script - and build-msix.ps1
        refuses to pack when the two disagree. Its fourth field is reserved for the Store and must stay 0. -->
   <Identity
-      Name="PLACEHOLDER.MortenBrudvik.Murmur"
+      Name="MortenBrudvik.MurmurVoiceTyping"
       Publisher="CN=E6ED6F6D-88CB-42AC-BED3-B0FA24EC28DD"
       Version="1.0.0.0"
       ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>Murmur</DisplayName>
+    <DisplayName>Murmur Voice Typing</DisplayName>
     <PublisherDisplayName>Morten Brudvik</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -40,7 +41,7 @@
       <!-- A normal list entry and tile on purpose: AppListEntry="none" would leave a tray app with nothing a Store
            reviewer can launch from the Start menu. -->
       <uap:VisualElements
-          DisplayName="Murmur"
+          DisplayName="Murmur Voice Typing"
           Description="Voice typing for Windows: hold a hotkey, talk, and the text lands in the app you are using. Speech recognition runs locally on your PC."
           BackgroundColor="transparent"
           Square150x150Logo="Assets\Square150x150Logo.png"
