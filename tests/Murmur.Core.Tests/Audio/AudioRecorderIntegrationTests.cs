@@ -22,10 +22,18 @@ public sealed class AudioRecorderIntegrationTests(ITestOutputHelper output)
         var recorder = new AudioRecorder();
         SkipWithoutMicrophone(recorder);
 
+        // The 2 s are timed from the first buffer, not from Start: a Bluetooth headset can take a second
+        // to switch to its hands-free profile before any audio arrives, and that start-up time is
+        // StartLatency_Under150ms's business, not this test's.
+        using var firstBuffer = new ManualResetEventSlim();
+        recorder.SamplesAvailable += _ => firstBuffer.Set();
+        var started = System.Diagnostics.Stopwatch.StartNew();
         recorder.Start(null);
         float[] samples;
         try
         {
+            firstBuffer.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).ShouldBeTrue("no audio arrived within 10 s");
+            output.WriteLine($"First audio after {started.ElapsedMilliseconds} ms.");
             Thread.Sleep(2000);
         }
         finally
@@ -33,7 +41,7 @@ public sealed class AudioRecorderIntegrationTests(ITestOutputHelper output)
             samples = recorder.Stop();
         }
 
-        output.WriteLine($"Recorded {samples.Length} samples in ~2 s.");
+        output.WriteLine($"Recorded {samples.Length} samples in ~2 s of capture.");
         samples.Length.ShouldBeInRange(32000 - 3200, 32000 + 3200);
     }
 
