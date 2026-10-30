@@ -42,7 +42,7 @@ public sealed class HistoryStoreTests : IDisposable
         _time.Advance(TimeSpan.FromSeconds(1));
         store.Add("two", "app", pasted: true);
 
-        store.Query(null, 10).Select(e => e.Text).ShouldBe(["two", "one"]);
+        store.Query(null, 10, null).Entries.Select(e => e.Text).ShouldBe(["two", "one"]);
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class HistoryStoreTests : IDisposable
     {
         var added = CreateStore().Add("persisted", "code.exe", pasted: false);
 
-        var loaded = CreateStore().Query(null, 10).Single();
+        var loaded = CreateStore().Query(null, 10, null).Entries.Single();
 
         loaded.ShouldBe(added);
     }
@@ -62,7 +62,7 @@ public sealed class HistoryStoreTests : IDisposable
         store.Add("Hello World", "app", pasted: true);
         store.Add("bye", "app", pasted: true);
 
-        store.Query("WORLD", 10).Single().Text.ShouldBe("Hello World");
+        store.Query("WORLD", 10, null).Entries.Single().Text.ShouldBe("Hello World");
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public sealed class HistoryStoreTests : IDisposable
         store.Add("a", "app", pasted: true);
         store.Add("b", "app", pasted: true);
 
-        store.Query("  ", 10).Count.ShouldBe(2);
+        store.Query("  ", 10, null).Entries.Count.ShouldBe(2);
     }
 
     [Fact]
@@ -85,10 +85,188 @@ public sealed class HistoryStoreTests : IDisposable
             _time.Advance(TimeSpan.FromSeconds(1));
         }
 
-        var result = store.Query(null, 2);
+        var result = store.Query(null, 2, null);
 
-        result.Count.ShouldBe(2);
-        result.Select(e => e.Text).ShouldBe(["entry 4", "entry 3"]);
+        result.Entries.Count.ShouldBe(2);
+        result.Entries.Select(e => e.Text).ShouldBe(["entry 4", "entry 3"]);
+    }
+
+    private HistoryEntry[] AddEntries(HistoryStore store, int count, string prefix = "entry")
+    {
+        var added = new HistoryEntry[count];
+        for (var i = 0; i < count; i++)
+        {
+            added[i] = store.Add($"{prefix} {i}", "app", pasted: true);
+            _time.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        return added;
+    }
+
+    [Fact]
+    public void Query_Before_ReturnsTheNextOlderPage()
+    {
+        var store = CreateStore();
+        AddEntries(store, 5);
+
+        var first = store.Query(null, 2, null);
+        var second = store.Query(null, 2, first.Entries[^1].Id);
+
+        first.Entries.Select(e => e.Text).ShouldBe(["entry 4", "entry 3"]);
+        first.HasMore.ShouldBeTrue();
+        second.Entries.Select(e => e.Text).ShouldBe(["entry 2", "entry 1"]);
+        second.HasMore.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Query_LastPage_ReportsNoMore()
+    {
+        var store = CreateStore();
+        AddEntries(store, 5);
+
+        var first = store.Query(null, 2, null);
+        var second = store.Query(null, 2, first.Entries[^1].Id);
+        var last = store.Query(null, 2, second.Entries[^1].Id);
+
+        last.Entries.Select(e => e.Text).ShouldBe(["entry 0"]);
+        last.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_ExactlyOnePageOfEntries_ReportsNoMore()
+    {
+        var store = CreateStore();
+        AddEntries(store, 3);
+
+        var page = store.Query(null, 3, null);
+
+        page.Entries.Count.ShouldBe(3);
+        page.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_Empty_ReportsNoMore()
+    {
+        var page = CreateStore().Query(null, 200, null);
+
+        page.Entries.ShouldBeEmpty();
+        page.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_Before_IsStableWhenNewEntriesArrive()
+    {
+        var store = CreateStore();
+        AddEntries(store, 5);
+        var first = store.Query(null, 2, null);
+
+        // Dictations made while the user is reading page 1 must not shift page 2.
+        AddEntries(store, 3, "late");
+        var second = store.Query(null, 2, first.Entries[^1].Id);
+        var third = store.Query(null, 2, second.Entries[^1].Id);
+
+        var seen = first.Entries.Concat(second.Entries).Concat(third.Entries).Select(e => e.Text).ToList();
+        seen.ShouldBe(["entry 4", "entry 3", "entry 2", "entry 1", "entry 0"]);
+        third.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_Before_TiedTimestamps_NeitherRepeatsNorSkips()
+    {
+        var store = CreateStore();
+        for (var i = 0; i < 5; i++)
+            store.Add($"entry {i}", "app", pasted: true); // the clock never moves, so every timestamp is equal
+
+        var first = store.Query(null, 2, null);
+        var second = store.Query(null, 2, first.Entries[^1].Id);
+        var third = store.Query(null, 2, second.Entries[^1].Id);
+
+        first.Entries.Concat(second.Entries).Concat(third.Entries).Select(e => e.Text)
+            .ShouldBe(["entry 4", "entry 3", "entry 2", "entry 1", "entry 0"]);
+    }
+
+    [Fact]
+    public void Query_Before_AppliesTheSearchWithinTheOlderEntries()
+    {
+        var store = CreateStore();
+        foreach (var text in new[] { "cat one", "dog one", "cat two", "dog two", "cat three" })
+        {
+            store.Add(text, "app", pasted: true);
+            _time.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        var first = store.Query("cat", 1, null);
+        var second = store.Query("cat", 1, first.Entries[^1].Id);
+        var third = store.Query("cat", 1, second.Entries[^1].Id);
+
+        first.Entries.Single().Text.ShouldBe("cat three");
+        first.HasMore.ShouldBeTrue();
+        second.Entries.Single().Text.ShouldBe("cat two");
+        second.HasMore.ShouldBeTrue();
+        third.Entries.Single().Text.ShouldBe("cat one");
+        third.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_Before_AnEntryThatDoesNotMatchTheSearch_StillMarksThePosition()
+    {
+        var store = CreateStore();
+        var added = AddEntries(store, 4); // entry 0 .. entry 3
+
+        // The cursor is entry 2, which "entry 1" does not match; the search resumes just below it all the same.
+        var page = store.Query("entry 1", 10, added[2].Id);
+
+        page.Entries.Select(e => e.Text).ShouldBe(["entry 1"]);
+        page.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_Before_UnknownId_ReturnsAnEmptyPageWithoutThrowing()
+    {
+        var store = CreateStore();
+        AddEntries(store, 3);
+
+        var page = store.Query(null, 2, Guid.NewGuid());
+
+        page.Entries.ShouldBeEmpty();
+        page.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_Before_TheEntryWasDeletedMeanwhile_ReturnsAnEmptyPageWithoutThrowing()
+    {
+        var store = CreateStore();
+        var added = AddEntries(store, 3);
+        store.Delete(added[1].Id).ShouldBeTrue();
+
+        var page = store.Query(null, 2, added[1].Id);
+
+        page.Entries.ShouldBeEmpty();
+        page.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_Before_TheOldestEntry_ReturnsAnEmptyPage()
+    {
+        var store = CreateStore();
+        var added = AddEntries(store, 3);
+
+        var page = store.Query(null, 2, added[0].Id);
+
+        page.Entries.ShouldBeEmpty();
+        page.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Query_ZeroLimit_ReturnsNoEntriesButSaysThereAreMore()
+    {
+        var store = CreateStore();
+        AddEntries(store, 2);
+
+        var page = store.Query(null, 0, null);
+
+        page.Entries.ShouldBeEmpty();
+        page.HasMore.ShouldBeTrue();
     }
 
     [Fact]
@@ -101,7 +279,7 @@ public sealed class HistoryStoreTests : IDisposable
         store.Delete(drop.Id).ShouldBeTrue();
         store.Delete(Guid.NewGuid()).ShouldBeFalse();
 
-        var reloaded = CreateStore().Query(null, 10);
+        var reloaded = CreateStore().Query(null, 10, null).Entries;
         reloaded.Select(e => e.Id).ShouldBe([keep.Id]);
         File.Exists(_paths.HistoryFile + ".tmp").ShouldBeFalse();
     }
@@ -115,8 +293,8 @@ public sealed class HistoryStoreTests : IDisposable
 
         store.Clear();
 
-        store.Query(null, 10).ShouldBeEmpty();
-        CreateStore().Query(null, 10).ShouldBeEmpty();
+        store.Query(null, 10, null).Entries.ShouldBeEmpty();
+        CreateStore().Query(null, 10, null).Entries.ShouldBeEmpty();
     }
 
     [Fact]
@@ -128,7 +306,7 @@ public sealed class HistoryStoreTests : IDisposable
 
         store.Add("new", "app", pasted: true);
 
-        CreateStore().Query(null, 10).Select(e => e.Text).ShouldBe(["new"]);
+        CreateStore().Query(null, 10, null).Entries.Select(e => e.Text).ShouldBe(["new"]);
     }
 
     [Fact]
@@ -145,7 +323,7 @@ public sealed class HistoryStoreTests : IDisposable
         Directory.CreateDirectory(_root);
         File.WriteAllLines(_paths.HistoryFile, [JsonUtils.Serialize(first), "garbage", "", JsonUtils.Serialize(second)]);
 
-        var entries = CreateStore().Query(null, 10);
+        var entries = CreateStore().Query(null, 10, null).Entries;
 
         entries.Count.ShouldBe(2);
         entries.Select(e => e.Text).ShouldBe(["second", "first"]);
@@ -162,7 +340,7 @@ public sealed class HistoryStoreTests : IDisposable
         _time.Advance(TimeSpan.FromSeconds(1));
         store.Add("second", "app", pasted: true);
 
-        CreateStore().Query(null, 10).Select(e => e.Text).ShouldBe(["second", "first"]);
+        CreateStore().Query(null, 10, null).Entries.Select(e => e.Text).ShouldBe(["second", "first"]);
     }
 
     [Fact]
@@ -172,7 +350,7 @@ public sealed class HistoryStoreTests : IDisposable
         Directory.CreateDirectory(_root);
         File.WriteAllLines(_paths.HistoryFile, ["{}", "null", JsonUtils.Serialize(valid)]);
 
-        CreateStore().Query(null, 10).Select(e => e.Text).ShouldBe(["valid"]);
+        CreateStore().Query(null, 10, null).Entries.Select(e => e.Text).ShouldBe(["valid"]);
     }
 
     [Fact]
@@ -186,7 +364,7 @@ public sealed class HistoryStoreTests : IDisposable
         _time.Advance(TimeSpan.FromSeconds(1));
         store.Add("second", "app", pasted: true);
 
-        CreateStore().Query(null, 10).Select(e => e.Text).ShouldBe(["second", "first"]);
+        CreateStore().Query(null, 10, null).Entries.Select(e => e.Text).ShouldBe(["second", "first"]);
     }
 
     [Fact]
@@ -195,7 +373,7 @@ public sealed class HistoryStoreTests : IDisposable
         const string text = "line one\nline two \"quoted\" — café 日本語";
         CreateStore().Add(text, "app", pasted: true);
 
-        CreateStore().Query(null, 10).Single().Text.ShouldBe(text);
+        CreateStore().Query(null, 10, null).Entries.Single().Text.ShouldBe(text);
         File.ReadAllLines(_paths.HistoryFile).Length.ShouldBe(1);
     }
 }

@@ -8,7 +8,7 @@ import { useHotkeyName } from "./useHotkeyName";
 export default function HistoryPage() {
   const [search, setSearch] = useState("");
   const [confirmingClear, setConfirmingClear] = useState(false);
-  const { entries, loading, error, remove, clearAll } = useHistory(search);
+  const { entries, loading, loadingOlder, hasMore, error, loadOlder, remove, clearAll } = useHistory(search);
   const hotkeyName = useHotkeyName();
 
   const groups = useMemo(() => groupByDay(entries, new Date()), [entries]);
@@ -69,6 +69,17 @@ export default function HistoryPage() {
             </ul>
           </section>
         ))}
+
+        {hasMore && entries.length > 0 && (
+          <button
+            type="button"
+            className="history-older"
+            disabled={loading || loadingOlder}
+            onClick={() => void loadOlder()}
+          >
+            Show older
+          </button>
+        )}
 
         {showEmpty && (
           <p className="history-empty">

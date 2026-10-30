@@ -34,6 +34,12 @@ export interface HistoryEntry {
   pasted: boolean;
 }
 
+/** One page of history, newest first; `hasMore` says whether older entries remain. */
+export interface HistoryPageResult {
+  entries: HistoryEntry[];
+  hasMore: boolean;
+}
+
 export interface MicrophoneInfo {
   id: string;
   name: string;

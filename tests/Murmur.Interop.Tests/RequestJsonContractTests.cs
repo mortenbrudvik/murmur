@@ -57,7 +57,7 @@ public class RequestJsonContractTests
     {
         var request = (GetHistoryRequest?)JsonUtils.Deserialize("{}", typeof(GetHistoryRequest));
 
-        request.ShouldBe(new GetHistoryRequest(null, 200));
+        request.ShouldBe(new GetHistoryRequest(null, 200, null));
     }
 
     [Fact]
@@ -66,6 +66,37 @@ public class RequestJsonContractTests
         var request = (GetHistoryRequest?)JsonUtils.Deserialize("""{"search":"abc","limit":50}""", typeof(GetHistoryRequest));
 
         request.ShouldBe(new GetHistoryRequest("abc", 50));
+    }
+
+    [Fact]
+    public void GetHistoryRequest_ReadsTheBeforeCursorFromAString()
+    {
+        var before = Guid.NewGuid();
+
+        var request = (GetHistoryRequest?)JsonUtils.Deserialize(
+            $$"""{"search":"","limit":200,"before":"{{before}}"}""", typeof(GetHistoryRequest));
+
+        request.ShouldBe(new GetHistoryRequest("", 200, before));
+    }
+
+    [Fact]
+    public void GetHistoryRequest_NullBefore_MeansTheFirstPage()
+    {
+        var request = (GetHistoryRequest?)JsonUtils.Deserialize("""{"before":null}""", typeof(GetHistoryRequest));
+
+        request.ShouldBe(new GetHistoryRequest(null, 200, null));
+    }
+
+    [Fact]
+    public void HistoryPageResult_SerializesAsEntriesAndHasMore()
+    {
+        var id = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var entry = new HistoryEntry(id, new DateTimeOffset(2026, 10, 30, 8, 15, 0, TimeSpan.Zero), "hello", "notepad.exe", true);
+
+        var json = JsonUtils.Serialize(new HistoryPageResult([entry], HasMore: true));
+
+        json.ShouldContain("\"entries\":[{\"id\":\"11111111-2222-3333-4444-555555555555\"");
+        json.ShouldContain("\"hasMore\":true");
     }
 
     [Fact]

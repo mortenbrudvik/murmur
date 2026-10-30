@@ -148,6 +148,10 @@ public partial class App : Application
         registry.Register<RestartAppRequest>("app", "restart");
         registry.Register<GetInputStatusRequest>("app", "getInputStatus");
 
+        // The history file is read on first use, and the first dictation of a sign-in start would otherwise wait for
+        // that read; touching the store here does it off the UI thread while the rest of start-up goes on.
+        PreloadHistoryAsync(_container.Resolve<IHistoryStore>()).FireAndForget();
+
         // 6. The theme is fixed to dark and applied before any window is created to avoid a flicker.
         ApplicationThemeManager.Apply(ApplicationTheme.Dark);
 
@@ -201,6 +205,22 @@ public partial class App : Application
         // 13. Started at sign-in, Murmur stays in the tray.
         if (!IsSignInStart(launch, identity))
             ShowMainWindow();
+    }
+
+    /// <summary>
+    /// Reads the history file into memory. A failure is only logged: the store retries the read on its next use, and
+    /// reports the failure to whoever asks for it then.
+    /// </summary>
+    private static async Task PreloadHistoryAsync(IHistoryStore history)
+    {
+        try
+        {
+            await Task.Run(() => history.Query(null, 1, null));
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not pre-load the history; it will be read when first needed");
+        }
     }
 
     /// <summary>

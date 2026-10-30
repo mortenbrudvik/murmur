@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import HistoryPage from "../HistoryPage";
 import { apiClient } from "../../../interop/WebViewApiClient";
-import type { HistoryEntry, MurmurSettings } from "../../../types/domain";
+import type { HistoryEntry, HistoryPageResult, MurmurSettings } from "../../../types/domain";
 
 vi.mock("../../../interop/WebViewApiClient", () => ({
   apiClient: {
@@ -30,7 +30,7 @@ function mockApi(entries: HistoryEntry[], overrides: Record<string, () => unknow
   vi.mocked(apiClient.call).mockImplementation(async (service, method) => {
     const key = `${service}.${method}`;
     if (overrides[key]) return overrides[key]();
-    if (key === "history.get") return entries;
+    if (key === "history.get") return { entries, hasMore: false } satisfies HistoryPageResult;
     if (key === "settings.get") return settings;
     return true;
   });
@@ -202,5 +202,104 @@ describe("HistoryPage", () => {
     fireEvent.change(screen.getByPlaceholderText("Search…"), { target: { value: "zzz" } });
 
     expect(await screen.findByText("No dictations match “zzz”.")).toBeTruthy();
+  });
+
+  describe("older pages", () => {
+    /** A history.get that answers the first page, then the page below the entry named by `before`. */
+    function mockPages(first: HistoryPageResult, older: Record<string, HistoryPageResult>) {
+      vi.mocked(apiClient.call).mockImplementation(async (service, method, params) => {
+        const key = `${service}.${method}`;
+        if (key === "history.get") {
+          const before = (params as { before?: string } | undefined)?.before;
+          return before === undefined ? first : older[before];
+        }
+        if (key === "settings.get") return settings;
+        return true;
+      });
+    }
+
+    it("shows no Show older button when there is nothing older", async () => {
+      mockApi([todayEntry("a", 10, 0)]);
+
+      render(<HistoryPage />);
+      await screen.findByText("text a");
+
+      expect(screen.queryByRole("button", { name: "Show older" })).toBeNull();
+    });
+
+    it("shows a Show older button under the list while there is more", async () => {
+      mockPages({ entries: [todayEntry("a", 10, 0)], hasMore: true }, {});
+
+      render(<HistoryPage />);
+
+      const button = await screen.findByRole("button", { name: "Show older" });
+      const card = screen.getByText("text a");
+      expect(card.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("Show older appends the next page", async () => {
+      mockPages(
+        { entries: [todayEntry("a", 10, 0), todayEntry("b", 9, 0)], hasMore: true },
+        { b: { entries: [todayEntry("c", 8, 0)], hasMore: false } },
+      );
+
+      render(<HistoryPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show older" }));
+
+      expect(await screen.findByText("text c")).toBeTruthy();
+      expect(screen.getByText("text a")).toBeTruthy();
+      expect(screen.getByText("text b")).toBeTruthy();
+      expect(apiClient.call).toHaveBeenCalledWith("history", "get", { search: "", limit: 200, before: "b" });
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Show older" })).toBeNull());
+    });
+
+    it("keeps Show older while the page loaded still has more behind it", async () => {
+      mockPages(
+        { entries: [todayEntry("a", 10, 0)], hasMore: true },
+        { a: { entries: [todayEntry("b", 9, 0)], hasMore: true } },
+      );
+
+      render(<HistoryPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show older" }));
+      await screen.findByText("text b");
+
+      expect(screen.getByRole("button", { name: "Show older" })).toBeTruthy();
+    });
+
+    it("a live entry does not drop the older entries on screen", async () => {
+      mockPages(
+        { entries: [todayEntry("a", 10, 0)], hasMore: true },
+        { a: { entries: [todayEntry("b", 9, 0)], hasMore: false } },
+      );
+
+      render(<HistoryPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show older" }));
+      await screen.findByText("text b");
+
+      pushAdded(todayEntry("fresh", 11, 0, { text: "just dictated" }));
+
+      expect(await screen.findByText("just dictated")).toBeTruthy();
+      expect(screen.getByText("text a")).toBeTruthy();
+      expect(screen.getByText("text b")).toBeTruthy();
+    });
+
+    it("shows an error and keeps the button when the older page cannot be loaded", async () => {
+      vi.mocked(apiClient.call).mockImplementation(async (service, method, params) => {
+        const key = `${service}.${method}`;
+        if (key === "settings.get") return settings;
+        if (key === "history.get") {
+          if ((params as { before?: string } | undefined)?.before !== undefined) throw new Error("locked");
+          return { entries: [todayEntry("a", 10, 0)], hasMore: true };
+        }
+        return true;
+      });
+
+      render(<HistoryPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show older" }));
+
+      expect((await screen.findByRole("alert")).textContent).toMatch(/older/i);
+      expect(screen.getByText("text a")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Show older" })).toBeTruthy();
+    });
   });
 });

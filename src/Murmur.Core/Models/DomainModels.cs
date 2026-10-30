@@ -106,6 +106,9 @@ public sealed record Vocabulary(IReadOnlyList<string> HintWords, IReadOnlyList<R
 
 public sealed record HistoryEntry(Guid Id, DateTimeOffset Timestamp, string Text, string TargetApp, bool Pasted);
 
+/// <summary>One page of history, newest first; <paramref name="HasMore"/> says whether older entries remain.</summary>
+public sealed record HistoryPageResult(IReadOnlyList<HistoryEntry> Entries, bool HasMore);
+
 public sealed record MicrophoneInfo(string Id, string Name, bool IsDefault);
 
 public enum EngineState

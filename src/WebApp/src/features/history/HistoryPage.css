@@ -209,6 +209,28 @@
   background: rgba(255, 107, 107, 0.12);
 }
 
+.history-older {
+  display: block;
+  margin: 14px auto 0;
+  padding: 6px 16px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.history-older:hover:not(:disabled) {
+  background: rgba(143, 179, 255, 0.12);
+}
+
+.history-older:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
 .history-empty {
   margin-top: 40px;
   text-align: center;

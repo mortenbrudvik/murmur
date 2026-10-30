@@ -44,7 +44,8 @@ function mockServer(status: EngineStatus, setup: SetupState = setupDone, input: 
     if (key === "app.getInputStatus") return input;
     if (key === "settings.get") return settings;
     if (key === "vocabulary.get") return vocabulary;
-    if (key === "settings.getMicrophones" || key === "history.get") return [];
+    if (key === "history.get") return { entries: [], hasMore: false };
+    if (key === "settings.getMicrophones") return [];
     return null;
   });
 }

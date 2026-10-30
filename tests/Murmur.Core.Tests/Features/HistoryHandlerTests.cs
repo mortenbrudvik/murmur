@@ -16,12 +16,13 @@ public sealed class HistoryHandlerTests
     public async Task GetHistory_PassesSearchAndLimit()
     {
         var entries = new[] { new HistoryEntry(Guid.NewGuid(), DateTimeOffset.UtcNow, "abc def", "notepad.exe", true) };
-        _history.Query("abc", 50).Returns(entries);
+        var page = new HistoryPageResult(entries, HasMore: true);
+        _history.Query("abc", 50, null).Returns(page);
 
         var result = await new GetHistoryHandler(_history).Handle(new GetHistoryRequest("abc", 50), CancellationToken.None);
 
-        result.ShouldBe(entries);
-        _history.Received(1).Query("abc", 50);
+        result.ShouldBe(page);
+        _history.Received(1).Query("abc", 50, null);
     }
 
     [Fact]
@@ -29,7 +30,21 @@ public sealed class HistoryHandlerTests
     {
         await new GetHistoryHandler(_history).Handle(new GetHistoryRequest(), CancellationToken.None);
 
-        _history.Received(1).Query(null, 200);
+        _history.Received(1).Query(null, 200, null);
+    }
+
+    [Fact]
+    public async Task GetHistory_PassesTheCursor()
+    {
+        var before = Guid.NewGuid();
+        var page = new HistoryPageResult([], HasMore: false);
+        _history.Query("abc", 200, before).Returns(page);
+
+        var result = await new GetHistoryHandler(_history)
+            .Handle(new GetHistoryRequest("abc", Before: before), CancellationToken.None);
+
+        result.ShouldBe(page);
+        _history.Received(1).Query("abc", 200, before);
     }
 
     [Fact]

@@ -38,15 +38,40 @@ public sealed class HistoryStore(MurmurPaths paths, TimeProvider time) : IHistor
         }
     }
 
-    public IReadOnlyList<HistoryEntry> Query(string? search, int limit)
+    public HistoryPageResult Query(string? search, int limit, Guid? before)
     {
         lock (_lock)
         {
-            var newestFirst = EnsureLoaded().AsEnumerable().Reverse();
-            if (!string.IsNullOrWhiteSpace(search))
-                newestFirst = newestFirst.Where(e => e.Text.Contains(search, StringComparison.OrdinalIgnoreCase));
+            var entries = EnsureLoaded();
 
-            return newestFirst.Take(limit).ToList();
+            // The cursor is a position, not a time: entries are only ever appended, so everything below the cursor's
+            // index is unchanged by later Adds, and entries sharing a timestamp stay in order.
+            var end = entries.Count;
+            if (before is { } cursor)
+            {
+                end = entries.FindIndex(e => e.Id == cursor);
+                if (end < 0)
+                    return new HistoryPageResult([], HasMore: false);
+            }
+
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
+            var page = new List<HistoryEntry>();
+            limit = Math.Max(limit, 0);
+
+            for (var i = end - 1; i >= 0; i--)
+            {
+                var entry = entries[i];
+                if (hasSearch && !entry.Text.Contains(search!, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // One match past the page is all it takes to know there is more.
+                if (page.Count == limit)
+                    return new HistoryPageResult(page, HasMore: true);
+
+                page.Add(entry);
+            }
+
+            return new HistoryPageResult(page, HasMore: false);
         }
     }
 
