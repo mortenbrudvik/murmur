@@ -52,6 +52,33 @@ public sealed class Resampler16kTests
     }
 
     [Fact]
+    public void Resampler_8kTo16k_KeepsEveryChunk()
+    {
+        // Bluetooth hands-free microphones run at 8 kHz: upsampling must produce twice as many samples as it is given.
+        const int rate = 8000;
+        var input = new float[3 * rate];
+        Sine(rate, 1000, 0.5f, rate).CopyTo(input, 2 * rate); // silent for 2 s, then a tone in the last second
+
+        var output = ProcessInChunks(new Resampler16k(rate), input, chunks: 300); // 10 ms chunks
+
+        // The sinc filter holds back its last ~33 input samples until more audio arrives (4 ms at 8 kHz, which is
+        // ~66 output samples), so allow 64 *input* samples short rather than 64 output samples.
+        output.Length.ShouldBeInRange(48000 - 2 * 64, 48000 + 64);
+        Rms(output[^16000..]).ShouldBe(0.5 / Math.Sqrt(2), tolerance: 0.5 / Math.Sqrt(2) * 0.1);
+    }
+
+    [Fact]
+    public void Resampler_11k025To16k_Length()
+    {
+        const int rate = 11025;
+
+        var output = ProcessInChunks(new Resampler16k(rate), Sine(rate, 1000, 0.5f, 3 * rate), chunks: 300);
+
+        output.Length.ShouldBeInRange(48000 - 64, 48000 + 64);
+        Rms(output[^16000..]).ShouldBe(0.5 / Math.Sqrt(2), tolerance: 0.5 / Math.Sqrt(2) * 0.1);
+    }
+
+    [Fact]
     public void Resampler_ToneAboveNewNyquist_IsAttenuated()
     {
         // 12 kHz is above the 8 kHz Nyquist of 16 kHz audio; without low-pass filtering it would alias to 4 kHz.

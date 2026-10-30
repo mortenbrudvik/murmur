@@ -21,15 +21,19 @@ public sealed class Resampler16k(int sourceRate)
         if (_resampler is null)
             return mono.ToArray();
 
-        // Input driven: tell the resampler how many samples we are about to give it, and it says how many
-        // output samples that yields.
-        var maxOutput = _resampler.ResamplePrepare(mono.Length, 1, out var inBuffer, out var inOffset);
+        // Input driven: ResamplePrepare takes (and returns) the number of input samples we are about to give it.
+        var inputCount = _resampler.ResamplePrepare(mono.Length, 1, out var inBuffer, out var inOffset);
         mono.CopyTo(inBuffer.AsSpan(inOffset));
 
-        var output = new float[maxOutput];
-        var produced = _resampler.ResampleOut(output, 0, mono.Length, maxOutput, 1);
+        // The output room must be sized for the rate change: upsampling (an 8 kHz Bluetooth headset) yields more
+        // samples than it is given, and ResampleOut stops at the capacity it is told about.
+        var output = new float[MaxOutputFor(inputCount)];
+        var produced = _resampler.ResampleOut(output, 0, inputCount, output.Length, 1);
         return produced == output.Length ? output : output[..produced];
     }
+
+    /// <summary>The most output samples <paramref name="inputCount"/> input samples can yield, with headroom for the carried fractional position.</summary>
+    private int MaxOutputFor(int inputCount) => (int)Math.Ceiling((double)inputCount * TargetRate / sourceRate) + 8;
 
     private static WdlResampler? CreateResampler(int sourceRate)
     {
