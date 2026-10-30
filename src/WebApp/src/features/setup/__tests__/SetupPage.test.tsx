@@ -157,6 +157,48 @@ describe("SetupPage", () => {
     });
   });
 
+  describe("keyboard focus", () => {
+    it("leaves the focus alone on the first render of the page", async () => {
+      renderPage({ state: microphoneStep });
+      await screen.findByText("✓ Microphone access allowed");
+
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    it("Next moves focus to the new step's heading", async () => {
+      const update = vi.fn<Update>().mockResolvedValue(undefined);
+      const view = renderPage({ update });
+      const next = screen.getByRole("button", { name: "Next" });
+      next.focus();
+      expect(document.activeElement).toBe(next);
+
+      fireEvent.click(next);
+      view.rerender(<SetupPage state={microphoneStep} engineStatus={downloading} update={update} onDone={() => undefined} />);
+
+      const microphone = await screen.findByRole("heading", { name: "Check your microphone" });
+      expect(document.activeElement).toBe(microphone);
+      expect(microphone.getAttribute("tabindex")).toBe("-1");
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      view.rerender(<SetupPage state={tryItStep} engineStatus={ready} update={update} onDone={() => undefined} />);
+
+      const tryIt = await screen.findByRole("heading", { name: "Try it" });
+      expect(document.activeElement).toBe(tryIt);
+      expect(tryIt.getAttribute("tabindex")).toBe("-1");
+    });
+
+    it("does not move the focus again when only the engine status changes", async () => {
+      const update = vi.fn<Update>().mockResolvedValue(undefined);
+      const view = renderPage({ state: tryItStep, engineStatus: loading, update });
+      const done = screen.getByRole("button", { name: "Done" });
+      done.focus();
+
+      view.rerender(<SetupPage state={tryItStep} engineStatus={ready} update={update} onDone={() => undefined} />);
+
+      expect(document.activeElement).toBe(done);
+    });
+  });
+
   describe("step 1, the speech model", () => {
     it("explains what is needed and how big it is", () => {
       renderPage();
@@ -367,6 +409,36 @@ describe("SetupPage", () => {
       expect(callsTo("settings.update")[0][2]).toEqual({ ...stored, microphoneId: "headset" });
     });
 
+    it("announces the microphone status in a polite live region that is there before the answer", async () => {
+      renderPage({ state: microphoneStep });
+      const region = await screen.findByRole("status");
+      expect(region.getAttribute("aria-live")).toBe("polite");
+
+      const allowed = await screen.findByText("✓ Microphone access allowed");
+
+      expect(region.contains(allowed)).toBe(true);
+    });
+
+    it("announces that Windows is blocking the microphone, but keeps the buttons out of the live region", async () => {
+      mockServer({ micTest: { state: "accessDenied", error: null } });
+      renderPage({ state: microphoneStep });
+
+      const blocked = await screen.findByText("Windows is blocking microphone access for Murmur.");
+
+      expect(blocked.closest('[role="status"]')?.getAttribute("aria-live")).toBe("polite");
+      expect(screen.getByRole("button", { name: "Check again" }).closest('[role="status"]')).toBeNull();
+    });
+
+    it("leaves a failed microphone test to its own alert, outside the live region", async () => {
+      mockServer({ micTest: { state: "failed", error: "The microphone was unplugged" } });
+      renderPage({ state: microphoneStep });
+
+      const alert = await screen.findByRole("alert");
+
+      expect(alert.closest('[role="status"]')).toBeNull();
+      expect(alert.querySelector('[role="status"]')).toBeNull();
+    });
+
     it("draws eight bars that follow the level", async () => {
       renderPage({ state: microphoneStep });
       await screen.findByText("✓ Microphone access allowed");
@@ -573,6 +645,20 @@ describe("SetupPage", () => {
       expect(screen.getByRole("alert").textContent).toBe("Model file is corrupt");
     });
 
+    it("announces the waiting text in a polite live region", () => {
+      renderPage({ state: tryItStep, engineStatus: loading });
+
+      const waiting = screen.getByText("Waiting for the speech model…");
+
+      expect(waiting.closest('[role="status"]')?.getAttribute("aria-live")).toBe("polite");
+    });
+
+    it("keeps the model's error alert out of the live region", () => {
+      renderPage({ state: tryItStep, engineStatus: { ...ready, state: "error", runtime: null, error: "Model file is corrupt" } });
+
+      expect(screen.getByRole("alert").closest('[role="status"]')).toBeNull();
+    });
+
     it("asks for a sentence once the model is ready, with a box to click", () => {
       renderPage({ state: tryItStep, engineStatus: ready });
 
@@ -609,6 +695,19 @@ describe("SetupPage", () => {
       push("history.added", entry);
 
       expect(screen.getByText("✓ That's it — Murmur types wherever your cursor is.")).toBeTruthy();
+    });
+
+    it("announces the first dictation in a polite live region that was already there", async () => {
+      renderPage({ state: tryItStep, engineStatus: ready });
+      await act(async () => undefined);
+      const region = screen.getByRole("status");
+      expect(region.getAttribute("aria-live")).toBe("polite");
+      expect(region.textContent).toBe("");
+
+      push("history.added", entry);
+
+      expect(screen.getByRole("status")).toBe(region);
+      expect(region.textContent).toBe("✓ That's it — Murmur types wherever your cursor is.");
     });
 
     it("says where Murmur lives afterwards", () => {

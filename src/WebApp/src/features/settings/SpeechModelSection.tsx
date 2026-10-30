@@ -8,9 +8,11 @@ const RECOMMENDED_SUFFIX = " — recommended for this PC";
 /**
  * Which speech model Murmur uses: a radio group of the models on offer. Switching downloads the other model in the
  * background while the current one keeps working, so while the engine is ready its download is shown under the group.
+ * A choice is shown at once and sent a second after the last change; a choice that could not be sent is reported under
+ * the group and the saved one is selected again.
  */
 export default function SpeechModelSection({ status }: { status: EngineStatus | null }) {
-  const { choice, select } = useModelChoice();
+  const { choice, error, select } = useModelChoice();
   const legendId = useId();
 
   if (!choice) return null;
@@ -33,7 +35,7 @@ export default function SpeechModelSection({ status }: { status: EngineStatus | 
               name="speech-model"
               value={option.id}
               checked={choice.selected === option.id}
-              onChange={() => void select(option.id)}
+              onChange={() => select(option.id)}
             />
             <span>{option.label + (option.id === choice.recommended ? RECOMMENDED_SUFFIX : "")}</span>
           </label>
@@ -55,6 +57,12 @@ export default function SpeechModelSection({ status }: { status: EngineStatus | 
           <p className="settings-hint">{`Downloading ${switching.modelName}`}</p>
           <p className="settings-hint">{progress.detail ? `${progress.amount} · ${progress.detail}` : progress.amount}</p>
         </div>
+      )}
+
+      {error && (
+        <p className="page-error" role="alert">
+          {error}
+        </p>
       )}
 
       {switchError && (

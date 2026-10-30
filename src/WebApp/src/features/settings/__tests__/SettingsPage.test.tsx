@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "../SettingsPage";
 import { apiClient } from "../../../interop/WebViewApiClient";
 import type {
@@ -109,6 +109,15 @@ async function renderLoaded(options: ServerOptions = {}, engineStatus: EngineSta
   return view;
 }
 
+/** Lets the speech model choice's 1 s wait pass; the clock only runs fake from here on, so loading stays real. */
+async function waitOutModelChoice() {
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+}
+
+function radio(name: string) {
+  return screen.getByRole("radio", { name }) as HTMLInputElement;
+}
+
 function toggle(name: string) {
   return screen.getByRole("switch", { name }) as HTMLInputElement;
 }
@@ -117,6 +126,10 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     vi.mocked(apiClient.call).mockReset();
     vi.mocked(apiClient.on).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe("hotkey", () => {
@@ -432,14 +445,62 @@ describe("SettingsPage", () => {
       expect((screen.getByRole("radio", { name: BEST_RECOMMENDED }) as HTMLInputElement).checked).toBe(false);
     });
 
-    it("chooses the other model, and shows it selected once the answer comes back", async () => {
+    it("shows the other model selected at once, and asks for it 1 s later", async () => {
       await renderLoaded({ choice });
+      await screen.findByRole("radio", { name: FAST });
+      vi.useFakeTimers({ shouldAdvanceTime: true });
 
-      fireEvent.click(await screen.findByRole("radio", { name: FAST }));
+      fireEvent.click(radio(FAST));
 
-      await waitFor(() => expect(apiClient.call).toHaveBeenCalledWith("models", "setChoice", { model: "smallEn" }));
-      await waitFor(() => expect((screen.getByRole("radio", { name: FAST }) as HTMLInputElement).checked).toBe(true));
-      expect((screen.getByRole("radio", { name: BEST_RECOMMENDED }) as HTMLInputElement).checked).toBe(false);
+      expect(radio(FAST).checked).toBe(true);
+      expect(radio(BEST_RECOMMENDED).checked).toBe(false);
+      expect(callsTo("models.setChoice")).toHaveLength(0);
+
+      await waitOutModelChoice();
+
+      expect(apiClient.call).toHaveBeenCalledWith("models", "setChoice", { model: "smallEn" });
+      expect(radio(FAST).checked).toBe(true);
+      expect(radio(BEST_RECOMMENDED).checked).toBe(false);
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("a failed setChoice shows the alert and restores the saved choice", async () => {
+      await renderLoaded({ choice });
+      await screen.findByRole("radio", { name: FAST });
+      const serve = vi.mocked(apiClient.call).getMockImplementation()!;
+      vi.mocked(apiClient.call).mockImplementation(async (service, method, params) => {
+        if (`${service}.${method}` === "models.setChoice") throw new Error("busy");
+        return serve(service, method, params);
+      });
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+
+      fireEvent.click(radio(FAST));
+      expect(radio(FAST).checked).toBe(true);
+      expect(screen.queryByRole("alert")).toBeNull();
+      await waitOutModelChoice();
+
+      expect(screen.getByRole("alert").textContent).toBe("Could not change the speech model (busy).");
+      expect(radio(BEST_RECOMMENDED).checked).toBe(true);
+      expect(radio(FAST).checked).toBe(false);
+    });
+
+    it("sends only the last of several quick changes", async () => {
+      await renderLoaded({ choice });
+      await screen.findByRole("radio", { name: FAST });
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+
+      fireEvent.click(radio(FAST));
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+      fireEvent.click(radio(BEST_RECOMMENDED));
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+      fireEvent.click(radio(FAST));
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+      expect(callsTo("models.setChoice")).toHaveLength(0);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+
+      expect(callsTo("models.setChoice")).toHaveLength(1);
+      expect(callsTo("models.setChoice")[0][2]).toEqual({ model: "smallEn" });
     });
 
     it("does not call setChoice for the model that is already selected", async () => {
@@ -493,8 +554,10 @@ describe("SettingsPage", () => {
     it("reads the choice again when the engine is ready after a switch, in case a failed switch put the old model back", async () => {
       await renderLoaded({ choice });
       await screen.findByRole("radio", { name: FAST });
-      fireEvent.click(screen.getByRole("radio", { name: FAST }));
-      await waitFor(() => expect((screen.getByRole("radio", { name: FAST }) as HTMLInputElement).checked).toBe(true));
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      fireEvent.click(radio(FAST));
+      await waitOutModelChoice();
+      expect(radio(FAST).checked).toBe(true);
       const readsBefore = callsTo("models.getChoice").length;
 
       // The engine reports the failed switch: ready on the old model again. The server's choice is back to large.
@@ -507,7 +570,7 @@ describe("SettingsPage", () => {
       act(() => pushed.forEach((callback) => callback(engine({ state: "ready", runtime: "Cuda" }))));
 
       await waitFor(() => expect(callsTo("models.getChoice").length).toBeGreaterThan(readsBefore));
-      await waitFor(() => expect((screen.getByRole("radio", { name: BEST_RECOMMENDED }) as HTMLInputElement).checked).toBe(true));
+      await waitFor(() => expect(radio(BEST_RECOMMENDED).checked).toBe(true));
     });
   });
 

@@ -24,21 +24,28 @@ export default function TryItStep({ engineStatus, onDone, saveError }: Props) {
 
   return (
     <>
-      <h1 className="setup-title">Try it</h1>
+      <h1 className="setup-title" tabIndex={-1}>
+        Try it
+      </h1>
       {ready ? (
         <>
           <p className="setup-muted">
             Click the box, hold <kbd className="setup-key">{hotkey}</kbd>, say a sentence, and let go.
           </p>
           <textarea className="text-input setup-practice" aria-label="Practice dictation" rows={3} />
-          {dictated && <p className="setup-ok">✓ That's it — Murmur types wherever your cursor is.</p>}
+          {/* Always there, so that a screen reader announces the line when it comes into it. */}
+          <div className="setup-live" role="status" aria-live="polite">
+            {dictated && <p className="setup-ok">✓ That's it — Murmur types wherever your cursor is.</p>}
+          </div>
           <p className="setup-muted setup-small">
             Tap <kbd className="setup-key">{hotkey}</kbd> once for hands-free; tap again to finish. Esc cancels. Change the key in Settings.
           </p>
         </>
       ) : (
         <>
-          <p className="setup-muted">Waiting for the speech model…</p>
+          <div role="status" aria-live="polite">
+            <p className="setup-muted">Waiting for the speech model…</p>
+          </div>
           {engineStatus?.state === "error" && (
             <p className="setup-error" role="alert">
               {describeEngineStatus(engineStatus).text}

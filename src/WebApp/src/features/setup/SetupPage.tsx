@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./SetupPage.css";
 import MicrophoneStep from "./MicrophoneStep";
 import ModelStep from "./ModelStep";
@@ -35,6 +35,16 @@ export default function SetupPage({ state, engineStatus, update, onDone }: Props
     STEPS.findIndex((step) => step.id === state.step),
   );
 
+  // On a step change the focus goes to the new step's heading: the button that was pressed is gone with the old step.
+  // Not on the first render, which is the window opening and not the user moving on.
+  const inner = useRef<HTMLDivElement>(null);
+  const shownStep = useRef(current);
+  useEffect(() => {
+    if (shownStep.current === current) return;
+    shownStep.current = current;
+    inner.current?.querySelector<HTMLElement>(".setup-title")?.focus();
+  }, [current]);
+
   /** Saves the progress. A failure is reported, never allowed to hold the user back: the page has already moved on. */
   async function save(patch: SetupPatch) {
     setSaveError(null);
@@ -53,7 +63,7 @@ export default function SetupPage({ state, engineStatus, update, onDone }: Props
 
   return (
     <div className="setup">
-      <div className="setup-inner">
+      <div className="setup-inner" ref={inner}>
         <ol className="setup-steps" aria-label="Setup steps">
           {STEPS.map((step, index) => {
             const status = index < current ? "done" : index === current ? "on" : "todo";

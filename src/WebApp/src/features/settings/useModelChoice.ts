@@ -1,33 +1,72 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiClient } from "../../interop/WebViewApiClient";
+import { failure } from "../../interop/errorMessage";
 import { useWebViewEvent } from "../../hooks/useWebViewEvent";
 import type { EngineStatus, ModelChoice, SpeechModelId } from "../../types/domain";
 
+/** How long a choice waits for a newer one before it is sent, so that arrowing through the options starts no downloads. */
+const CHOICE_DELAY_MS = 1000;
+
 /**
  * The speech model in use, the one that suits this PC and the models on offer. Null until known.
- * Choosing a model returns at once: the download and the switch go on in the background and are reported by
- * engine.statusChanged.
+ * A choice shows at once but is sent one second after the last change; sending it returns at once: the download and
+ * the switch go on in the background and are reported by engine.statusChanged. When reading or sending fails, `error`
+ * says so and the choice shown is the one the server last confirmed.
  */
-export function useModelChoice(): { choice: ModelChoice | null; select(id: SpeechModelId): Promise<void> } {
-  const [choice, setChoice] = useState<ModelChoice | null>(null);
+export function useModelChoice(): {
+  choice: ModelChoice | null;
+  error: string | null;
+  select(id: SpeechModelId): void;
+} {
+  // What the server last confirmed, and the model chosen since then that has not been confirmed yet.
+  const [saved, setSaved] = useState<ModelChoice | null>(null);
+  const [pending, setPending] = useState<SpeechModelId | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Each read or choice gets a number; only the latest answer may update the state, and none after unmount.
+  // Each read or send gets a number; only the latest answer may update the state, and none after unmount.
   const latest = useRef(0);
   const mounted = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedSelection = useRef<SpeechModelId | null>(null);
 
   const accept = useCallback((requestId: number, answer: ModelChoice | null) => {
-    // A failed or empty answer keeps what we had: the server's choice is read again when the engine next reports ready.
-    if (mounted.current && requestId === latest.current && answer) setChoice(answer);
+    if (!mounted.current || requestId !== latest.current) return;
+    // An empty answer keeps what we had: the server's choice is read again when the engine next reports ready.
+    if (answer) {
+      savedSelection.current = answer.selected;
+      setSaved(answer);
+    }
+    setError(null);
+    // The answer settles the choice made so far, unless a newer choice is still waiting to be sent.
+    if (timer.current === null) setPending(null);
+  }, []);
+
+  const reject = useCallback((requestId: number, message: string) => {
+    if (!mounted.current || requestId !== latest.current) return;
+    setError(message);
+    if (timer.current === null) setPending(null);
   }, []);
 
   const read = useCallback(async () => {
     const requestId = ++latest.current;
     try {
       accept(requestId, await apiClient.call<ModelChoice | null>("models", "getChoice", {}));
-    } catch {
-      // Stay as we are; see accept.
+    } catch (err) {
+      reject(requestId, failure("Could not read the speech model", err));
     }
-  }, [accept]);
+  }, [accept, reject]);
+
+  const send = useCallback(
+    async (id: SpeechModelId) => {
+      const requestId = ++latest.current;
+      try {
+        accept(requestId, await apiClient.call<ModelChoice | null>("models", "setChoice", { model: id }));
+      } catch (err) {
+        reject(requestId, failure("Could not change the speech model", err));
+      }
+    },
+    [accept, reject],
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -35,6 +74,9 @@ export function useModelChoice(): { choice: ModelChoice | null; select(id: Speec
 
     return () => {
       mounted.current = false;
+      // A choice still waiting is dropped: leaving the page is not a decision to switch models.
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
     };
   }, [read]);
 
@@ -44,18 +86,22 @@ export function useModelChoice(): { choice: ModelChoice | null; select(id: Speec
     if (status.state === "ready" && !status.download) void read();
   });
 
-  /** Never rejects: when the request fails the selection simply stays where it was. */
   const select = useCallback(
-    async (id: SpeechModelId) => {
-      const requestId = ++latest.current;
-      try {
-        accept(requestId, await apiClient.call<ModelChoice | null>("models", "setChoice", { model: id }));
-      } catch {
-        // The selection stays on the previous model, which is the model still in use.
-      }
+    (id: SpeechModelId) => {
+      setError(null);
+      setPending(id);
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        // Back on the confirmed model by the end of the wait: nothing to switch.
+        if (id === savedSelection.current) setPending(null);
+        else void send(id);
+      }, CHOICE_DELAY_MS);
     },
-    [accept],
+    [send],
   );
 
-  return { choice, select };
+  const choice = useMemo(() => (saved && pending ? { ...saved, selected: pending } : saved), [saved, pending]);
+
+  return { choice, error, select };
 }

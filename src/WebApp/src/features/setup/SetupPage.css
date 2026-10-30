@@ -48,8 +48,20 @@
   color: var(--text-strong);
 }
 
+/* A step's heading takes the focus when the step opens, which is not a control: the ring only shows the place. */
+.setup-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
 .setup-muted {
   color: var(--muted);
+}
+
+/* A live region that adds no box of its own: its lines are laid out as if they sat in the parent. */
+.setup-live {
+  display: contents;
 }
 
 .setup-small {

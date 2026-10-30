@@ -43,8 +43,11 @@ function MicrophoneTest({ microphoneId }: { microphoneId: string | null }) {
   return (
     <div className="setup-row">
       <div className="setup-mic-status">
-        {result?.state === "listening" && <span className="setup-ok setup-small">✓ Microphone access allowed</span>}
-        {result?.state === "accessDenied" && <span className="setup-small">Windows is blocking microphone access for Murmur.</span>}
+        {/* Always there, so that a screen reader announces what comes into it; the alerts and buttons stay outside. */}
+        <div className="setup-live" role="status" aria-live="polite">
+          {result?.state === "listening" && <span className="setup-ok setup-small">✓ Microphone access allowed</span>}
+          {result?.state === "accessDenied" && <span className="setup-small">Windows is blocking microphone access for Murmur.</span>}
+        </div>
         {result?.state === "failed" && (
           <p className="setup-error setup-small" role="alert">
             {result.error || "The microphone could not be opened."}
@@ -83,7 +86,9 @@ export default function MicrophoneStep({ onNext, saveError }: Props) {
 
   return (
     <>
-      <h1 className="setup-title">Check your microphone</h1>
+      <h1 className="setup-title" tabIndex={-1}>
+        Check your microphone
+      </h1>
       <p className="setup-muted">Say something — the bars should move.</p>
       <div className="setup-card">
         <div className="setup-row">
