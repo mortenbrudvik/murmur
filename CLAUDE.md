@@ -35,6 +35,14 @@ npm run test:run     # Vitest (single run)
 dotnet build -p:SkipFrontendBuild=true
 ```
 
+### Microsoft Store package (MSIX)
+
+```powershell
+& 'C:\Program Files\PowerShell\7\pwsh.exe' -File build/build-msix.ps1   # -> installer-output\Murmur-<version>-x64.msix, unsigned
+```
+
+The version lives in `version.json` and `packaging/msix/AppxManifest.xml` (`1.0.0` and `1.0.0.0`), kept in step by hand; the script refuses to pack when they disagree. Submission steps, the identity placeholder and how to sideload the staged layout for a check: `docs/store-submission-runbook.md`. Package identity changes behaviour in two places: start with Windows (`PackagedStartupRegistration` over the manifest's startup task instead of the Run key, chosen in `AppModule.RegisterStartup`) and CUDA (`CudaRuntimeLoader`, because a packaged process does not search PATH for DLLs). Settings, history, the model and logs stay in `%LOCALAPPDATA%\Murmur` in both channels (measured: not redirected).
+
 ## Architecture
 
 **Type:** Hybrid WPF + WebView2 + React
