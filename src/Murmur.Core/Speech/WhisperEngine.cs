@@ -9,10 +9,10 @@ using Whisper.net.LibraryLoader;
 namespace Murmur.Core.Speech;
 
 /// <summary>
-/// Whisper large-v3-turbo through Whisper.net, on CUDA when the CUDA 13 runtime DLLs can be found on PATH (see
-/// <see cref="CudaRuntimeLoader"/>), otherwise Vulkan, otherwise the CPU. <see cref="InitializeAsync"/> warms the
-/// model up with a second of zeros, so the one-off cost of the first run is paid before it reports Ready rather than
-/// on the first dictation.
+/// Whisper large-v3-turbo through Whisper.net, on CUDA when the CUDA 13 runtime DLLs can be found (see
+/// <see cref="CudaRuntimeSearch"/> and <see cref="CudaRuntimeLoader"/>), otherwise Vulkan, otherwise the CPU.
+/// <see cref="InitializeAsync"/> warms the model up with a second of zeros, so the one-off cost of the first run is
+/// paid before it reports Ready rather than on the first dictation.
 /// </summary>
 public sealed class WhisperEngine(IModelManager models) : ISpeechEngine, IDisposable
 {
@@ -157,7 +157,11 @@ public sealed class WhisperEngine(IModelManager models) : ISpeechEngine, IDispos
         RuntimeOptions.RuntimeLibraryOrder = [RuntimeLibrary.Cuda, RuntimeLibrary.Vulkan, RuntimeLibrary.Cpu];
 
         // Before the factory loads the native library: without it the packaged (Store) build can never use CUDA.
-        CudaRuntimeLoader.TryLoad(Environment.GetEnvironmentVariable("PATH"));
+        var cudaDirectory = CudaRuntimeLoader.FindRuntimeDirectory(CudaRuntimeSearch.Directories(CudaRuntimeSearch.FromSystem()), File.Exists);
+        if (cudaDirectory is not null)
+            CudaRuntimeLoader.TryLoad(cudaDirectory);
+        else
+            Log.ForContext<WhisperEngine>().Information("No CUDA 13 runtime found; the speech engine will use Vulkan or the CPU");
         return WhisperFactory.FromPath(modelPath);
     }
 

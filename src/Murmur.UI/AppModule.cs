@@ -69,6 +69,7 @@ public class AppModule : Module
         builder.RegisterType<DiskSpace>().As<IDiskSpace>().SingleInstance();
         builder.RegisterType<ModelManager>().As<IModelManager>().SingleInstance();
         builder.RegisterType<GpuInfo>().As<IGpuInfo>().SingleInstance();
+        builder.RegisterType<CudaRuntimeLocator>().As<ICudaRuntimeLocator>().SingleInstance();
         builder.RegisterType<ModelSelection>().SingleInstance();
         // Never disposed by the container: disposing the native Whisper factory while a transcription may still be
         // running can crash the process, and process exit frees the GPU memory anyway.

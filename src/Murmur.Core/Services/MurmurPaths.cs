@@ -16,4 +16,7 @@ public sealed class MurmurPaths(string root)
 
     /// <summary>Debug builds only: while this file exists, GPU detection reports no GPU at all.</summary>
     public string SimulateNoGpuFile { get; } = Path.Combine(root, "simulate-no-gpu");
+
+    /// <summary>Debug builds only: while this file exists, the search for the CUDA 13 runtime finds nothing.</summary>
+    public string SimulateNoCudaRuntimeFile { get; } = Path.Combine(root, "simulate-no-cuda-runtime");
 }

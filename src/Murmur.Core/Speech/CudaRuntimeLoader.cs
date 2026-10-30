@@ -4,8 +4,9 @@ using Serilog;
 namespace Murmur.Core.Speech;
 
 /// <summary>
-/// Loads the CUDA 13 runtime DLLs that Whisper.net's CUDA backend imports, by full path from the first PATH directory
-/// that has all of them, before Whisper.net loads its native runtime.
+/// Loads the CUDA 13 runtime DLLs that Whisper.net's CUDA backend imports, by full path from the directory
+/// <see cref="CudaRuntimeSearch"/> and <see cref="FindRuntimeDirectory"/> picked, before Whisper.net loads its native
+/// runtime.
 /// </summary>
 /// <remarks>
 /// An unpackaged process finds them on PATH by itself. A packaged one (the Microsoft Store build) does not: Windows'
@@ -14,9 +15,9 @@ namespace Murmur.Core.Speech;
 /// packaged, and inside the package ggml-cuda-whisper.dll loaded once these three had been loaded first. A module
 /// that is already in the process satisfies a later import by name, which is what this relies on.
 /// <para>
-/// It runs in both channels so there is one code path: the directory it picks is the one an unpackaged PATH search
-/// finds anyway. Best effort and never throws: when the runtime is missing or will not load, Whisper.net falls back to
-/// Vulkan or the CPU exactly as before.
+/// It runs in both channels so there is one code path: the directory it picks is one an unpackaged PATH search
+/// would find, or one the user's PATH is about to hold after an install. Best effort and never throws: when the
+/// runtime is missing or will not load, Whisper.net falls back to Vulkan or the CPU exactly as before.
 /// </para>
 /// </remarks>
 internal static class CudaRuntimeLoader
@@ -26,60 +27,38 @@ internal static class CudaRuntimeLoader
 
     private static readonly ILogger Logger = Log.ForContext(typeof(CudaRuntimeLoader));
 
-    /// <summary>Loads the runtime from <paramref name="searchPath"/> (a PATH value); returns the directory, or null.</summary>
-    public static string? TryLoad(string? searchPath)
+    /// <summary>Loads <see cref="RuntimeDlls"/> from <paramref name="directory"/>, in order; false when one will not load.</summary>
+    public static bool TryLoad(string directory)
     {
         try
         {
-            var directory = FindRuntimeDirectory(searchPath, File.Exists);
-            if (directory is null)
-            {
-                Logger.Information("No CUDA 13 runtime on PATH; the speech engine will use Vulkan or the CPU");
-                return null;
-            }
-
             foreach (var dll in RuntimeDlls)
             {
                 var path = Path.Combine(directory, dll);
                 if (!NativeLibrary.TryLoad(path, out _))
                 {
                     Logger.Warning("Could not load {Path}; the speech engine will use Vulkan or the CPU", path);
-                    return null;
+                    return false;
                 }
             }
 
             Logger.Information("Loaded the CUDA 13 runtime from {Directory}", directory);
-            return directory;
+            return true;
         }
         catch (Exception ex)
         {
             // A preload is an optimisation: failing it must not fail the engine, which falls back on its own.
-            Logger.Warning(ex, "Could not look for the CUDA 13 runtime; the speech engine will use Vulkan or the CPU");
-            return null;
+            Logger.Warning(ex, "Could not load the CUDA 13 runtime from {Directory}; the speech engine will use Vulkan or the CPU", directory);
+            return false;
         }
     }
 
     /// <summary>
-    /// The first fully qualified directory in <paramref name="searchPath"/> that holds every one of
-    /// <see cref="RuntimeDlls"/>, or null. A directory with only some of them is skipped.
+    /// The first of <paramref name="directories"/> that holds every one of <see cref="RuntimeDlls"/>, or null. A
+    /// directory with only some of them is skipped. The directories must be fully qualified, as
+    /// <see cref="CudaRuntimeSearch.Directories"/> returns them: a relative one would resolve against whatever the
+    /// working directory is.
     /// </summary>
-    internal static string? FindRuntimeDirectory(string? searchPath, Func<string, bool> fileExists)
-    {
-        if (string.IsNullOrWhiteSpace(searchPath))
-            return null;
-
-        var entries = searchPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var entry in entries)
-        {
-            // PATH entries may be quoted; a relative one would resolve against whatever the working directory is.
-            var directory = entry.Trim('"');
-            if (!Path.IsPathFullyQualified(directory))
-                continue;
-
-            if (RuntimeDlls.All(dll => fileExists(Path.Combine(directory, dll))))
-                return directory;
-        }
-
-        return null;
-    }
+    internal static string? FindRuntimeDirectory(IEnumerable<string> directories, Func<string, bool> fileExists) =>
+        directories.FirstOrDefault(directory => RuntimeDlls.All(dll => fileExists(Path.Combine(directory, dll))));
 }
