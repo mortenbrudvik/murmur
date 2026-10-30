@@ -273,6 +273,39 @@ public sealed class WhisperEngineTests : IDisposable
         _cuda.DidNotReceive().FindRuntimeDirectory();
     }
 
+    /// <summary>Murmur quit while a switch downloaded: the next start loads the new choice and deletes the previous model.</summary>
+    [Fact]
+    public async Task InitializeAsync_AnotherModelOnDisk_IsDeletedOnceReady()
+    {
+        _stored = _stored with { SpeechModel = SpeechModelId.SmallEn };
+        _models.HasExpectedFile(SpeechModelCatalog.LargeV3Turbo).Returns(true);
+        EngineState? stateWhenDeleted = null;
+        _models.When(m => m.Delete(SpeechModelCatalog.LargeV3Turbo)).Do(_ => stateWhenDeleted = _engine.Status.State);
+
+        await _engine.InitializeAsync(Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Small);
+        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
+        _models.DidNotReceive().Delete(SpeechModelCatalog.SmallEn);
+        Index("delete:LargeV3Turbo").ShouldBeGreaterThan(Index("load:ggml-small.en.bin"));
+        stateWhenDeleted.ShouldBe(EngineState.Ready);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_DeletingAnotherModelFails_StillEndsReady()
+    {
+        _models.When(m => m.Delete(SpeechModelCatalog.SmallEn)).Do(_ => throw new IOException("The file is in use."));
+
+        await _engine.InitializeAsync(Ct);
+
+        _models.Received(1).Delete(SpeechModelCatalog.SmallEn);
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Large);
+        _engine.Status.Error.ShouldBeNull();
+        Statuses().ShouldNotContain(s => s.State == EngineState.Error);
+    }
+
     // ---- transcription ------------------------------------------------------------------------------------------
 
     [Fact]
@@ -362,7 +395,7 @@ public sealed class WhisperEngineTests : IDisposable
         await initializing.WaitAsync(Patience, Ct);
 
         sawCancellation.ShouldBeTrue();
-        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
+        _models.Received().Delete(SpeechModelCatalog.LargeV3Turbo);
         Index("delete:LargeV3Turbo").ShouldBeGreaterThan(Index("ensured:LargeV3Turbo"), "the download let go of its .part first");
         Index("ensure:SmallEn").ShouldBeGreaterThan(Index("delete:LargeV3Turbo"));
         _engine.Status.State.ShouldBe(EngineState.Ready);
@@ -467,7 +500,7 @@ public sealed class WhisperEngineTests : IDisposable
         _stored.SpeechModel.ShouldBe(SpeechModelId.LargeV3Turbo);
         Statuses().ShouldBeEmpty();
         _loader.LoadCount.ShouldBe(1);
-        await _models.Received(1).EnsureModelAsync(Arg.Any<SpeechModelInfo>(), Arg.Any<IProgress<DownloadProgress>>(), Arg.Any<CancellationToken>());
+        await _models.DidNotReceive().EnsureModelAsync(Arg.Any<SpeechModelInfo>(), Arg.Any<IProgress<DownloadProgress>>(), Arg.Any<CancellationToken>());
         _models.DidNotReceive().Delete(Arg.Any<SpeechModelInfo>());
     }
 
@@ -543,7 +576,8 @@ public sealed class WhisperEngineTests : IDisposable
         _engine.Status.State.ShouldBe(EngineState.Ready);
         _engine.Status.ModelName.ShouldBe(Small);
         _engine.Status.Error.ShouldBeNull();
-        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
+        _models.Received().Delete(SpeechModelCatalog.LargeV3Turbo);
+        _models.DidNotReceive().Delete(SpeechModelCatalog.SmallEn);
     }
 
     [Fact]
@@ -560,6 +594,58 @@ public sealed class WhisperEngineTests : IDisposable
         _engine.Status.ModelName.ShouldBe(Small);
     }
 
+    /// <summary>
+    /// The complete large file is kept while no model is loaded, through a failed switch to small, and goes once a
+    /// retry of small is Ready.
+    /// </summary>
+    [Fact]
+    public async Task SwitchModelAsync_FirstLoadFailsThenRetried_LeavesNoOtherModel()
+    {
+        _models.HasExpectedFile(SpeechModelCatalog.LargeV3Turbo).Returns(true);
+        var verifying = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _downloads[SpeechModelId.LargeV3Turbo] = async (_, ct) =>
+        {
+            verifying.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("not cancelled");
+        };
+        var smallAttempts = 0;
+        _downloads[SpeechModelId.SmallEn] = (_, _) => Interlocked.Increment(ref smallAttempts) == 1
+            ? Task.FromException<string>(new HttpRequestException("Response status code does not indicate success: 404 (Not Found).", null, HttpStatusCode.NotFound))
+            : Task.FromResult(PathOf(SpeechModelCatalog.SmallEn));
+        var initializing = _engine.InitializeAsync(Ct);
+        await verifying.Task.WaitAsync(Patience, Ct);
+
+        await _engine.SwitchModelAsync(SpeechModelId.SmallEn).WaitAsync(Patience, Ct);
+        await initializing.WaitAsync(Patience, Ct);
+        _engine.Status.State.ShouldBe(EngineState.Error);
+        _models.DidNotReceive().Delete(SpeechModelCatalog.LargeV3Turbo);
+
+        await _engine.SwitchModelAsync(SpeechModelId.SmallEn).WaitAsync(Patience, Ct);
+
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Small);
+        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
+        _models.DidNotReceive().Delete(SpeechModelCatalog.SmallEn);
+        Index("delete:LargeV3Turbo").ShouldBeGreaterThan(Index("load:ggml-small.en.bin"));
+    }
+
+    [Fact]
+    public async Task SwitchModelAsync_DeletingThePreviousModelFails_StillEndsReady()
+    {
+        await ReadyOnLargeAsync();
+        _models.When(m => m.Delete(SpeechModelCatalog.LargeV3Turbo)).Do(_ => throw new UnauthorizedAccessException("Access is denied."));
+
+        await _engine.SwitchModelAsync(SpeechModelId.SmallEn).WaitAsync(Patience, Ct);
+
+        _models.Received(1).Delete(SpeechModelCatalog.LargeV3Turbo);
+        _engine.Status.State.ShouldBe(EngineState.Ready);
+        _engine.Status.ModelName.ShouldBe(Small);
+        _engine.Status.Error.ShouldBeNull();
+        _loader.ModelAt(0).Disposed.ShouldBeTrue();
+        _stored.SpeechModel.ShouldBe(SpeechModelId.SmallEn);
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------------------
 
     private async Task ReadyOnLargeAsync()
@@ -569,6 +655,9 @@ public sealed class WhisperEngineTests : IDisposable
         _engine.Status.ModelName.ShouldBe(Large);
         lock (_statuses)
             _statuses.Clear();
+        lock (_events)
+            _events.Clear();
+        _models.ClearReceivedCalls();
     }
 
     private async Task<string> EnsureAsync(SpeechModelInfo model, IProgress<DownloadProgress> progress, CancellationToken ct)

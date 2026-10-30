@@ -23,7 +23,7 @@ public interface ISpeechEngine
 
     /// <summary>
     /// Makes <paramref name="model"/> the speech model: downloads and loads it while the current one stays Ready, then
-    /// swaps them and deletes the previous model's file. A failed switch keeps the current model, reports why in
+    /// swaps them and deletes every other model's files. A failed switch keeps the current model, reports why in
     /// <see cref="EngineStatus.Error"/> and makes it the choice again. Persists the choice before the returned task's
     /// first await; uses the token given to <see cref="InitializeAsync"/>. Completes when the switch has ended; never
     /// throws.

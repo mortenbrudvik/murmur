@@ -16,7 +16,9 @@ namespace Murmur.Core.Speech;
 /// Starting and switching models are operations that run one at a time on the thread pool. A switch cancels the
 /// running operation and waits for it to end before it touches any model file, because a download holds its .part file
 /// open. Transcriptions use the loaded model under <c>_modelGate</c>, which an operation also takes to swap models, so
-/// a model is never disposed while it transcribes.
+/// a model is never disposed while it transcribes. Whenever an operation reaches Ready on a model, it deletes every other
+/// catalog model's files, so a switch that never finished (Murmur quit during its download, or its first load failed)
+/// cannot leave a model on disk for good.
 /// </para>
 /// </summary>
 public sealed class WhisperEngine(
@@ -92,7 +94,7 @@ public sealed class WhisperEngine(
             _lifetime = ct;
             running = _operation is { Task.IsCompleted: false } operation
                 ? operation.Task
-                : Start(target: null, deferredDelete: null, choiceVersion: 0);
+                : Start(target: null, choiceVersion: 0);
         }
         finally
         {
@@ -212,8 +214,8 @@ public sealed class WhisperEngine(
     }
 
     /// <summary>
-    /// Under <see cref="_operationGate"/>: cancels and awaits the running operation, deletes the model it was getting
-    /// when nothing needs it any more, and starts the operation that ends on <paramref name="target"/>, if any.
+    /// Under <see cref="_operationGate"/>: cancels and awaits the running operation, deletes the partial download it
+    /// leaves behind, and starts the operation that ends on <paramref name="target"/>, if any.
     /// </summary>
     private async Task<Task> BeginSwitchAsync(SpeechModelInfo target, int choiceVersion)
     {
@@ -233,15 +235,13 @@ public sealed class WhisperEngine(
             return Task.CompletedTask;
 
         var loaded = Volatile.Read(ref _loaded);
-        SpeechModelInfo? deferredDelete = null;
-        if (previous?.Target is { } abandoned && abandoned != target && abandoned != loaded?.Info)
+        // A partial download goes now, to free its disk space for the next one. A complete file that was about to
+        // become the first model stays until another model is Ready (DeleteModelsOtherThan), so a failed download
+        // cannot leave the user with neither.
+        if (previous?.Target is { } abandoned && abandoned != target && abandoned != loaded?.Info
+            && (loaded is not null || !models.HasExpectedFile(abandoned)))
         {
-            // A complete file that was about to become the first model stays until the next one is loaded, so a failed
-            // download does not leave the user with neither; a partial download goes now, to free its disk space.
-            if (loaded is null && models.HasExpectedFile(abandoned))
-                deferredDelete = abandoned;
-            else
-                Delete(abandoned);
+            Delete(abandoned);
         }
 
         if (loaded is not null && loaded.Info == target)
@@ -252,14 +252,14 @@ public sealed class WhisperEngine(
         }
 
         _logger.Information("Switching the speech model to {Model}", target.DisplayName);
-        return Start(target, deferredDelete, choiceVersion);
+        return Start(target, choiceVersion);
     }
 
     /// <summary>
     /// Under <see cref="_operationGate"/>, with no operation running: starts a first load when no model is loaded yet,
     /// otherwise a switch from the loaded one. A null <paramref name="target"/> means the model <see cref="ModelSelection"/> resolves.
     /// </summary>
-    private Task Start(SpeechModelInfo? target, SpeechModelInfo? deferredDelete, int choiceVersion)
+    private Task Start(SpeechModelInfo? target, int choiceVersion)
     {
         _operation?.Cts.Dispose();
 
@@ -273,7 +273,7 @@ public sealed class WhisperEngine(
             try
             {
                 if (from is null)
-                    await LoadFirstModelAsync(operation, deferredDelete).ConfigureAwait(false);
+                    await LoadFirstModelAsync(operation).ConfigureAwait(false);
                 else
                     await SwitchFromAsync(operation, from).ConfigureAwait(false);
             }
@@ -287,11 +287,12 @@ public sealed class WhisperEngine(
         return operation.Task;
     }
 
-    private async Task LoadFirstModelAsync(Operation operation, SpeechModelInfo? deferredDelete)
+    private async Task LoadFirstModelAsync(Operation operation)
     {
         var ct = operation.Cts.Token;
         HardwareFacts? hardware = null;
         SpeechModelInfo? model = null;
+        LoadedModel next;
         var loading = false;
         try
         {
@@ -306,7 +307,7 @@ public sealed class WhisperEngine(
 
             loading = true;
             SetStatus(loadingStatus);
-            var next = await LoadAsync(model, path, hardware, ct).ConfigureAwait(false);
+            next = await LoadAsync(model, path, hardware, ct).ConfigureAwait(false);
             if (hardware.RuntimeDirectory is not null && next.Model.Runtime?.StartsWith("Cuda", StringComparison.Ordinal) != true)
             {
                 _logger.Warning("The CUDA 13 runtime is in {Directory}, but the speech engine runs on {Runtime}",
@@ -315,10 +316,6 @@ public sealed class WhisperEngine(
 
             if (!await TrySwapInAsync(next, ct).ConfigureAwait(false))
                 return;
-
-            SetStatus(next.ReadyStatus);
-            if (deferredDelete is not null)
-                Delete(deferredDelete);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -326,13 +323,19 @@ public sealed class WhisperEngine(
             // A switch that cancelled it reports the next model itself.
             if (!operation.Superseded && !IsDisposed)
                 SetStatus(new EngineStatus(EngineState.NotStarted, model?.DisplayName ?? "", Gpu: hardware?.Advice));
+            return;
         }
         catch (Exception ex)
         {
             _logger.Error(ex, "Speech engine failed to {Step} the speech model", loading ? "load" : "download");
             SetStatus(new EngineStatus(EngineState.Error, model?.DisplayName ?? "", Error: DescribeStartFailure(ex, model, loading),
                 Gpu: hardware?.Advice));
+            return;
         }
+
+        // Outside the try: nothing after Ready may turn it into an Error.
+        SetStatus(next.ReadyStatus);
+        DeleteModelsOtherThan(next.Info);
     }
 
     private async Task SwitchFromAsync(Operation operation, LoadedModel from)
@@ -379,7 +382,7 @@ public sealed class WhisperEngine(
             _logger.Warning(ex, "Could not unload {Model}", from.Info.DisplayName);
         }
 
-        Delete(from.Info);
+        DeleteModelsOtherThan(target);
     }
 
     /// <summary>
@@ -465,16 +468,30 @@ public sealed class WhisperEngine(
         }
     }
 
+    /// <summary>
+    /// Deletes the files of every catalog model but <paramref name="active"/>, which has just become Ready: the previous
+    /// model after a switch, and whatever an unfinished switch or a failed first load left behind. Only from inside an
+    /// operation, so no download of another model can be running.
+    /// </summary>
+    private void DeleteModelsOtherThan(SpeechModelInfo active)
+    {
+        foreach (var id in Enum.GetValues<SpeechModelId>())
+        {
+            if (id != active.Id)
+                Delete(SpeechModelCatalog.Get(id));
+        }
+    }
+
     private void Delete(SpeechModelInfo model)
     {
         try
         {
             models.Delete(model);
-            _logger.Information("Deleted the {Model} files", model.DisplayName);
+            _logger.Debug("Deleted any {Model} files", model.DisplayName);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Only costs disk space: the next download of it starts over or resumes.
+            // Only costs disk space until the next time a model becomes Ready, which tries again; never fails Ready.
             _logger.Warning(ex, "Could not delete the {Model} files", model.DisplayName);
         }
     }
