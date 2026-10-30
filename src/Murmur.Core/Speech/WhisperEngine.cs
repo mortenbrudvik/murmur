@@ -9,9 +9,10 @@ using Whisper.net.LibraryLoader;
 namespace Murmur.Core.Speech;
 
 /// <summary>
-/// Whisper large-v3-turbo through Whisper.net, on CUDA when the CUDA 13 runtime DLLs can be found, otherwise
-/// Vulkan, otherwise the CPU. <see cref="InitializeAsync"/> warms the model up with a second of zeros, so the
-/// one-off cost of the first run is paid before it reports Ready rather than on the first dictation.
+/// Whisper large-v3-turbo through Whisper.net, on CUDA when the CUDA 13 runtime DLLs can be found on PATH (see
+/// <see cref="CudaRuntimeLoader"/>), otherwise Vulkan, otherwise the CPU. <see cref="InitializeAsync"/> warms the
+/// model up with a second of zeros, so the one-off cost of the first run is paid before it reports Ready rather than
+/// on the first dictation.
 /// </summary>
 public sealed class WhisperEngine(ModelManager models) : ISpeechEngine, IDisposable
 {
@@ -151,6 +152,9 @@ public sealed class WhisperEngine(ModelManager models) : ISpeechEngine, IDisposa
     {
         // Process-wide and only honored before the first factory loads the native library.
         RuntimeOptions.RuntimeLibraryOrder = [RuntimeLibrary.Cuda, RuntimeLibrary.Vulkan, RuntimeLibrary.Cpu];
+
+        // Before the factory loads the native library: without it the packaged (Store) build can never use CUDA.
+        CudaRuntimeLoader.TryLoad(Environment.GetEnvironmentVariable("PATH"));
         return WhisperFactory.FromPath(modelPath);
     }
 
