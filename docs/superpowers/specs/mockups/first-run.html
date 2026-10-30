@@ -1,0 +1,136 @@
+<style>
+  .win { border-radius: 10px; overflow: hidden; background: #1c1f27; color: #dfe3ee; font-family: Segoe UI, sans-serif;
+    font-size: 13px; border: 1px solid rgba(255,255,255,.08); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+  .tb { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #181a21; font-size: 12px; }
+  .tb .logo { width: 12px; height: 12px; border-radius: 3px; background: linear-gradient(135deg,#8fb3ff,#b59bff); }
+  .tb .sp { flex: 1; } .tb .c { color: #7d859b; width: 18px; text-align: center; }
+  .body { padding: 22px 26px 24px; min-height: 330px; display: flex; flex-direction: column; gap: 14px; }
+  .steps { display: flex; gap: 6px; font-size: 11px; color: #7d859b; }
+  .steps span { padding: 3px 10px; border-radius: 999px; background: #22262f; }
+  .steps .on { background: rgba(143,179,255,.16); color: #c6d6ff; }
+  .steps .done { color: #3ecf8e; }
+  h4 { margin: 2px 0 0; font-size: 20px; font-weight: 600; color: #e9ecf5; }
+  .mut { color: #9aa3b8; line-height: 1.5; }
+  .card { background: #22262f; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .bar { height: 8px; border-radius: 999px; background: #2c313c; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 38%; border-radius: 999px; background: linear-gradient(90deg,#8fb3ff,#b59bff); }
+  .tip { border: 1px solid rgba(143,179,255,.35); background: rgba(143,179,255,.07); border-radius: 8px; padding: 12px 14px;
+    display: flex; gap: 12px; align-items: flex-start; }
+  .tip .ic { font-size: 18px; line-height: 1; }
+  .btn { display: inline-block; padding: 6px 12px; border-radius: 6px; background: #8fb3ff; color: #141824; font-weight: 600; font-size: 12px; }
+  .btn.ghost { background: transparent; color: #c6d6ff; border: 1px solid rgba(143,179,255,.45); font-weight: 500; }
+  .ok { color: #3ecf8e; }
+  .meter { display: flex; gap: 3px; align-items: flex-end; height: 22px; }
+  .meter i { width: 6px; border-radius: 2px; background: #8fb3ff; }
+  .kbd { border: 1px solid rgba(255,255,255,.25); border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+  .practice { background: #15171d; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; padding: 10px 12px; min-height: 54px; color: #e9ecf5; }
+  .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; }
+  .small { font-size: 11.5px; }
+  .pillmini { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(22,24,32,.9);
+    border: 1px solid rgba(255,255,255,.12); }
+  .pillmini .rec { width: 6px; height: 6px; border-radius: 50%; background: #ff5a5f; }
+</style>
+
+<h2>First run: getting Murmur ready</h2>
+<p class="subtitle">Shown in Murmur's own window the first time it starts. It is not a blocking splash: the window can be closed at any point, and the download keeps going in the background, with a Windows notification when Murmur is ready. The CUDA tip appears only when an NVIDIA card is found without CUDA.</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="step1" onclick="toggleSelect(this)">
+    <div class="card-image" style="aspect-ratio:auto;display:block;background:transparent;padding:12px">
+      <div class="win">
+        <div class="tb"><span class="logo"></span>Murmur<span class="sp"></span><span class="c">–</span><span class="c">✕</span></div>
+        <div class="body">
+          <div class="steps"><span class="on">1 · Speech model</span><span>2 · Microphone</span><span>3 · Try it</span></div>
+          <h4>Getting Murmur ready</h4>
+          <div class="mut">Murmur turns speech into text on this PC. It needs its speech model once — about 1.6 GB.</div>
+          <div class="card">
+            <div class="row"><span>Downloading speech model</span><span class="mut small">612 MB of 1.6 GB</span></div>
+            <div class="bar"><i></i></div>
+            <div class="row small mut"><span>18 MB/s · about 1 minute left</span><span>Resumes if interrupted</span></div>
+          </div>
+          <div class="tip">
+            <span class="ic">⚡</span>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div><b>Your NVIDIA GeForce RTX 3060 can run Murmur about twice as fast.</b></div>
+              <div class="mut small">Murmur is using your graphics card through Vulkan. Install NVIDIA's free CUDA 13 toolkit (about 3 GB) and restart Murmur to use CUDA.</div>
+              <div><span class="btn">Get CUDA 13 ↗</span> <span class="mut small" style="margin-left:8px">Not now</span></div>
+            </div>
+          </div>
+          <div class="foot"><span class="mut small">You can close this window — Murmur keeps downloading.</span><span class="btn ghost">Next</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>1 · Speech model (+ CUDA tip)</h3><p>Progress with size, speed and time left. The CUDA tip only shows for NVIDIA cards without CUDA; "Not now" hides it here, and it stays available in Settings.</p></div>
+  </div>
+
+  <div class="card" data-choice="step2" onclick="toggleSelect(this)">
+    <div class="card-image" style="aspect-ratio:auto;display:block;background:transparent;padding:12px">
+      <div class="win">
+        <div class="tb"><span class="logo"></span>Murmur<span class="sp"></span><span class="c">–</span><span class="c">✕</span></div>
+        <div class="body">
+          <div class="steps"><span class="done">✓ Speech model</span><span class="on">2 · Microphone</span><span>3 · Try it</span></div>
+          <h4>Check your microphone</h4>
+          <div class="mut">Say something — the bars should move.</div>
+          <div class="card">
+            <div class="row"><span>Microphone</span><span class="mut">Windows default — Headphones (WH-1000XM6) ▾</span></div>
+            <div class="row"><span class="ok small">✓ Microphone access allowed</span>
+              <span class="meter"><i style="height:30%"></i><i style="height:55%"></i><i style="height:85%"></i><i style="height:60%"></i><i style="height:95%"></i><i style="height:40%"></i><i style="height:70%"></i><i style="height:25%"></i></span></div>
+          </div>
+          <div class="mut small">Bluetooth headsets take about a second to switch on their microphone — wait for the start sound before you talk.</div>
+          <div class="foot"><span class="mut small">Problems? Windows Settings → Privacy → Microphone</span><span class="btn ghost">Next</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>2 · Microphone</h3><p>Asks for Windows microphone permission, lets you pick the mic, and shows a live level meter so you know it hears you.</p></div>
+  </div>
+
+  <div class="card" data-choice="step3" onclick="toggleSelect(this)">
+    <div class="card-image" style="aspect-ratio:auto;display:block;background:transparent;padding:12px">
+      <div class="win">
+        <div class="tb"><span class="logo"></span>Murmur<span class="sp"></span><span class="c">–</span><span class="c">✕</span></div>
+        <div class="body">
+          <div class="steps"><span class="done">✓ Speech model</span><span class="done">✓ Microphone</span><span class="on">3 · Try it</span></div>
+          <h4>Try it</h4>
+          <div class="mut">Click the box, hold <span class="kbd">Right Ctrl</span>, say a sentence, and let go.</div>
+          <div class="practice">Hello Murmur, this is my first dictation.</div>
+          <div class="row"><span class="ok">✓ That's it — Murmur types wherever your cursor is.</span><span class="pillmini"><span class="rec"></span>pill</span></div>
+          <div class="mut small">Tap <span class="kbd">Right Ctrl</span> once for hands-free; tap again to finish. Esc cancels. Change the key in Settings.</div>
+          <div class="foot"><span class="mut small">Murmur lives in the tray from now on.</span><span class="btn">Done</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>3 · Try it</h3><p>A practice box for the first real dictation, with the hold / tap / Esc basics. "Done" closes setup; Murmur stays in the tray.</p></div>
+  </div>
+
+  <div class="card" data-choice="settings" onclick="toggleSelect(this)">
+    <div class="card-image" style="aspect-ratio:auto;display:block;background:transparent;padding:12px">
+      <div class="win">
+        <div class="tb"><span class="logo"></span>Murmur<span class="sp"></span><span class="c">–</span><span class="c">✕</span></div>
+        <div class="body">
+          <h4 style="font-size:17px">Settings</h4>
+          <div class="card">
+            <div><b>Whisper large-v3-turbo</b></div>
+            <div class="mut">Ready · Vulkan</div>
+            <div class="tip" style="margin-top:4px">
+              <span class="ic">⚡</span>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <div class="small">CUDA isn't installed. Your NVIDIA GeForce RTX 3060 can run Murmur about twice as fast with CUDA 13.</div>
+                <div><span class="btn">Get CUDA 13 ↗</span> <span class="btn ghost" style="margin-left:6px">Restart Murmur</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="mut small">Other variants of this line:</div>
+            <div class="small">• NVIDIA driver too old for CUDA 13 → <span style="color:#c6d6ff">Update NVIDIA driver ↗</span></div>
+            <div class="small">• No NVIDIA card → no tip at all (Vulkan or CPU is the best available)</div>
+            <div class="small">• CUDA in use → <span class="ok">Ready · CUDA</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Settings, afterwards</h3><p>The same tip lives permanently on the engine card until CUDA is in use, with a "Restart Murmur" button (CUDA is only picked up at start).</p></div>
+  </div>
+
+</div>
