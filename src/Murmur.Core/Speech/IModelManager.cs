@@ -39,4 +39,11 @@ public interface IModelManager
 
     /// <summary>Removes the model file, its partial download and its verification entry. A missing file is not an error.</summary>
     void Delete(SpeechModelInfo model);
+
+    /// <summary>
+    /// Like <see cref="Delete"/>, for a model that is not in use, except that a partial download written to within
+    /// <see cref="ModelManager.PartialDownloadKeep"/> stays: a switch that failed on the connection resumes it when the
+    /// model is chosen again. A missing file is not an error.
+    /// </summary>
+    void DeleteUnused(SpeechModelInfo model);
 }

@@ -35,6 +35,9 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
     /// </summary>
     public const int SecureConnectionRetries = 3;
 
+    /// <summary>How long <see cref="DeleteUnused"/> keeps a partial download after it was last written to.</summary>
+    public static TimeSpan PartialDownloadKeep { get; } = TimeSpan.FromDays(7);
+
     /// <summary>How long a download may receive no bytes before it is aborted and resumed.</summary>
     public static TimeSpan StallTimeout { get; } = TimeSpan.FromSeconds(30);
 
@@ -60,6 +63,16 @@ public sealed class ModelManager(MurmurPaths paths, HttpClient http, TimeProvide
         var modelPath = PathFor(model);
         DeleteIfExists(modelPath);
         DeleteIfExists(modelPath + ".part");
+        Forget(model);
+    }
+
+    public void DeleteUnused(SpeechModelInfo model)
+    {
+        var modelPath = PathFor(model);
+        DeleteIfExists(modelPath);
+        var part = new FileInfo(modelPath + ".part");
+        if (part.Exists && time.GetUtcNow() - part.LastWriteTimeUtc > PartialDownloadKeep)
+            part.Delete();
         Forget(model);
     }
 

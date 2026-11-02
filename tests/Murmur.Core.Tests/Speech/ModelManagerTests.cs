@@ -808,6 +808,55 @@ public sealed class ModelManagerTests : IDisposable
         Should.NotThrow(() => manager.Delete(_model));
     }
 
+    [Fact]
+    public async Task DeleteUnused_RecentPart_RemovesModelAndCacheEntryButKeepsPart()
+    {
+        var manager = CreateManager(_ => Ok(_body));
+        await Ensure(manager);
+        WritePart([1, 2, 3]);
+        File.SetLastWriteTimeUtc(PartPath, (_time.GetUtcNow() - ModelManager.PartialDownloadKeep + TimeSpan.FromHours(1)).UtcDateTime);
+
+        manager.DeleteUnused(_model);
+
+        File.Exists(ModelPath).ShouldBeFalse();
+        File.ReadAllText(_paths.ModelVerificationFile).ShouldNotContain("test.bin");
+        File.ReadAllBytes(PartPath).ShouldBe([1, 2, 3], "a switch that failed on the connection resumes it when the model is chosen again");
+    }
+
+    [Fact]
+    public void DeleteUnused_PartOlderThanTheKeep_RemovesIt()
+    {
+        var manager = CreateManager(_ => throw new InvalidOperationException());
+        WritePart([1, 2, 3]);
+        File.SetLastWriteTimeUtc(PartPath, (_time.GetUtcNow() - ModelManager.PartialDownloadKeep - TimeSpan.FromHours(1)).UtcDateTime);
+
+        manager.DeleteUnused(_model);
+
+        File.Exists(PartPath).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteUnused_RecentPartKept_ResumesWhenTheModelIsEnsured()
+    {
+        WritePart(_body[..400]);
+        File.SetLastWriteTimeUtc(PartPath, _time.GetUtcNow().UtcDateTime);
+        var manager = CreateManager(_ => Partial(new ScriptedStream(_body[400..], chunkSize: 100)));
+
+        manager.DeleteUnused(_model);
+        var path = await Ensure(manager);
+
+        _handler.Ranges.ShouldBe(["bytes=400-"]);
+        File.ReadAllBytes(path).ShouldBe(_body);
+    }
+
+    [Fact]
+    public void DeleteUnused_NothingOnDisk_DoesNotThrow()
+    {
+        var manager = CreateManager(_ => throw new InvalidOperationException());
+
+        Should.NotThrow(() => manager.DeleteUnused(_model));
+    }
+
     // ---- helpers --------------------------------------------------------------------------------------------
 
     private ModelManager CreateManager(Func<int, HttpResponseMessage> respond)

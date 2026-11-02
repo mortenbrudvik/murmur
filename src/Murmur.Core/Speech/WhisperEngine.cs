@@ -573,23 +573,27 @@ public sealed class WhisperEngine(
     /// <summary>
     /// Deletes the files of every catalog model but <paramref name="active"/>, which has just become Ready, and
     /// <paramref name="switchingTo"/>, whose partial download the operation goes on to resume: the previous model after
-    /// a switch, and whatever an unfinished switch or a failed first load left behind. Only from inside an operation, so
-    /// no download of another model can be running.
+    /// a switch, and whatever an unfinished switch or a failed first load left behind. A recent partial download stays
+    /// (<see cref="IModelManager.DeleteUnused"/>), so a switch that failed on the connection and was put back is not
+    /// thrown away by the next start. Only from inside an operation, so no download of another model can be running.
     /// </summary>
     private void DeleteModelsOtherThan(SpeechModelInfo active, SpeechModelInfo? switchingTo = null)
     {
         foreach (var id in Enum.GetValues<SpeechModelId>())
         {
             if (id != active.Id && id != switchingTo?.Id)
-                Delete(SpeechModelCatalog.Get(id));
+                Delete(SpeechModelCatalog.Get(id), unused: true);
         }
     }
 
-    private void Delete(SpeechModelInfo model)
+    private void Delete(SpeechModelInfo model, bool unused = false)
     {
         try
         {
-            models.Delete(model);
+            if (unused)
+                models.DeleteUnused(model);
+            else
+                models.Delete(model);
             _logger.Debug("Deleted any {Model} files", model.DisplayName);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
