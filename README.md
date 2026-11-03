@@ -9,6 +9,8 @@ terminal, a browser, your editor, mail or chat. Speech is recognised on your own
 On the Microsoft Store it is called **Murmur Voice Typing**:
 <https://apps.microsoft.com/detail/9N2FVKGMJQ5S>
 
+You can try it in your browser, with your own voice, at <https://brudvik.com/murmur>.
+
 ## What it does
 
 - **Hold to talk.** Hold Right Ctrl (or a hotkey you choose), speak, release. The text is pasted into
