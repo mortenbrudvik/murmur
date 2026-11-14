@@ -19,8 +19,9 @@ namespace Murmur.Core.Dictation;
 /// <para>
 /// Single-threaded by design: everything runs on the thread that created the controller (the UI thread). Recorder
 /// events and timer ticks are posted to that thread's <see cref="SynchronizationContext"/>, or run inline when it
-/// has none (tests). Only opening the microphone (it can take a second) and the clipboard work (paste, copy) run on
-/// the thread pool; without a synchronization context the microphone opens inline too.
+/// has none (tests). Only opening the microphone (it can take a second), the clipboard work (paste, copy) and the
+/// history and audio file writes run on the thread pool; without a synchronization context the microphone opens inline
+/// too.
 /// </para>
 /// </summary>
 public sealed class DictationController : IDisposable
@@ -301,7 +302,7 @@ public sealed class DictationController : IDisposable
 
     private void StartRecording(DateTimeOffset pressedAt)
     {
-        _settings = _settingsService.Load();
+        RefreshSettings();
         var generation = Interlocked.Increment(ref _generation);
         _detector.Reset();
         _levelWindowFill = 0;
@@ -759,8 +760,24 @@ public sealed class DictationController : IDisposable
         }
 
         // No recording started, so the settings snapshot may be older than the owner's last change to the sound cues.
-        _settings = _settingsService.Load();
+        RefreshSettings();
         ShowProblem(DescribeNotReady(status));
+    }
+
+    /// <summary>
+    /// Takes a new settings snapshot. When the settings cannot be read (the file is locked, or access to it is denied),
+    /// the previous snapshot stays: a dictation that has started must not fail on its settings.
+    /// </summary>
+    private void RefreshSettings()
+    {
+        try
+        {
+            _settings = _settingsService.Load();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.Warning(ex, "Could not read the settings; using the ones read before");
+        }
     }
 
     /// <summary>Shows a problem in the pill, with the problem cue when sound cues are on.</summary>
@@ -785,28 +802,11 @@ public sealed class DictationController : IDisposable
     /// <returns>Whether the entry is in history; losing only its audio or its announcement still counts as saved.</returns>
     private async Task<bool> SaveAsync(string text, string targetApp, bool pasted, float[] samples)
     {
-        HistoryEntry entry;
-        try
-        {
-            entry = _history.Add(text, targetApp, pasted);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Could not save the dictation to history");
+        // Off the UI thread: both are file writes. The announcement comes back to the UI thread.
+        var keepAudio = _settings.KeepAudio;
+        var entry = await Task.Run(() => Store(text, targetApp, pasted, keepAudio ? samples : null));
+        if (entry is null)
             return false;
-        }
-
-        if (_settings.KeepAudio)
-        {
-            try
-            {
-                _audioArchive.Save(entry.Id, samples);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, "Could not save the audio of history entry {EntryId}", entry.Id);
-            }
-        }
 
         try
         {
@@ -818,6 +818,39 @@ public sealed class DictationController : IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Adds the history entry, then saves its audio. Runs on the thread pool. Failures are logged, never thrown.
+    /// </summary>
+    /// <param name="samples">The audio to keep with the entry, or null when audio is not kept.</param>
+    /// <returns>The entry, or null when it could not be added.</returns>
+    private HistoryEntry? Store(string text, string targetApp, bool pasted, float[]? samples)
+    {
+        HistoryEntry entry;
+        try
+        {
+            entry = _history.Add(text, targetApp, pasted);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not save the dictation to history");
+            return null;
+        }
+
+        if (samples is not null)
+        {
+            try
+            {
+                _audioArchive.Save(entry.Id, samples);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Could not save the audio of history entry {EntryId}", entry.Id);
+            }
+        }
+
+        return entry;
     }
 
     /// <summary>

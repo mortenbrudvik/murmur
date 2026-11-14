@@ -713,6 +713,46 @@ public sealed class DictationControllerTests : IDisposable
         _recorder.Received(1).Start("mic-2");
     }
 
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task StartRecording_SettingsCannotBeRead_RecordsWithThePreviousSettings(Type failure)
+    {
+        _settings.Load().Returns(MurmurSettings.Default with { MicrophoneId = "mic-2", KeepAudio = true });
+        HoldAndRelease();
+        await Finished();
+        _settings.Load().Returns(_ => throw (Exception)Activator.CreateInstance(failure, "settings.json is locked")!);
+        _recorder.ClearReceivedCalls();
+        _pill.ClearReceivedCalls();
+        _audioArchive.ClearReceivedCalls();
+
+        DownPastArmDelay();
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        Up();
+        await Finished();
+
+        _recorder.Received(1).Start("mic-2");
+        _pill.Received(1).ShowStarting();
+        _pill.Received(1).ShowListening();
+        await _inserter.Received(2).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        _audioArchive.Received(1).Save(_added[1].Id, Speech); // KeepAudio from the previous snapshot
+        _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public void StartRecording_FirstSettingsReadFails_RecordsWithTheDefaults()
+    {
+        _settings.Load().Returns(_ => throw new IOException("settings.json is locked"));
+
+        DownPastArmDelay();
+
+        _recorder.Received(1).Start(null);
+        _pill.Received(1).ShowListening();
+        _matcher.DictationActive.ShouldBeTrue();
+    }
+
     [Fact]
     public async Task HotkeyDown_OpensTheMicrophoneOffTheUiThread()
     {
@@ -736,6 +776,35 @@ public sealed class DictationControllerTests : IDisposable
         mic.Recordings.ShouldBe(1);
         _cues.Received(1).PlayStart(); // its first audio
         _pill.Received(1).ShowListening();
+    }
+
+    [Fact]
+    public async Task Save_WritesHistoryAndAudioOffTheUiThread_AndAnnouncesOnIt()
+    {
+        _settings.Load().Returns(MurmurSettings.Default with { KeepAudio = true });
+        SynchronizationContext? addContext = null, audioContext = null, publishContext = null;
+        _history.When(h => h.Add(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>()))
+            .Do(_ => addContext = SynchronizationContext.Current);
+        _audioArchive.When(a => a.Save(Arg.Any<Guid>(), Arg.Any<float[]>()))
+            .Do(_ => audioContext = SynchronizationContext.Current);
+        _mediator.When(m => m.Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>()))
+            .Do(_ => publishContext = SynchronizationContext.Current);
+        var ui = new QueueSynchronizationContext();
+        _controller = Create(ui);
+        DownPastArmDelay(ui);
+        await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
+        _time.Advance(TimeSpan.FromMilliseconds(800));
+        ui.RunPending();
+
+        ui.Run(Up);
+        await ui.RunUntilCompleteAsync(Controller.CurrentWork, WaitLimit);
+
+        _history.Received(1).Add("Hello world.", "Notepad", true);
+        _audioArchive.Received(1).Save(_added.Single().Id, Speech);
+        addContext.ShouldNotBeSameAs(ui);
+        audioContext.ShouldNotBeSameAs(ui);
+        publishContext.ShouldBeSameAs(ui); // the web is told on the UI thread, as before
+        _pill.Received(1).Hide();
     }
 
     [Fact]

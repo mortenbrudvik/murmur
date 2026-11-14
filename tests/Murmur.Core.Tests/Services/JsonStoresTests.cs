@@ -271,6 +271,113 @@ public sealed class JsonStoresTests : IDisposable
     }
 
     [Fact]
+    public void SettingsService_Load_KeepsTheFileItReadUntilASave()
+    {
+        var service = NewSettingsService();
+        service.Save(MurmurSettings.Default with { MicrophoneId = "mic-1" });
+        service.Load();
+
+        // Changed behind the service's back: it keeps what it had.
+        File.WriteAllText(_paths.SettingsFile, "{\"microphoneId\":\"mic-2\"}");
+
+        service.Load().MicrophoneId.ShouldBe("mic-1");
+    }
+
+    [Fact]
+    public void SettingsService_Load_ReadsTheFileOnce()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(_paths.SettingsFile, "{\"microphoneId\":\"mic-1\"}");
+        var service = NewSettingsService();
+        service.Load();
+        File.Delete(_paths.SettingsFile);
+
+        service.Load().MicrophoneId.ShouldBe("mic-1");
+    }
+
+    [Fact]
+    public void SettingsService_SaveAndUpdate_ReplaceTheKeptSettings()
+    {
+        var service = NewSettingsService();
+        service.Load();
+
+        service.Save(MurmurSettings.Default with { MicrophoneId = "mic-1" });
+        service.Load().MicrophoneId.ShouldBe("mic-1");
+
+        service.Update(s => s with { KeepAudio = true });
+        service.Load().ShouldBe(MurmurSettings.Default with { MicrophoneId = "mic-1", KeepAudio = true });
+    }
+
+    [Fact]
+    public void SettingsService_ReadFails_KeepsNothingAndReadsAgainNextTime()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(_paths.SettingsFile, "{\"microphoneId\":\"mic-1\"}");
+        var service = NewSettingsService();
+
+        using (new FileStream(_paths.SettingsFile, FileMode.Open, FileAccess.Read, FileShare.None))
+            Should.Throw<IOException>(() => service.Load());
+
+        service.Load().MicrophoneId.ShouldBe("mic-1");
+    }
+
+    [Fact]
+    public void SettingsService_KeptSettings_StillRepairTheHotkeyAndNameItAfterTheLayout()
+    {
+        var service = NewSettingsService(FakeKeyboardLayout.Nordic);
+        service.Save(MurmurSettings.Default with
+        {
+            Hotkey = new HotkeyDefinition(0xDD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+]"),
+        });
+
+        service.Load().Hotkey.DisplayName.ShouldBe("Ctrl+Alt+Å");
+
+        service.Save(MurmurSettings.Default with { Hotkey = new HotkeyDefinition(0x41, HotkeyModifiers.None, "A") });
+
+        service.Load().Hotkey.ShouldBe(HotkeyDefinition.Default);
+    }
+
+    [Fact]
+    public void VocabularyService_Load_KeepsTheFileItReadUntilASave()
+    {
+        var service = new VocabularyService(_paths);
+        service.Save(new Vocabulary(["Murmur"], []));
+        service.Load();
+
+        File.WriteAllText(_paths.VocabularyFile, "{\"hintWords\":[\"Changed\"]}");
+        service.Load().HintWords.ShouldBe(["Murmur"]);
+
+        service.Save(new Vocabulary(["WebView2"], [new ReplacementRule("web view two", "WebView2")]));
+        var loaded = service.Load();
+
+        loaded.HintWords.ShouldBe(["WebView2"]);
+        loaded.Replacements.ShouldBe([new ReplacementRule("web view two", "WebView2")]);
+    }
+
+    [Fact]
+    public void VocabularyService_SaveWithMissingLists_KeepsThemEmpty()
+    {
+        var service = new VocabularyService(_paths);
+
+        service.Save(new Vocabulary(null!, null!));
+
+        service.Load().HintWords.ShouldBeEmpty();
+        service.Load().Replacements.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void VocabularyService_ReadFails_KeepsNothingAndReadsAgainNextTime()
+    {
+        new VocabularyService(_paths).Save(new Vocabulary(["Murmur"], []));
+        var service = new VocabularyService(_paths);
+
+        using (new FileStream(_paths.VocabularyFile, FileMode.Open, FileAccess.Read, FileShare.None))
+            Should.Throw<IOException>(() => service.Load());
+
+        service.Load().HintWords.ShouldBe(["Murmur"]);
+    }
+
+    [Fact]
     public void Paths_AreUnderRootWithSpecifiedNames()
     {
         _paths.SettingsFile.ShouldBe(Path.Combine(_root, "settings.json"));
