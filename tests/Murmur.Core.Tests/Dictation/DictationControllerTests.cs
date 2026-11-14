@@ -1400,6 +1400,56 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task KeepAudioOn_AudioSaveThrows_StillPastesAndKeepsTheEntry()
+    {
+        _settings.Load().Returns(MurmurSettings.Default with { KeepAudio = true });
+        _audioArchive.When(a => a.Save(Arg.Any<Guid>(), Arg.Any<float[]>())).Do(_ => throw new IOException("disk full"));
+
+        HoldAndRelease();
+        await Finished();
+
+        await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
+        _history.Received(1).Add("Hello world.", "Notepad", true);
+        // Losing only the audio still counts as saved: the entry is announced and nothing is reported.
+        await _mediator.Received(1).Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>());
+        _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public async Task HandsFreeTimeLimit_AnnouncementThrows_StillCountsAsSaved()
+    {
+        _mediator.Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("no window")));
+
+        Tap();
+        _time.Advance(TimeSpan.FromMinutes(10));
+        await Finished();
+
+        _history.Received(1).Add("Hello world.", "", false);
+        _pill.Received(1).ShowNotice("Saved to history", NoticeKind.Problem);
+        _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!); // not the clipboard fallback of a failed save
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public void HandleSignal_AfterDispose_DoesNothing()
+    {
+        Controller.Dispose();
+        _recorder.ClearReceivedCalls();
+
+        DownPastArmDelay();
+        Up();
+
+        _recorder.DidNotReceiveWithAnyArgs().Start(default);
+        _pill.ReceivedCalls().ShouldBeEmpty();
+        _cues.ReceivedCalls().ShouldBeEmpty();
+        _machine.State.ShouldBe(DictationState.Idle);
+        _matcher.DictationActive.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task SoundCuesOff_NoCues()
     {
         _settings.Load().Returns(MurmurSettings.Default with { SoundCues = false });
