@@ -5,18 +5,22 @@ namespace Murmur.Interop;
 
 public static class IpcLogger
 {
+    private const int MaxLoggedLength = 200;
+
     [Conditional("DEBUG")]
     public static void LogRequest(string serviceName, string methodName, string jsonParams)
     {
         Log.ForContext(typeof(IpcLogger))
-            .Debug("[IPC ->] {ServiceName}.{MethodName}({Params})", serviceName, methodName, Truncate(jsonParams));
+            .Debug("[IPC ->] {ServiceName}.{MethodName}({Params})", serviceName, methodName,
+                DescribePayload(serviceName, jsonParams));
     }
 
     [Conditional("DEBUG")]
     public static void LogResponse(string serviceName, string methodName, string jsonResult)
     {
         Log.ForContext(typeof(IpcLogger))
-            .Debug("[IPC <-] {ServiceName}.{MethodName} -> {Result}", serviceName, methodName, Truncate(jsonResult));
+            .Debug("[IPC <-] {ServiceName}.{MethodName} -> {Result}", serviceName, methodName,
+                DescribePayload(serviceName, jsonResult));
     }
 
     [Conditional("DEBUG")]
@@ -26,7 +30,7 @@ public static class IpcLogger
             return;
 
         Log.ForContext(typeof(IpcLogger))
-            .Debug("[IPC v] Event: {EventName} -> {Data}", eventName, Truncate(json));
+            .Debug("[IPC v] Event: {EventName} -> {Data}", eventName, DescribeEventPayload(eventName, json));
     }
 
     /// <summary>
@@ -35,6 +39,33 @@ public static class IpcLogger
     /// </summary>
     public static bool LogsEvent(string eventName) => eventName != "setup.micLevel";
 
-    private static string Truncate(string? value, int maxLength = 200)
-        => value is null ? "(null)" : value.Length <= maxLength ? value : value[..maxLength] + "...";
+    /// <summary>
+    /// What the log shows of a payload to or from <paramref name="serviceName"/>. The history and vocabulary services
+    /// carry what the user said and the words they added, and a Debug build writes its log to the same folder as the
+    /// installed app, so for those only the length is shown. Any other payload is shown up to 200 characters.
+    /// </summary>
+    public static string DescribePayload(string serviceName, string? json)
+    {
+        if (json is null)
+            return "(null)";
+        if (CarriesUserText(serviceName))
+            return $"({json.Length} chars)";
+        return json.Length <= MaxLoggedLength ? json : json[..MaxLoggedLength] + "...";
+    }
+
+    /// <summary>
+    /// What the log shows of an event's payload: as <see cref="DescribePayload"/> for the service the event's name
+    /// starts with, so <c>history.added</c> shows only its length.
+    /// </summary>
+    public static string DescribeEventPayload(string eventName, string? json)
+        => DescribePayload(ServiceOf(eventName), json);
+
+    private static bool CarriesUserText(string serviceName) => serviceName is "history" or "vocabulary";
+
+    /// <summary>The service part of an event name such as <c>history.added</c>.</summary>
+    private static string ServiceOf(string eventName)
+    {
+        var dot = eventName.IndexOf('.', StringComparison.Ordinal);
+        return dot < 0 ? eventName : eventName[..dot];
+    }
 }
