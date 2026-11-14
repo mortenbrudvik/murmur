@@ -101,6 +101,35 @@ public sealed class HistoryStore(MurmurPaths paths, TimeProvider time) : IHistor
         }
     }
 
+    public HistoryTotals Totals()
+    {
+        lock (_lock)
+        {
+            var entries = EnsureLoaded();
+            long words = 0;
+            foreach (var entry in entries)
+                words += CountWords(entry.Text);
+
+            // Entries are only ever appended, so the first one is the oldest.
+            return new HistoryTotals(entries.Count, words, entries.Count > 0 ? entries[0].Timestamp : null);
+        }
+    }
+
+    private static int CountWords(string text)
+    {
+        var words = 0;
+        var inWord = false;
+        foreach (var c in text)
+        {
+            var isSpace = char.IsWhiteSpace(c);
+            if (!isSpace && !inWord)
+                words++;
+            inWord = !isSpace;
+        }
+
+        return words;
+    }
+
     private List<HistoryEntry> EnsureLoaded() => _entries ??= ReadFile();
 
     private List<HistoryEntry> ReadFile()

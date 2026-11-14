@@ -22,4 +22,10 @@ public interface IHistoryStore
     bool Delete(Guid id);
 
     void Clear();
+
+    /// <summary>
+    /// How many dictations the history holds, how many words they add up to, and when the oldest was made. It counts
+    /// what is in the history now: a deleted entry no longer counts.
+    /// </summary>
+    HistoryTotals Totals();
 }

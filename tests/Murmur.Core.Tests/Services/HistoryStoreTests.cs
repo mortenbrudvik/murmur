@@ -376,4 +376,66 @@ public sealed class HistoryStoreTests : IDisposable
         CreateStore().Query(null, 10, null).Entries.Single().Text.ShouldBe(text);
         File.ReadAllLines(_paths.HistoryFile).Length.ShouldBe(1);
     }
+
+    [Fact]
+    public void Totals_EmptyHistory_IsZeroWithNoSince()
+    {
+        CreateStore().Totals().ShouldBe(new HistoryTotals(0, 0, null));
+    }
+
+    [Fact]
+    public void Totals_CountsWordsAsRunsOfNonWhitespace()
+    {
+        var store = CreateStore();
+        store.Add("  hello   world\n\tagain ", "app", pasted: true);
+        store.Add("one", "app", pasted: true);
+
+        var totals = store.Totals();
+
+        totals.Dictations.ShouldBe(2);
+        totals.Words.ShouldBe(4);
+    }
+
+    [Fact]
+    public void Totals_Since_IsTheOldestEntrysTimestamp()
+    {
+        var store = CreateStore();
+        var oldest = store.Add("first", "app", pasted: true);
+        _time.Advance(TimeSpan.FromDays(40));
+        store.Add("second", "app", pasted: true);
+
+        store.Totals().Since.ShouldBe(oldest.Timestamp);
+    }
+
+    [Fact]
+    public void Totals_AfterDelete_NoLongerCountsThatEntry()
+    {
+        var store = CreateStore();
+        var gone = store.Add("three little words", "app", pasted: true);
+        _time.Advance(TimeSpan.FromSeconds(1));
+        var kept = store.Add("two words", "app", pasted: true);
+
+        store.Delete(gone.Id);
+
+        store.Totals().ShouldBe(new HistoryTotals(1, 2, kept.Timestamp));
+    }
+
+    [Fact]
+    public void Totals_AfterClear_IsZero()
+    {
+        var store = CreateStore();
+        store.Add("some words here", "app", pasted: true);
+
+        store.Clear();
+
+        store.Totals().ShouldBe(new HistoryTotals(0, 0, null));
+    }
+
+    [Fact]
+    public void Totals_ReadsTheFileLikeAQueryDoes()
+    {
+        CreateStore().Add("kept on disk", "app", pasted: true);
+
+        CreateStore().Totals().Words.ShouldBe(3);
+    }
 }

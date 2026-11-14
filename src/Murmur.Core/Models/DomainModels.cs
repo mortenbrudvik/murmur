@@ -109,6 +109,12 @@ public sealed record HistoryEntry(Guid Id, DateTimeOffset Timestamp, string Text
 /// <summary>One page of history, newest first; <paramref name="HasMore"/> says whether older entries remain.</summary>
 public sealed record HistoryPageResult(IReadOnlyList<HistoryEntry> Entries, bool HasMore);
 
+/// <summary>
+/// What the history adds up to, for the About dialog. A word is a run of non-whitespace characters.
+/// <paramref name="Since"/> is the oldest entry's timestamp, null for an empty history.
+/// </summary>
+public sealed record HistoryTotals(int Dictations, long Words, DateTimeOffset? Since);
+
 public sealed record MicrophoneInfo(string Id, string Name, bool IsDefault);
 
 public enum EngineState
