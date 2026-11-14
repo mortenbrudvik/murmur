@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
-using System.Windows.Threading;
 using Autofac;
 using MediatR;
 using Murmur.Common;
@@ -49,7 +48,7 @@ public partial class App : Application
     /// <summary>The splash while it is up; null on a sign-in start and once it has handed over to the main window.</summary>
     private SplashWindow? _splash;
     private SplashViewModel? _splashModel;
-    private SplashGate? _splashGate;
+    private SplashSession? _splashSession;
 
     /// <summary>Set once Murmur is really exiting; until then closing the main window only hides it.</summary>
     public static bool IsQuitting { get; private set; }
@@ -143,11 +142,11 @@ public partial class App : Application
             ShowSplash();
 
             // The rest of start-up takes the UI thread for a good part of a second (measured: about 0.4 s on the
-            // owner's PC), and a window is only drawn when the dispatcher is free. So it waits one turn, at a priority
-            // below rendering: the splash is drawn first and start-up goes on behind it. Its animation and its clock
-            // begin when start-up is done and frames can be drawn again; otherwise the animation's opening would never
-            // be seen and the splash would close before its minimum time on screen.
-            Dispatcher.BeginInvoke(DispatcherPriority.Background, () => RunStartup(() =>
+            // owner's PC), and a window is only drawn when the dispatcher is free. So it waits one turn: the splash is
+            // drawn first and start-up goes on behind it. Its animation and its clock begin when start-up is done and
+            // frames can be drawn again; otherwise the animation's opening would never be seen and the splash would
+            // close before its minimum time on screen.
+            StartupTurn.AfterRender(Dispatcher, () => RunStartup(() =>
             {
                 FinishStart(launch);
                 BeginSplash();
@@ -199,7 +198,7 @@ public partial class App : Application
         PreloadHistoryAsync(_container.Resolve<IHistoryStore>()).FireAndForget();
 
         // 6. The splash closes once the web UI has drawn its first page (and its minimum time has passed).
-        _container.Resolve<UiReadiness>().BecameReady += () => _splashGate?.MarkReady();
+        _container.Resolve<UiReadiness>().BecameReady += () => _splashSession?.MarkUiReady();
 
         // Created before the pill and set explicitly: WPF makes the first window it sees the MainWindow, and that
         // must never be the pill or the splash. Its WebView only starts when the window is first shown.
@@ -268,7 +267,7 @@ public partial class App : Application
         // is up, so its page loads unseen and the splash hands over to a window that is already drawn.
         if (!IsSignInStart(launch, identity))
         {
-            if (_splash is not null)
+            if (_splashSession is { IsOver: false })
                 _mainWindow.Preload();
             else
                 ShowMainWindow();
@@ -283,16 +282,29 @@ public partial class App : Application
     private void ShowSplash()
     {
         _splashModel = new SplashViewModel(new AppInfo(new PackageIdentity(), MurmurPaths.Default).Version);
-        _splash = new SplashWindow(_splashModel);
-        _splash.SkipRequested += SkipSplash;
+        var splash = _splash = new SplashWindow(_splashModel);
 
         // WPF made the splash the MainWindow, being the first window created. It is not: see step 6.
         MainWindow = null;
 
-        _splashGate = new SplashGate(TimeProvider.System, SplashGate.DefaultMinimum, SplashGate.DefaultTimeout);
+        var gate = new SplashGate(TimeProvider.System, SplashGate.DefaultMinimum, SplashGate.DefaultTimeout);
+        var session = _splashSession = new SplashSession(
+            gate,
+            mainWindowIsShown: () => !IsQuitting && _mainWindow is { IsVisible: true },
+            revealMainWindow: activate => _mainWindow?.Reveal(activate),
+            closeSplash: () => CloseSplashWindow(splash),
+            foregroundProcessId: WindowNative.ForegroundProcessId,
+            ownProcessId: (uint)Environment.ProcessId);
+
+        splash.SkipRequested += session.Skip;
+
         // Raised on whichever thread closed the gate: a timer's, the IPC call's that reported the UI ready, or this one.
-        _splashGate.Closed += reason => Dispatcher.BeginInvoke(() => CloseSplash(reason));
-        _splash.Show();
+        gate.Closed += reason => Dispatcher.BeginInvoke(() =>
+        {
+            Log.Information("The splash closes: {Reason}", reason);
+            session.HandOver();
+        });
+        splash.Show();
     }
 
     /// <summary>
@@ -301,33 +313,28 @@ public partial class App : Application
     /// </summary>
     private void BeginSplash()
     {
-        _splash?.Play();
-        _splashGate?.Start();
-    }
-
-    /// <summary>Closes the splash now, if it is up: a click or a key on it, or any request for the main window.</summary>
-    private void SkipSplash() => _splashGate?.Skip();
-
-    /// <summary>
-    /// The hand-over: the main window becomes visible and the splash fades out. The window takes the focus only if
-    /// Murmur still has it (<see cref="SplashHandoff"/>). If start-up has not got as far as the main window yet (an
-    /// early skip), there is nothing to reveal: step 13 finds the splash gone and shows the window itself.
-    /// </summary>
-    private void CloseSplash(SplashCloseReason reason)
-    {
-        if (_splash is not { } splash)
+        if (_splashSession is not { IsOver: false } session)
             return;
 
-        Log.Information("The splash closes: {Reason}", reason);
+        _splash?.Play();
+        session.Begin();
+    }
+
+    /// <summary>Closes the splash now, if it is up: the still unseen main window was activated from the taskbar.</summary>
+    private void SkipSplash() => _splashSession?.Skip();
+
+    /// <summary>
+    /// The splash is over: it fades out after a hand-over, and goes at once when Murmur is quitting. Either way the
+    /// status line has nothing left to follow.
+    /// </summary>
+    private void CloseSplashWindow(SplashWindow splash)
+    {
         _splash = null;
         _splashModel = null;
-        _splashGate?.Dispose();
-        _splashGate = null;
-
-        if (!IsQuitting && _mainWindow is { IsVisible: true } window)
-            window.Reveal(SplashHandoff.ShouldActivate(WindowNative.ForegroundProcessId(), (uint)Environment.ProcessId));
-
-        splash.FadeOutAndCloseAsync().FireAndForget();
+        if (IsQuitting)
+            splash.Close();
+        else
+            splash.FadeOutAndCloseAsync().FireAndForget();
     }
 
     /// <summary>
@@ -566,11 +573,11 @@ public partial class App : Application
         if (IsQuitting || _mainWindow is null)
             return;
 
-        // While the splash is up the window is on its way: asking for it (the tray, a second launch) only cuts the
-        // splash short, and the hand-over shows the window.
-        if (_splash is not null)
+        // While the splash is up the window is on its way: asking for it (the tray, a second launch) cuts the splash
+        // short, and the hand-over brings the window to the front.
+        if (_splashSession is { IsOver: false } session)
         {
-            SkipSplash();
+            session.RequestWindow();
             return;
         }
 
@@ -596,11 +603,7 @@ public partial class App : Application
         IsQuitting = true;
 
         // A splash still up goes at once, without its hand-over.
-        _splashGate?.Dispose();
-        _splashGate = null;
-        _splash?.Close();
-        _splash = null;
-        _splashModel = null;
+        _splashSession?.Abandon();
 
         _inputHooks?.Dispose();
         _tray?.Dispose();

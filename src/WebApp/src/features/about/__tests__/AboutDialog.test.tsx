@@ -158,6 +158,47 @@ describe("AboutDialog", () => {
     expect(document.activeElement).toBe(last);
   });
 
+  // A click on the dialog's text (the tagline, the path) leaves the focus on the page's body: no button has it.
+  it("still closes on Esc when the focus has left its buttons", async () => {
+    const { onClose } = await openDialog();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes Tab back into the dialog when the focus has left its buttons, and never to the page behind", async () => {
+    const behind = document.createElement("button");
+    document.body.appendChild(behind);
+    await openDialog();
+    const first = screen.getByRole("button", { name: "Open folder" });
+    const last = screen.getByRole("button", { name: "Close" });
+
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(document.body, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(document.body, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    behind.focus();
+    fireEvent.keyDown(behind, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    behind.remove();
+  });
+
+  it("stops listening for keys once it is closed", async () => {
+    const { rerender, onClose } = await openDialog();
+    rerender(<AboutDialog open={false} engineStatus={ready} onClose={onClose} />);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("gives focus back to what had it when it closes", async () => {
     const opener = document.createElement("button");
     document.body.appendChild(opener);

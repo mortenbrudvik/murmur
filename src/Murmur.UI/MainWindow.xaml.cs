@@ -75,8 +75,6 @@ public partial class MainWindow : FluentWindow
             Activate();
     }
 
-    /// <summary>True between <see cref="Preload"/> and <see cref="Reveal"/>: shown, but not drawn.</summary>
-    public bool IsPreloaded => _cloaked;
 
     protected override void OnClosing(CancelEventArgs e)
     {

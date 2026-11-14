@@ -7,7 +7,7 @@ internal static partial class WindowNative
 {
     /// <summary>
     /// DWMWA_CLOAK: the window stays shown as far as Windows and WPF are concerned (it lays out, its WebView loads and
-    /// paints), but the desktop compositor does not draw it, and it has no taskbar button and no Alt+Tab entry.
+    /// paints), but the desktop compositor does not draw it. It does have its taskbar button (measured).
     /// </summary>
     private const uint DWMWA_CLOAK = 13;
 

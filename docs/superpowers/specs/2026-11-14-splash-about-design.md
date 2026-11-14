@@ -115,12 +115,15 @@ about 150 ms.
 - **Focus:** the splash takes the foreground when it appears, as the main window does today. When it closes, the main
   window is activated only if Murmur still has the foreground. If the user has gone to another app in the meantime, the
   main window is shown without being activated, so a dictation already under way is not pasted into Murmur. (My call.)
+  The exception is a window that was asked for while the splash was up (the tray icon, a second launch): it comes to
+  the front, because the app in front is then only the taskbar or whatever started the second launch. (Added after
+  the code review, 2026-11-15.)
 
 - **Ready signal:** the React app calls a new IPC request (`app` / `ready`) once, after its first real render (the
   setup page or the shell, not the `null` it returns while the setup state loads).
 - **Skip:** a click on the splash, or any key while it has focus, closes it at once and shows the main window, drawn
   or not.
-- **Timeout:** 8 s after it appeared it closes regardless and the main window is shown. In a Debug build with the
+- **Timeout:** 8 s after its animation began it closes regardless and the main window is shown. In a Debug build with the
   Vite server down, this is the path taken.
 - **Quit** from the tray while it is up closes it with everything else.
 

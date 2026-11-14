@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import "./AboutDialog.css";
 import HumHeader from "./HumHeader";
 import { buildDetails, describeDictated, describeRunningOn } from "./aboutText";
@@ -52,31 +52,42 @@ export default function AboutDialog({ open, engineStatus, onClose }: Props) {
     return () => clearTimeout(timer);
   }, [copyLabel]);
 
+  // The keys are heard on the document, not on the dialog: a click on the dialog's text (the tagline, the path) leaves
+  // the focus on the page's body, and a handler on the dialog would then hear nothing. Modal: Esc closes from
+  // anywhere, and Tab goes round the dialog's own controls and never out to the page behind it.
+  useEffect(() => {
+    if (!open) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (e.key !== "Tab") return;
+
+      const controls = [...(dialog.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+      if (controls.length === 0) return;
+
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      const active = document.activeElement;
+      const outside = !dialog.current?.contains(active);
+      if (e.shiftKey && (outside || active === first)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (outside || active === last)) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
-
-  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-
-    if (e.key !== "Tab") return;
-
-    // Modal: Tab goes round the dialog's own controls and never out to the page behind it.
-    const controls = [...(dialog.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
-    if (controls.length === 0) return;
-
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
 
   function onScrimMouseDown(e: MouseEvent<HTMLDivElement>) {
     if (e.target === e.currentTarget) onClose();
@@ -107,7 +118,7 @@ export default function AboutDialog({ open, engineStatus, onClose }: Props) {
 
   return (
     <div className="about-scrim" onMouseDown={onScrimMouseDown}>
-      <div className="about" role="dialog" aria-modal="true" aria-labelledby="about-name" ref={dialog} onKeyDown={onKeyDown}>
+      <div className="about" role="dialog" aria-modal="true" aria-labelledby="about-name" ref={dialog}>
         <HumHeader />
         <div className="about-main">
           <div className="about-id">

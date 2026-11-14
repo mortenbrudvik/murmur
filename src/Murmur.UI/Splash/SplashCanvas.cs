@@ -72,7 +72,7 @@ internal sealed class SplashCanvas : FrameworkElement
         IsHitTestVisible = false;
     }
 
-    /// <summary>Seconds since the splash appeared.</summary>
+    /// <summary>Seconds since the splash's animation began.</summary>
     public double Time
     {
         get => (double)GetValue(TimeProperty);
