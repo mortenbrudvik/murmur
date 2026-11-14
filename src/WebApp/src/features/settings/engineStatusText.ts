@@ -34,7 +34,11 @@ export function describeModelSwitch(download: DownloadProgress): EngineStatusVie
   return describeProgress(download, download.modelName);
 }
 
-/** The one status line shared by the Settings engine card and the banner above every page. */
+/**
+ * The one status line shared by the Settings engine card and the banner above every page. The splash shows the same
+ * line from C# (EngineStatusText.Describe in Murmur.Core), because it is on screen before this code runs: change the
+ * wording in both, and in both tests.
+ */
 export function describeEngineStatus(status: EngineStatus): EngineStatusView {
   switch (status.state) {
     case "downloading":
