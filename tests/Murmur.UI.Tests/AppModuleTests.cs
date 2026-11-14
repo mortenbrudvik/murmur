@@ -2,6 +2,7 @@ using Autofac;
 using Autofac.Core;
 using MediatR;
 using Murmur.Core.Audio;
+using Murmur.Core.Dictation;
 using Murmur.Core.Features.App;
 using Murmur.Core.Features.Models;
 using Murmur.Core.Features.Settings;
@@ -113,6 +114,15 @@ public sealed class AppModuleTests
         container.Resolve<ILinkOpener>().ShouldBeOfType<ShellLinkOpener>();
         container.Resolve<SetupCoordinator>().ShouldBeSameAs(container.Resolve<SetupCoordinator>());
         container.Resolve<LaunchOptions>().ShouldBeSameAs(container.Resolve<LaunchOptions>());
+    }
+
+    /// <summary>The dictation controller hands every recording to the delivery; one that cannot be built stops Murmur at start.</summary>
+    [Fact]
+    public void Bootstrap_ResolvesOneDictationDelivery()
+    {
+        using var container = AutofacBootstrapper.Bootstrap();
+
+        container.Resolve<DictationDelivery>().ShouldBeSameAs(container.Resolve<DictationDelivery>());
     }
 
     /// <summary>Settings and the hotkey capture both name symbol keys after the layout; each needs the one Win32 reader.</summary>

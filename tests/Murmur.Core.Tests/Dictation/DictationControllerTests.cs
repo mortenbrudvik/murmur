@@ -1990,11 +1990,12 @@ public sealed class DictationControllerTests : IDisposable
         SynchronizationContext.SetSynchronizationContext(context);
         try
         {
+            // A real delivery over the same substitutes, so the assertions on them cover the whole dictation.
+            var delivery = new DictationDelivery(
+                _engine, postProcessors ?? [new TranscriptCleaner(), new VocabularyReplacer(_vocabulary)],
+                inserter ?? _inserter, _history, _audioArchive, _vocabulary, _mediator, _time);
             return new DictationController(
-                _machine, _matcher, _recorder, _engine,
-                postProcessors ?? [new TranscriptCleaner(), new VocabularyReplacer(_vocabulary)],
-                inserter ?? _inserter, _history, _audioArchive, _pill, _cues, _notifier, _settings, _vocabulary, _keys, _mediator,
-                _time);
+                _machine, _matcher, _recorder, _engine, delivery, _pill, _cues, _notifier, _settings, _keys, _time);
         }
         finally
         {
@@ -2154,11 +2155,14 @@ public sealed class DictationControllerTests : IDisposable
     {
         private readonly ConcurrentQueue<LogEvent> _events = new();
 
-        /// <summary>The controller's events (the logger is global, so other test classes may log here too).</summary>
+        /// <summary>
+        /// The events of the controller and its delivery (the logger is global, so other test classes may log here too).
+        /// </summary>
         public LogEvent[] Events =>
         [
             .. _events.Where(e => e.Properties.TryGetValue(Constants.SourceContextPropertyName, out var source)
-                                  && source.ToString().Contains(nameof(DictationController))),
+                                  && (source.ToString().Contains(nameof(DictationController))
+                                      || source.ToString().Contains(nameof(DictationDelivery)))),
         ];
 
         public void Emit(LogEvent logEvent) => _events.Enqueue(logEvent);

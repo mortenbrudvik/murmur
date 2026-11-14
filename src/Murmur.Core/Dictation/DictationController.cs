@@ -1,12 +1,8 @@
-using MediatR;
 using Murmur.Core.Audio;
-using Murmur.Core.Features.History;
 using Murmur.Core.Input;
-using Murmur.Core.Insertion;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
-using Murmur.Core.Text;
 using Serilog;
 using Serilog.Events;
 
@@ -14,14 +10,14 @@ namespace Murmur.Core.Dictation;
 
 /// <summary>
 /// Runs dictation end to end. Hotkey signals drive the <see cref="DictationStateMachine"/>; its actions start and
-/// stop the microphone, transcribe, post-process, paste and record history, with the pill and sound cues as
-/// feedback.
+/// stop the microphone and hand the recording to <see cref="DictationDelivery"/> (transcribe, paste, record history),
+/// with the pill, sound cues and Windows notifications as feedback.
 /// <para>
 /// Single-threaded by design: everything runs on the thread that created the controller (the UI thread). Recorder
 /// events and timer ticks are posted to that thread's <see cref="SynchronizationContext"/>, or run inline when it
-/// has none (tests). Only opening the microphone (it can take a second), the clipboard work (paste, copy) and the
-/// history and audio file writes run on the thread pool; without a synchronization context the microphone opens inline
-/// too.
+/// has none (tests). Only opening the microphone (it can take a second) and, in <see cref="DictationDelivery"/>, the
+/// clipboard work (paste, copy) and the history and audio file writes run on the thread pool; without a synchronization
+/// context the microphone opens inline too.
 /// </para>
 /// </summary>
 public sealed class DictationController : IDisposable
@@ -47,20 +43,6 @@ public sealed class DictationController : IDisposable
     private static readonly UnpastedNotice LostUnpasted = new(
         TranscriptionFailedNotice, "Murmur couldn't keep your text",
         "It couldn't be pasted, saved to History or copied. Murmur's log has the details.");
-
-    // How a dictation ended, for the one log line each dictation gets.
-    private const string PastedOutcome = "pasted";
-    private const string LeftOnClipboardOutcome = "left-on-clipboard";
-    private const string SavedOnlyOutcome = "saved-only";
-    private const string SilenceOutcome = "silence";
-    private const string CancelledOutcome = "cancelled";
-    private const string FailedOutcome = "failed";
-
-    /// <summary>
-    /// Whisper's own silence verdict. The speech detector is the real gate (Whisper.net reports 0 here); this is a
-    /// harmless second guard.
-    /// </summary>
-    private const float NoSpeechThreshold = 0.6f;
 
     // Generic virtual-key codes, which cover both sides of the keyboard; the Win keys have none.
     private const int VkShift = 0x10;
@@ -89,17 +71,12 @@ public sealed class DictationController : IDisposable
     private readonly HotkeyMatcher _matcher;
     private readonly IAudioRecorder _recorder;
     private readonly ISpeechEngine _engine;
-    private readonly ITranscriptPostProcessor[] _postProcessors;
-    private readonly ITextInserter _inserter;
-    private readonly IHistoryStore _history;
-    private readonly IAudioArchive _audioArchive;
+    private readonly DictationDelivery _delivery;
     private readonly IPillPresenter _pill;
     private readonly ISoundCues _cues;
     private readonly IUserNotifier _notifier;
     private readonly ISettingsService _settingsService;
-    private readonly IVocabularyService _vocabulary;
     private readonly IKeyStateProbe _keys;
-    private readonly IMediator _mediator;
     private readonly TimeProvider _time;
     private readonly SynchronizationContext? _context;
     private readonly SpeechDetector _detector = new();
@@ -138,27 +115,22 @@ public sealed class DictationController : IDisposable
     private CancellationTokenSource? _cts;
     private bool _disposed;
 
+    /// <param name="engine">Asked whether it can transcribe; <paramref name="delivery"/> does the transcribing.</param>
     public DictationController(
         DictationStateMachine machine, HotkeyMatcher matcher, IAudioRecorder recorder, ISpeechEngine engine,
-        IEnumerable<ITranscriptPostProcessor> postProcessors, ITextInserter inserter, IHistoryStore history,
-        IAudioArchive audioArchive, IPillPresenter pill, ISoundCues cues, IUserNotifier notifier, ISettingsService settings,
-        IVocabularyService vocabulary, IKeyStateProbe keys, IMediator mediator, TimeProvider time)
+        DictationDelivery delivery, IPillPresenter pill, ISoundCues cues, IUserNotifier notifier,
+        ISettingsService settings, IKeyStateProbe keys, TimeProvider time)
     {
         _machine = machine;
         _matcher = matcher;
         _recorder = recorder;
         _engine = engine;
-        _postProcessors = [.. postProcessors.OrderBy(p => p.Order)];
-        _inserter = inserter;
-        _history = history;
-        _audioArchive = audioArchive;
+        _delivery = delivery;
         _pill = pill;
         _cues = cues;
         _notifier = notifier;
         _settingsService = settings;
-        _vocabulary = vocabulary;
         _keys = keys;
-        _mediator = mediator;
         _time = time;
         _context = SynchronizationContext.Current;
         if (_context is null)
@@ -572,7 +544,7 @@ public sealed class DictationController : IDisposable
         Abandon();
         _machine.Reset();
         ShowProblem(MicrophoneUnavailableNotice);
-        LogRecordingEnded(FailedOutcome);
+        LogRecordingEnded(DictationOutcome.Failed);
     }
 
     private void StopRecording(bool paste, DateTimeOffset releasedAt)
@@ -593,7 +565,7 @@ public sealed class DictationController : IDisposable
         int generation, Task opening, DictationStats stats, bool paste, CancellationTokenSource cts)
     {
         var ct = cts.Token;
-        var outcome = FailedOutcome;
+        var outcome = DictationOutcome.Failed;
         try
         {
             // Not Stop while the open is running: Stop waits for it, and this is the UI thread. Already open, this
@@ -601,7 +573,7 @@ public sealed class DictationController : IDisposable
             await WaitForOpenAsync(opening);
             if (!IsCurrent(generation))
             {
-                outcome = CancelledOutcome; // Esc while it opened: Abandon or the open released the microphone
+                outcome = DictationOutcome.Cancelled; // Esc while it opened: Abandon or the open released the microphone
                 return;
             }
 
@@ -619,35 +591,37 @@ public sealed class DictationController : IDisposable
             stats.AudioMs = samples.Length / (Resampler16k.TargetRate / 1000);
             stats.SpeechDetected = _detector.SpeechDetected;
 
-            var text = stats.SpeechDetected ? await TranscribeAsync(samples, ct) : "";
+            var text = "";
+            if (stats.SpeechDetected)
+            {
+                _pill.ShowTranscribing();
+                text = await _delivery.TranscribeAsync(samples, ct);
+            }
+
             stats.Characters = text.Length;
             if (!IsCurrent(generation))
             {
-                outcome = CancelledOutcome; // Esc during the transcription: the result is discarded
+                outcome = DictationOutcome.Cancelled; // Esc during the transcription: the result is discarded
                 return;
             }
 
             if (text.Length == 0)
             {
                 // Paste nothing, save nothing. A tap that was too short to say anything ends silently.
-                outcome = SilenceOutcome;
+                outcome = DictationOutcome.Silence;
                 if (stats.AudioMs >= NothingHeardMinAudioMs)
                     ShowProblem(NothingHeardNotice);
                 else
                     _pill.Hide();
             }
-            else if (paste)
-            {
-                outcome = await PasteAsync(generation, text, samples, stats, ct);
-            }
             else
             {
-                outcome = await KeepUnpastedAsync(generation, text, samples);
+                outcome = await DeliverAsync(generation, text, samples, stats, paste, ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            outcome = CancelledOutcome; // Esc: the result is discarded
+            outcome = DictationOutcome.Cancelled; // Esc: the result is discarded
         }
         catch (Exception ex)
         {
@@ -670,81 +644,57 @@ public sealed class DictationController : IDisposable
         }
     }
 
-    /// <returns>The post-processed transcript, or "" when there was no speech in it.</returns>
-    private async Task<string> TranscribeAsync(float[] samples, CancellationToken ct)
-    {
-        _pill.ShowTranscribing();
-        var prompt = PromptBuilder.Build(_vocabulary.Load().HintWords);
-        var result = await _engine.TranscribeAsync(samples, prompt, ct);
-        if (result.MaxNoSpeechProbability >= NoSpeechThreshold)
-            return "";
-
-        var text = result.Text;
-        foreach (var postProcessor in _postProcessors)
-            text = postProcessor.Process(text);
-
-        // Trimmed last: a vocabulary rule that deletes a leading or trailing word ("um" → "") leaves a space behind.
-        return text.Trim();
-    }
-
+    /// <summary>
+    /// Pastes the text, or only keeps it when it is not to be pasted, and tells the owner where it went unless the
+    /// dictation was cancelled meanwhile.
+    /// </summary>
     /// <returns>The outcome for the dictation's log line.</returns>
-    private async Task<string> PasteAsync(
-        int generation, string text, float[] samples, DictationStats stats, CancellationToken ct)
+    private async Task<DictationOutcome> DeliverAsync(
+        int generation, string text, float[] samples, DictationStats stats, bool paste, CancellationToken ct)
     {
-        InsertResult inserted;
-        try
+        var keepAudio = _settings.KeepAudio;
+        DictationOutcome outcome;
+        if (paste)
         {
-            // Off the UI thread: clipboard retries and the wait for modifiers to be released would freeze it.
-            inserted = await Task.Run(() => _inserter.InsertAsync(text, ct));
+            var delivered = await _delivery.PasteAsync(text, samples, keepAudio, () => IsCurrent(generation), ct);
+            outcome = delivered.Outcome;
+            stats.TargetApp = delivered.TargetApp;
+            if (delivered.InsertedAt is { } insertedAt)
+                stats.ReleaseToPasteMs = (long)(insertedAt - stats.StoppedAt).TotalMilliseconds;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        else
         {
-            _logger.Error(ex, "Could not paste the transcript");
-            return IsCurrent(generation) ? await KeepUnpastedAsync(generation, text, samples) : CancelledOutcome;
+            outcome = await _delivery.KeepUnpastedAsync(text, samples, keepAudio, () => IsCurrent(generation));
         }
 
-        // The text has left Murmur (it is in the target app, or on the clipboard), so it goes into history even if Esc
-        // was pressed in the meantime; only the pill is left alone then.
-        stats.ReleaseToPasteMs = (long)(_time.GetUtcNow() - stats.StoppedAt).TotalMilliseconds;
-        stats.TargetApp = inserted.TargetApp;
-        var pasted = inserted.Outcome == InsertOutcome.Pasted;
-
-        // A failed save is only logged: the text is already where the owner wanted it.
-        await SaveAsync(text, inserted.TargetApp, pasted, samples);
+        // Text that reached the target app or history after Esc is not reported: the pill is left alone then.
         if (IsCurrent(generation))
-        {
-            if (pasted)
-                _pill.Hide();
-            else
-                NotifyUnpasted(CopiedUnpasted);
-        }
+            ShowDelivered(outcome);
 
-        return pasted ? PastedOutcome : LeftOnClipboardOutcome;
+        return outcome;
     }
 
     /// <summary>
-    /// For text that was not pasted (a hands-free session that hit its time limit, or a failed paste): keeps it in
-    /// history, or when that fails, on the clipboard.
+    /// Says where delivered text went. Pasted text needs no word, so the pill just goes; text that was not pasted is a
+    /// problem, told in the pill and in a Windows notification.
     /// </summary>
-    /// <returns>The outcome for the dictation's log line.</returns>
-    private async Task<string> KeepUnpastedAsync(int generation, string text, float[] samples)
+    private void ShowDelivered(DictationOutcome outcome)
     {
-        if (await SaveAsync(text, "", pasted: false, samples))
+        switch (outcome)
         {
-            if (IsCurrent(generation))
+            case DictationOutcome.Pasted:
+                _pill.Hide();
+                break;
+            case DictationOutcome.LeftOnClipboard:
+                NotifyUnpasted(CopiedUnpasted);
+                break;
+            case DictationOutcome.SavedOnly:
                 NotifyUnpasted(SavedUnpasted);
-            return SavedOnlyOutcome;
+                break;
+            case DictationOutcome.Failed:
+                NotifyUnpasted(LostUnpasted);
+                break;
         }
-
-        if (!IsCurrent(generation))
-            return CancelledOutcome;
-
-        // Off the UI thread: the copy waits for any clipboard restore still pending.
-        var copied = await Task.Run(() => _inserter.TryCopy(text));
-        if (IsCurrent(generation))
-            NotifyUnpasted(copied ? CopiedUnpasted : LostUnpasted);
-
-        return copied ? LeftOnClipboardOutcome : FailedOutcome;
     }
 
     /// <summary>
@@ -798,61 +748,6 @@ public sealed class DictationController : IDisposable
         _notifier.Notify(notice.Title, notice.Message);
     }
 
-    /// <summary>Records the dictation in history (with its audio, when kept) and announces it. Failures are logged, never thrown.</summary>
-    /// <returns>Whether the entry is in history; losing only its audio or its announcement still counts as saved.</returns>
-    private async Task<bool> SaveAsync(string text, string targetApp, bool pasted, float[] samples)
-    {
-        // Off the UI thread: both are file writes. The announcement comes back to the UI thread.
-        var keepAudio = _settings.KeepAudio;
-        var entry = await Task.Run(() => Store(text, targetApp, pasted, keepAudio ? samples : null));
-        if (entry is null)
-            return false;
-
-        try
-        {
-            await _mediator.Publish(new HistoryEntryAddedNotification(entry));
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Could not announce history entry {EntryId}", entry.Id);
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Adds the history entry, then saves its audio. Runs on the thread pool. Failures are logged, never thrown.
-    /// </summary>
-    /// <param name="samples">The audio to keep with the entry, or null when audio is not kept.</param>
-    /// <returns>The entry, or null when it could not be added.</returns>
-    private HistoryEntry? Store(string text, string targetApp, bool pasted, float[]? samples)
-    {
-        HistoryEntry entry;
-        try
-        {
-            entry = _history.Add(text, targetApp, pasted);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Could not save the dictation to history");
-            return null;
-        }
-
-        if (samples is not null)
-        {
-            try
-            {
-                _audioArchive.Save(entry.Id, samples);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, "Could not save the audio of history entry {EntryId}", entry.Id);
-            }
-        }
-
-        return entry;
-    }
-
     /// <summary>
     /// Drops the current dictation: releases the microphone, cancels any transcription or paste in flight (its
     /// result is discarded, unless Ctrl+V was already sent) and stops polling. The caller updates the pill.
@@ -872,7 +767,7 @@ public sealed class DictationController : IDisposable
         if (_recording)
         {
             _recording = false;
-            LogRecordingEnded(CancelledOutcome);
+            LogRecordingEnded(DictationOutcome.Cancelled);
         }
 
         _cts?.Cancel();
@@ -881,7 +776,7 @@ public sealed class DictationController : IDisposable
     }
 
     /// <summary>Logs the outcome of a dictation that ended while still recording (cancelled, or the microphone failed).</summary>
-    private void LogRecordingEnded(string outcome)
+    private void LogRecordingEnded(DictationOutcome outcome)
     {
         _stats.StoppedAt = _time.GetUtcNow();
         _stats.SpeechDetected = _detector.SpeechDetected;
@@ -889,13 +784,25 @@ public sealed class DictationController : IDisposable
     }
 
     /// <summary>The one Information line every dictation ends with. Never includes the transcript, only its length.</summary>
-    private void LogOutcome(string outcome, DictationStats stats) =>
+    private void LogOutcome(DictationOutcome outcome, DictationStats stats) =>
         _logger.Information(
             "Dictation {Outcome:l}: recorded {RecordingMs} ms ({AudioMs} ms of audio, the first {FirstAudioMs} ms after the press), " +
             "speech detected {SpeechDetected}, peak {PeakDbfs:F1} dBFS, {Characters} characters, " +
             "release to paste {ReleaseToPasteMs} ms, target {TargetApp}",
-            outcome, (long)(stats.StoppedAt - stats.StartedAt).TotalMilliseconds, stats.AudioMs, stats.FirstAudioMs,
+            Describe(outcome), (long)(stats.StoppedAt - stats.StartedAt).TotalMilliseconds, stats.AudioMs, stats.FirstAudioMs,
             stats.SpeechDetected, stats.PeakDbfs, stats.Characters, stats.ReleaseToPasteMs, stats.TargetApp);
+
+    /// <summary>The outcome as the log line names it.</summary>
+    private static string Describe(DictationOutcome outcome) => outcome switch
+    {
+        DictationOutcome.Pasted => "pasted",
+        DictationOutcome.LeftOnClipboard => "left-on-clipboard",
+        DictationOutcome.SavedOnly => "saved-only",
+        DictationOutcome.Silence => "silence",
+        DictationOutcome.Cancelled => "cancelled",
+        DictationOutcome.Failed => "failed",
+        _ => outcome.ToString(),
+    };
 
     private void EndDictation()
     {

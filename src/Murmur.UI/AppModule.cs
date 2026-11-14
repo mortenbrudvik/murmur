@@ -128,6 +128,7 @@ public class AppModule : Module
         builder.RegisterType<InputStatus>().SingleInstance();
         builder.Register(_ => new DictationStateMachine(DictationTimings.Default)).SingleInstance();
         builder.RegisterType<SoundCues>().As<ISoundCues>().SingleInstance();
+        builder.RegisterType<DictationDelivery>().SingleInstance();
 
         // Resolve on the UI thread: it captures that thread's SynchronizationContext.
         builder.RegisterType<DictationController>().SingleInstance();
