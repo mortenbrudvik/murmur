@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Windows;
 using System.Windows.Interop;
 using Murmur.Core.Dictation;
 using Murmur.UI.Pill;
@@ -221,7 +222,64 @@ public class PillPresenterTests
         });
     }
 
+    [Fact]
+    public void ShowStarting_FromAnotherThread_ShowsThePillWithoutTakingFocus()
+    {
+        WithPill(rig =>
+        {
+            var foreground = GetForegroundWindow();
+
+            OnAnotherThread(rig.Pill.ShowStarting);
+            StaHost.PumpUntil(() => rig.Window.IsVisible, TimeSpan.FromSeconds(2)).ShouldBeTrue();
+            StaHost.Pump(Short);
+
+            rig.Vm.Mode.ShouldBe(PillMode.Starting);
+            rig.Window.IsActive.ShouldBeFalse();
+            GetForegroundWindow().ShouldBe(foreground);
+        });
+    }
+
+    // Red means recording: while the microphone starts, the pill shows a hollow dot in its place.
+    [Fact]
+    public void ShowStarting_ThenListening_ShowsTheRecordingDotOnlyOnceListening()
+    {
+        WithPill(rig =>
+        {
+            var recordingDot = (FrameworkElement)rig.Window.FindName("RecordingDot");
+            var startingDot = (FrameworkElement)rig.Window.FindName("StartingDot");
+
+            rig.Pill.ShowStarting();
+            StaHost.Pump(Short);
+            recordingDot.IsVisible.ShouldBeFalse();
+            startingDot.IsVisible.ShouldBeTrue();
+
+            rig.Pill.ShowListening();
+            StaHost.Pump(Short);
+            recordingDot.IsVisible.ShouldBeTrue();
+            startingDot.IsVisible.ShouldBeFalse();
+        });
+    }
+
+    [Fact]
+    public void ShowStarting_ThenListening_KeepsThePillTheSameSizeAndPlace()
+    {
+        WithPill(rig =>
+        {
+            rig.Pill.ShowStarting();
+            StaHost.Pump(Short);
+            var (left, width) = (rig.Window.Left, rig.Window.ActualWidth);
+
+            rig.Pill.ShowListening();
+            StaHost.Pump(Short);
+
+            rig.Window.ActualWidth.ShouldBe(width, 0.01);
+            rig.Window.Left.ShouldBe(left, 0.5); // within a pixel: Left reads back rounded to device pixels after a move
+            width.ShouldBeGreaterThan(PillWindow.ShadowMargin.Left + PillWindow.ShadowMargin.Right + 40); // the dot and bars, not an empty capsule
+        });
+    }
+
     [Theory]
+    [InlineData(PillMode.Starting)]
     [InlineData(PillMode.Listening)]
     [InlineData(PillMode.Transcribing)]
     public void Show_AfterNotice_CancelsTheHideTimer(PillMode next)
@@ -229,7 +287,11 @@ public class PillPresenterTests
         WithPill(rig =>
         {
             rig.Pill.ShowNotice("Loading model…");
-            if (next == PillMode.Listening)
+            if (next == PillMode.Starting)
+            {
+                rig.Pill.ShowStarting();
+            }
+            else if (next == PillMode.Listening)
             {
                 rig.Pill.ShowListening();
             }

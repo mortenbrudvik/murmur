@@ -27,6 +27,12 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     // Work area (DIPs) of the monitor the pill was last shown on; reused while it stays visible.
     private Rect _workAreaDip;
 
+    public void ShowStarting() => Post(() =>
+    {
+        StopNoticeTimer();
+        Show(PillMode.Starting);
+    });
+
     public void ShowListening() => Post(() =>
     {
         StopNoticeTimer();

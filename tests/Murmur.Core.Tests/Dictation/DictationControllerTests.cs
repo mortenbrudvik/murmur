@@ -637,7 +637,7 @@ public sealed class DictationControllerTests : IDisposable
 
         Received.InOrder(() =>
         {
-            _pill.ShowListening();
+            _pill.ShowStarting();
             _pill.ShowNotice("Microphone unavailable"); // replaces the pill shown before the microphone was opened
         });
         _machine.State.ShouldBe(DictationState.Idle);
@@ -673,7 +673,8 @@ public sealed class DictationControllerTests : IDisposable
         mic.WaitUntilOpening();
         mic.StartContext.ShouldNotBeSameAs(ui);
         mic.IsOpening.ShouldBeTrue();
-        _pill.Received(1).ShowListening();
+        _pill.Received(1).ShowStarting();
+        _pill.DidNotReceive().ShowListening();
         _matcher.DictationActive.ShouldBeTrue(); // so the hook catches Esc and a combo key while it opens
         _machine.State.ShouldBe(DictationState.HoldRecording);
 
@@ -682,6 +683,7 @@ public sealed class DictationControllerTests : IDisposable
 
         mic.Recordings.ShouldBe(1);
         _cues.Received(1).PlayStart(); // its first audio
+        _pill.Received(1).ShowListening();
     }
 
     [Fact]
@@ -797,7 +799,7 @@ public sealed class DictationControllerTests : IDisposable
         contextDuringOpen.ShouldNotBeSameAs(ui);
         Received.InOrder(() =>
         {
-            _pill.ShowListening();
+            _pill.ShowStarting();
             _pill.ShowNotice("Microphone unavailable"); // replaces the pill shown before the microphone was opened
         });
         _recorder.DidNotReceive().Cancel();
@@ -856,7 +858,8 @@ public sealed class DictationControllerTests : IDisposable
         DownPastArmDelay(ui); // pressed again before the first microphone has finished opening
 
         _recorder.Received(1).Start(Arg.Any<string?>()); // the recorder takes one recording at a time
-        _pill.Received(2).ShowListening();
+        _pill.Received(2).ShowStarting();
+        _pill.DidNotReceive().ShowListening(); // no microphone is live yet
 
         mic.Open();
         await ui.RunUntilCompleteAsync(Controller.MicrophoneOpening, WaitLimit);
@@ -868,6 +871,7 @@ public sealed class DictationControllerTests : IDisposable
             _recorder.Start(Arg.Any<string?>());
             _cues.PlayStart(); // on the second microphone's audio: the first one's belongs to the cancelled press
         });
+        _pill.Received(1).ShowListening(); // likewise only for the second microphone's audio
         mic.Recordings.ShouldBe(1);
         mic.ReleasedWhileOpening.ShouldBeFalse();
         logs.Events.ShouldNotContain(e => e.Exception != null);
@@ -1715,6 +1719,63 @@ public sealed class DictationControllerTests : IDisposable
         _pill.ClearReceivedCalls();
         RaiseSamples(Speech);
         _pill.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void RecordingStarted_UntilTheFirstAudio_ThePillShowsStartingNotListening()
+    {
+        _chunksOnStart = [];
+
+        DownPastArmDelay();
+
+        _pill.Received(1).ShowStarting();
+        _pill.DidNotReceive().ShowListening();
+    }
+
+    [Fact]
+    public void FirstAudio_SwitchesThePillToListeningOnce()
+    {
+        _chunksOnStart = [];
+        DownPastArmDelay();
+
+        RaiseSamples(Speech);
+        RaiseSamples(Speech);
+
+        Received.InOrder(() =>
+        {
+            _pill.ShowStarting();
+            _pill.ShowListening();
+        });
+        _pill.Received(1).ShowListening();
+    }
+
+    [Fact]
+    public async Task DictationLogLine_SaysHowLongAfterThePressTheFirstAudioCame()
+    {
+        using var logs = new LogCapture();
+        _chunksOnStart = [];
+        DownPastArmDelay();
+        _time.Advance(TimeSpan.FromMilliseconds(650));
+
+        RaiseSamples(Speech);
+        Up();
+        await Finished();
+
+        var line = logs.Events.Single(e => e.Properties.ContainsKey("Outcome"));
+        ((ScalarValue)line.Properties["FirstAudioMs"]).Value.ShouldBe((long)(ArmDelay.TotalMilliseconds + 650));
+    }
+
+    [Fact]
+    public async Task DictationLogLine_WithoutAnyAudio_HasNoFirstAudioTime()
+    {
+        using var logs = new LogCapture();
+        _chunksOnStart = [];
+
+        HoldAndRelease();
+        await Finished();
+
+        var line = logs.Events.Single(e => e.Properties.ContainsKey("Outcome"));
+        ((ScalarValue)line.Properties["FirstAudioMs"]).Value.ShouldBeNull();
     }
 
     private DictationController Create(

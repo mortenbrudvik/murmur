@@ -6,7 +6,13 @@ namespace Murmur.Core.Dictation;
 /// </summary>
 public interface IPillPresenter
 {
-    /// <summary>Shows the pill with a live waveform (a red dot and level bars).</summary>
+    /// <summary>
+    /// Shows the pill while the microphone is being started (a hollow dot and flat, dimmed bars): the hotkey was
+    /// seen, but nothing is recorded yet.
+    /// </summary>
+    void ShowStarting();
+
+    /// <summary>Shows the pill with a live waveform (a red dot and level bars): the microphone is recording.</summary>
     void ShowListening();
 
     /// <summary>Adds one microphone level reading to the waveform.</summary>

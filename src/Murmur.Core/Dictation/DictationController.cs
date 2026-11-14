@@ -294,9 +294,11 @@ public sealed class DictationController : IDisposable
         _recording = true; // set first: without a synchronization context, chunks arrive even from inside Start
 
         // Opening the microphone can take a second (a Bluetooth headset), so it opens on the thread pool and the rest
-        // happens at once: the pill shows, and the hook catches Esc and a combo key. If the microphone cannot be opened,
-        // a notice replaces the pill.
-        _pill.ShowListening();
+        // happens at once: the pill shows, and the hook catches Esc and a combo key. The pill shows that the microphone
+        // is starting, not that it is listening: audio comes only some time after the open (most of a second on some
+        // devices), and what is said before then is lost. The first audio turns it to listening. If the microphone
+        // cannot be opened, a notice replaces the pill.
+        _pill.ShowStarting();
         _matcher.DictationActive = true;
         _opening = OpenMicrophoneAsync(generation, _settings.MicrophoneId, _opening);
 
@@ -426,8 +428,10 @@ public sealed class DictationController : IDisposable
         if (!_micLive)
         {
             // The first audio marks the moment the microphone is live (a Bluetooth headset can take a second to
-            // open), so the start cue tells the owner when to talk.
+            // open), so the pill and the start cue tell the owner when to talk.
             _micLive = true;
+            _stats.FirstAudioMs = (long)(_time.GetUtcNow() - _stats.StartedAt).TotalMilliseconds;
+            _pill.ShowListening();
             if (_settings.SoundCues)
                 _cues.PlayStart();
         }
@@ -799,10 +803,11 @@ public sealed class DictationController : IDisposable
     /// <summary>The one Information line every dictation ends with. Never includes the transcript, only its length.</summary>
     private void LogOutcome(string outcome, DictationStats stats) =>
         _logger.Information(
-            "Dictation {Outcome:l}: recorded {RecordingMs} ms ({AudioMs} ms of audio), speech detected {SpeechDetected}, " +
-            "peak {PeakDbfs:F1} dBFS, {Characters} characters, release to paste {ReleaseToPasteMs} ms, target {TargetApp}",
-            outcome, (long)(stats.StoppedAt - stats.StartedAt).TotalMilliseconds, stats.AudioMs, stats.SpeechDetected,
-            stats.PeakDbfs, stats.Characters, stats.ReleaseToPasteMs, stats.TargetApp);
+            "Dictation {Outcome:l}: recorded {RecordingMs} ms ({AudioMs} ms of audio, the first {FirstAudioMs} ms after the press), " +
+            "speech detected {SpeechDetected}, peak {PeakDbfs:F1} dBFS, {Characters} characters, " +
+            "release to paste {ReleaseToPasteMs} ms, target {TargetApp}",
+            outcome, (long)(stats.StoppedAt - stats.StartedAt).TotalMilliseconds, stats.AudioMs, stats.FirstAudioMs,
+            stats.SpeechDetected, stats.PeakDbfs, stats.Characters, stats.ReleaseToPasteMs, stats.TargetApp);
 
     private void EndDictation()
     {
@@ -835,6 +840,12 @@ public sealed class DictationController : IDisposable
         public DateTimeOffset StoppedAt { get; set; } = startedAt;
 
         public int AudioMs { get; set; }
+
+        /// <summary>
+        /// From the press to the first audio from the microphone: how long the owner had to wait before talking. Null
+        /// when no audio came. The microphone's open is only part of it; the device takes time to deliver after that.
+        /// </summary>
+        public long? FirstAudioMs { get; set; }
 
         public bool SpeechDetected { get; set; }
 

@@ -6,6 +6,10 @@ namespace Murmur.UI.Pill;
 public enum PillMode
 {
     Hidden,
+
+    /// <summary>The microphone is being started: nothing is recorded yet.</summary>
+    Starting,
+
     Listening,
     Transcribing,
     Notice,
@@ -51,6 +55,8 @@ public sealed partial class PillViewModel : ObservableObject
         Bars[^1] = newest;
     }
 
+    private static bool IsRecordingFace(PillMode mode) => mode is PillMode.Starting or PillMode.Listening;
+
     private static double ToBar(float rmsDbfs)
     {
         if (float.IsNaN(rmsDbfs))
@@ -62,10 +68,11 @@ public sealed partial class PillViewModel : ObservableObject
         return Math.Clamp(MinBar + fraction * (MaxBar - MinBar), MinBar, MaxBar);
     }
 
-    // A new recording starts from a flat waveform, not the previous recording's last levels.
+    // A new recording starts from a flat waveform, not the previous recording's last levels. Starting and listening
+    // are the two faces of one recording, so nothing resets on the way from one to the other.
     partial void OnModeChanged(PillMode oldValue, PillMode newValue)
     {
-        if (newValue == PillMode.Listening && oldValue != PillMode.Listening)
+        if (IsRecordingFace(newValue) && !IsRecordingFace(oldValue))
         {
             for (var i = 0; i < Bars.Count; i++)
             {
