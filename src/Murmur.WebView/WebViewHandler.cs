@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using Murmur.Common;
@@ -62,6 +63,11 @@ public class WebViewHandler
     /// Empty by default: nothing loads until the origin the app is served from is listed.
     /// </summary>
     public IReadOnlyList<string> AllowedOrigins { get; init; } = [];
+
+    /// <summary>
+    /// The colour the web area shows before the page paints, instead of white. Read once, as WebView2 is initialized.
+    /// </summary>
+    public System.Drawing.Color? DefaultBackgroundColor { get; init; }
 
     public virtual void Navigate(string url, bool forceRefresh = false)
     {
@@ -163,7 +169,26 @@ public class WebViewHandler
                     AllowSingleSignOnUsingOSPrimaryAccount = false
                 });
 
-            await WebView.EnsureCoreWebView2Async(environment);
+            // Given to the browser as it is created, so not even its first frame is white, and kept on the control so
+            // the control does not put its own default back. A runtime too old for the option still gets the
+            // control's colour, a moment later.
+            CoreWebView2ControllerOptions? controllerOptions = null;
+            if (DefaultBackgroundColor is { } background)
+            {
+                WebView.DefaultBackgroundColor = background;
+                try
+                {
+                    controllerOptions = environment.CreateCoreWebView2ControllerOptions();
+                    controllerOptions.DefaultBackgroundColor = background;
+                }
+                catch (Exception ex) when (ex is NotImplementedException or InvalidCastException or COMException)
+                {
+                    _logger.Debug(ex, "This WebView2 runtime cannot take the background colour at creation");
+                    controllerOptions = null;
+                }
+            }
+
+            await WebView.EnsureCoreWebView2Async(environment, controllerOptions);
 
             ApplySettings(WebView.CoreWebView2.Settings);
 

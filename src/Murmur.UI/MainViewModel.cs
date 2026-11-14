@@ -56,6 +56,8 @@ public partial class MainViewModel : ObservableObject
         {
             HostObject = bridge,
             HostObjectName = HostObjectName,
+            // --bg in src/WebApp/src/index.css: the web area shows it until the page paints, instead of white.
+            DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x1c, 0x1f, 0x27),
             // Only the page's own origin. In Debug that is the Vite dev server, whose hot-reload websocket does not
             // raise WebResourceRequested and so needs no entry.
             AllowedOrigins = [origin],
