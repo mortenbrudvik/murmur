@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Murmur.Core.Dictation;
 using Serilog;
@@ -12,7 +14,8 @@ namespace Murmur.UI.Pill;
 /// </summary>
 public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPresenter
 {
-    private static readonly TimeSpan NoticeDuration = TimeSpan.FromSeconds(1.5);
+    private static readonly TimeSpan InfoDuration = TimeSpan.FromSeconds(1.5);
+    private static readonly TimeSpan ProblemDuration = TimeSpan.FromSeconds(4.5);
 
     // Send runs each call ahead of lower-priority work already queued (hotkey signals, recorder chunks, rendering), but it
     // cannot interrupt work that is running: the pill shows only once the UI thread is free (so the microphone opens off
@@ -24,8 +27,10 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     private DispatcherTimer? _noticeTimer;
     private bool _shownBefore;
 
-    // Work area (DIPs) of the monitor the pill was last shown on; reused while it stays visible.
+    // The monitor the pill was last shown on, reused while it stays visible: its work area in DIPs at its own DPI, and
+    // that DPI.
     private Rect _workAreaDip;
+    private double _monitorDpi = 96;
 
     public void ShowStarting() => Post(() =>
     {
@@ -47,11 +52,14 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
         Show(PillMode.Transcribing);
     });
 
-    public void ShowNotice(string text) => Post(() =>
+    public void ShowNotice(string text, NoticeKind kind) => Post(() =>
     {
         vm.NoticeText = text;
         Show(PillMode.Notice);
-        RestartNoticeTimer();
+        RestartNoticeTimer(kind == NoticeKind.Problem ? ProblemDuration : InfoDuration);
+
+        // The pill is never focused, so a screen reader would not notice the change by itself.
+        window.Announce(text);
     });
 
     public void Hide() => Post(() =>
@@ -81,7 +89,7 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 
         if (wasHidden)
         {
-            _workAreaDip = GetForegroundWorkAreaDip();
+            (_workAreaDip, _monitorDpi) = GetForegroundWorkArea();
         }
 
         // Also when already visible: the capsule changes width between modes and must stay centered.
@@ -118,36 +126,52 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
         vm.Mode = PillMode.Hidden;
     }
 
+    /// <summary>
+    /// Places the window by its top-left corner in physical pixels on the chosen monitor, not through Left and Top: the
+    /// app is per-monitor DPI aware, and WPF converts Left and Top with the DPI of the monitor the window is on now,
+    /// which is the wrong one when the pill moves to a monitor with a different scale. Once the move puts the window on
+    /// that monitor, Windows rescales it to the monitor's DPI; the corner is where the capsule's size at that DPI puts it.
+    /// </summary>
     private void Reposition()
     {
         // Resize the window now, so that it is never seen at its new position with its old size.
         window.UpdateLayout();
 
         var topLeft = PillPlacement.Compute(_workAreaDip, window.MeasureCapsule());
-        window.Left = topLeft.X - PillWindow.ShadowMargin.Left;
-        window.Top = topLeft.Y - PillWindow.ShadowMargin.Top;
+        var scale = _monitorDpi / 96.0;
+        var x = (int)Math.Round((topLeft.X - PillWindow.ShadowMargin.Left) * scale);
+        var y = (int)Math.Round((topLeft.Y - PillWindow.ShadowMargin.Top) * scale);
+        if (!PillNative.MoveTo(new WindowInteropHelper(window).EnsureHandle(), x, y))
+        {
+            _logger.Warning("Could not move the pill to ({X}, {Y})", x, y);
+        }
     }
 
-    /// <summary>The work area of the monitor showing the foreground window, in DIPs at that monitor's DPI.</summary>
-    private static Rect GetForegroundWorkAreaDip()
+    /// <summary>
+    /// The work area of the monitor showing the foreground window, in DIPs at that monitor's DPI, and that DPI. Without
+    /// one, the primary work area at the pill's own DPI.
+    /// </summary>
+    private (Rect WorkAreaDip, double Dpi) GetForegroundWorkArea()
     {
         if (!PillNative.TryGetForegroundWorkArea(out var workArea, out var dpi))
         {
-            return SystemParameters.WorkArea;
+            return (SystemParameters.WorkArea, VisualTreeHelper.GetDpi(window).PixelsPerInchX);
         }
 
         var scale = 96.0 / dpi;
-        return new Rect(
+        var workAreaDip = new Rect(
             workArea.left * scale,
             workArea.top * scale,
             (workArea.right - workArea.left) * scale,
             (workArea.bottom - workArea.top) * scale);
+        return (workAreaDip, dpi);
     }
 
-    private void RestartNoticeTimer()
+    private void RestartNoticeTimer(TimeSpan duration)
     {
         _noticeTimer ??= CreateNoticeTimer();
         _noticeTimer.Stop();
+        _noticeTimer.Interval = duration;
         _noticeTimer.Start();
     }
 
@@ -155,7 +179,7 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 
     private DispatcherTimer CreateNoticeTimer()
     {
-        var timer = new DispatcherTimer(DispatcherPriority.Normal, window.Dispatcher) { Interval = NoticeDuration };
+        var timer = new DispatcherTimer(DispatcherPriority.Normal, window.Dispatcher);
         timer.Tick += (_, _) =>
         {
             timer.Stop();

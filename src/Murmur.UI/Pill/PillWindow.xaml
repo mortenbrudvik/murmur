@@ -17,14 +17,8 @@
         SizeToContent="WidthAndHeight"
         FontFamily="Segoe UI">
 
+  <!-- The colours (PillBackgroundBrush and the rest) are app resources, in Themes/PillColors.xaml. -->
   <Window.Resources>
-    <SolidColorBrush x:Key="PillBackgroundBrush" Color="#E0161820" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillBorderBrush" Color="#1FFFFFFF" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillRecordingBrush" Color="#FF5A5F" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillRecordingHaloBrush" Color="#2EFF5A5F" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillAccentBrush" Color="#8FB3FF" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillTextBrush" Color="#DFE3EE" po:Freeze="True" />
-
     <pill:BarHeightConverter x:Key="BarHeightConverter" />
     <SineEase x:Key="PulseEasing" EasingMode="EaseInOut" po:Freeze="True" />
 
@@ -96,7 +90,7 @@
           Background="{DynamicResource PillBackgroundBrush}"
           IsHitTestVisible="False">
     <Border.Effect>
-      <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.45" Color="Black" />
+      <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.45" Color="{DynamicResource PillShadowColor}" />
     </Border.Effect>
 
     <!-- MinHeight keeps the capsule the same height in every mode, so it only changes width. -->
@@ -178,8 +172,10 @@
         </Control.Style>
       </Control>
 
-      <!-- Notice: a short message -->
-      <TextBlock Text="{Binding NoticeText}"
+      <!-- Notice: a short message. A live region, and PillWindow.Announce raises a notification for screen readers. -->
+      <TextBlock x:Name="NoticeTextBlock"
+                 Text="{Binding NoticeText}"
+                 AutomationProperties.LiveSetting="Assertive"
                  FontSize="12"
                  VerticalAlignment="Center"
                  TextWrapping="NoWrap"

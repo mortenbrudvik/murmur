@@ -23,6 +23,7 @@ using Murmur.Core.Setup;
 using Murmur.Core.Speech;
 using Murmur.Interop;
 using Murmur.UI.Pill;
+using Murmur.UI.Themes;
 using Murmur.UI.Tray;
 using Serilog;
 using Wpf.Ui.Appearance;
@@ -161,7 +162,9 @@ public partial class App : Application
         _mainWindow = _container.Resolve<MainWindow>();
         MainWindow = _mainWindow;
 
-        // 7. The pill's window handle exists from the start, so its first Show is quick.
+        // 7. The pill's window handle exists from the start, so its first Show is quick. Its colours follow a Windows
+        // contrast theme.
+        PillContrast.Follow(Resources);
         var pill = _container.Resolve<PillWindow>();
         new WindowInteropHelper(pill).EnsureHandle();
 

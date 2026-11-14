@@ -32,6 +32,20 @@ public sealed class DictationController : IDisposable
     private const string SavedNotice = "Saved to history";
     private const string MicrophoneUnavailableNotice = "Microphone unavailable";
     private const string TranscriptionFailedNotice = "Transcription failed";
+    private const string NothingHeardNotice = "Didn't hear anything";
+
+    // A recording at least this long that held no speech was meant to be one, so the user is told nothing was heard
+    // (a muted or wrong microphone). A shorter one is taken as an accidental tap and ends silently.
+    private const int NothingHeardMinAudioMs = 1000;
+
+    // The Windows notifications for text that was not pasted: the pill says it too, but is gone after a few seconds.
+    private static readonly UnpastedNotice CopiedUnpasted = new(
+        CopiedNotice, "Murmur couldn't paste your text", "It's on the clipboard. Press Ctrl+V to paste it.");
+    private static readonly UnpastedNotice SavedUnpasted = new(
+        SavedNotice, "Murmur saved your text to History", "It wasn't pasted. Open Murmur to copy it from History.");
+    private static readonly UnpastedNotice LostUnpasted = new(
+        TranscriptionFailedNotice, "Murmur couldn't keep your text",
+        "It couldn't be pasted, saved to History or copied. Murmur's log has the details.");
 
     // How a dictation ended, for the one log line each dictation gets.
     private const string PastedOutcome = "pasted";
@@ -80,6 +94,7 @@ public sealed class DictationController : IDisposable
     private readonly IAudioArchive _audioArchive;
     private readonly IPillPresenter _pill;
     private readonly ISoundCues _cues;
+    private readonly IUserNotifier _notifier;
     private readonly ISettingsService _settingsService;
     private readonly IVocabularyService _vocabulary;
     private readonly IKeyStateProbe _keys;
@@ -125,7 +140,7 @@ public sealed class DictationController : IDisposable
     public DictationController(
         DictationStateMachine machine, HotkeyMatcher matcher, IAudioRecorder recorder, ISpeechEngine engine,
         IEnumerable<ITranscriptPostProcessor> postProcessors, ITextInserter inserter, IHistoryStore history,
-        IAudioArchive audioArchive, IPillPresenter pill, ISoundCues cues, ISettingsService settings,
+        IAudioArchive audioArchive, IPillPresenter pill, ISoundCues cues, IUserNotifier notifier, ISettingsService settings,
         IVocabularyService vocabulary, IKeyStateProbe keys, IMediator mediator, TimeProvider time)
     {
         _machine = machine;
@@ -138,6 +153,7 @@ public sealed class DictationController : IDisposable
         _audioArchive = audioArchive;
         _pill = pill;
         _cues = cues;
+        _notifier = notifier;
         _settingsService = settings;
         _vocabulary = vocabulary;
         _keys = keys;
@@ -236,7 +252,7 @@ public sealed class DictationController : IDisposable
             case DictationAction.NotifyNotReady:
                 // A combo press, or an armed press that turned out to be a dictation: nothing starts, and an armed press's
                 // tick stops.
-                _pill.ShowNotice(DescribeNotReady(status));
+                NotifyNotReady(status);
                 EndDictation();
                 break;
             case DictationAction.Arm:
@@ -554,7 +570,7 @@ public sealed class DictationController : IDisposable
         _recording = false;
         Abandon();
         _machine.Reset();
-        _pill.ShowNotice(MicrophoneUnavailableNotice);
+        ShowProblem(MicrophoneUnavailableNotice);
         LogRecordingEnded(FailedOutcome);
     }
 
@@ -590,7 +606,7 @@ public sealed class DictationController : IDisposable
 
             if (!_microphoneOpen)
             {
-                _pill.ShowNotice(MicrophoneUnavailableNotice); // the open failed, and logged why
+                ShowProblem(MicrophoneUnavailableNotice); // the open failed, and logged why
                 return;
             }
 
@@ -612,8 +628,12 @@ public sealed class DictationController : IDisposable
 
             if (text.Length == 0)
             {
+                // Paste nothing, save nothing. A tap that was too short to say anything ends silently.
                 outcome = SilenceOutcome;
-                _pill.Hide(); // paste nothing, save nothing
+                if (stats.AudioMs >= NothingHeardMinAudioMs)
+                    ShowProblem(NothingHeardNotice);
+                else
+                    _pill.Hide();
             }
             else if (paste)
             {
@@ -632,7 +652,7 @@ public sealed class DictationController : IDisposable
         {
             _logger.Error(ex, "Transcription failed");
             if (IsCurrent(generation))
-                _pill.ShowNotice(TranscriptionFailedNotice);
+                ShowProblem(TranscriptionFailedNotice);
         }
         finally
         {
@@ -695,7 +715,7 @@ public sealed class DictationController : IDisposable
             if (pasted)
                 _pill.Hide();
             else
-                _pill.ShowNotice(CopiedNotice);
+                NotifyUnpasted(CopiedUnpasted);
         }
 
         return pasted ? PastedOutcome : LeftOnClipboardOutcome;
@@ -711,7 +731,7 @@ public sealed class DictationController : IDisposable
         if (await SaveAsync(text, "", pasted: false, samples))
         {
             if (IsCurrent(generation))
-                _pill.ShowNotice(SavedNotice);
+                NotifyUnpasted(SavedUnpasted);
             return SavedOnlyOutcome;
         }
 
@@ -721,9 +741,44 @@ public sealed class DictationController : IDisposable
         // Off the UI thread: the copy waits for any clipboard restore still pending.
         var copied = await Task.Run(() => _inserter.TryCopy(text));
         if (IsCurrent(generation))
-            _pill.ShowNotice(copied ? CopiedNotice : TranscriptionFailedNotice);
+            NotifyUnpasted(copied ? CopiedUnpasted : LostUnpasted);
 
         return copied ? LeftOnClipboardOutcome : FailedOutcome;
+    }
+
+    /// <summary>
+    /// The hotkey was pressed while the engine cannot transcribe. A model that is still loading or downloading is passing
+    /// news; an engine that failed is a problem.
+    /// </summary>
+    private void NotifyNotReady(EngineStatus status)
+    {
+        if (status.State != EngineState.Error)
+        {
+            _pill.ShowNotice(DescribeNotReady(status), NoticeKind.Info);
+            return;
+        }
+
+        // No recording started, so the settings snapshot may be older than the owner's last change to the sound cues.
+        _settings = _settingsService.Load();
+        ShowProblem(DescribeNotReady(status));
+    }
+
+    /// <summary>Shows a problem in the pill, with the problem cue when sound cues are on.</summary>
+    private void ShowProblem(string notice)
+    {
+        _pill.ShowNotice(notice, NoticeKind.Problem);
+        if (_settings.SoundCues)
+            _cues.PlayProblem();
+    }
+
+    /// <summary>
+    /// Text that was not pasted: says so in the pill and in a Windows notification, which stays in the notification
+    /// centre after the pill is gone (the pill is click-through and nothing else repeats it).
+    /// </summary>
+    private void NotifyUnpasted(UnpastedNotice notice)
+    {
+        ShowProblem(notice.Pill);
+        _notifier.Notify(notice.Title, notice.Message);
     }
 
     /// <summary>Records the dictation in history (with its audio, when kept) and announces it. Failures are logged, never thrown.</summary>
@@ -829,6 +884,9 @@ public sealed class DictationController : IDisposable
         else
             _context.Post(static state => ((Action)state!).Invoke(), action);
     }
+
+    /// <summary>What the pill and the Windows notification say about text that was not pasted.</summary>
+    private sealed record UnpastedNotice(string Pill, string Title, string Message);
 
     /// <summary>What a dictation's log line reports. Holds no transcript text.</summary>
     /// <param name="startedAt">When the hotkey was pressed.</param>

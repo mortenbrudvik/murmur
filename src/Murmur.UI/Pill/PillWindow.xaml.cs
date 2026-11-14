@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Interop;
 
 namespace Murmur.UI.Pill;
@@ -33,6 +35,17 @@ public partial class PillWindow : Window
         return new Size(
             desired.Width - ShadowMargin.Left - ShadowMargin.Right,
             desired.Height - ShadowMargin.Top - ShadowMargin.Bottom);
+    }
+
+    /// <summary>
+    /// Tells screen readers about a notice. The pill is never focused and never activated, so without this a notice
+    /// would be visual only. Raised from the notice text, which is a live region as well.
+    /// </summary>
+    public void Announce(string text)
+    {
+        var peer = UIElementAutomationPeer.FromElement(NoticeTextBlock) ?? UIElementAutomationPeer.CreatePeerForElement(NoticeTextBlock);
+        peer?.RaiseNotificationEvent(
+            AutomationNotificationKind.Other, AutomationNotificationProcessing.ImportantMostRecent, text, "MurmurPillNotice");
     }
 
     protected override void OnSourceInitialized(EventArgs e)

@@ -172,7 +172,7 @@ public class PillPresenterTests
             var transcribingWidth = rig.Window.ActualWidth;
             CenterX().ShouldBe(centerX, 0.5);
 
-            rig.Pill.ShowNotice("Copied — press Ctrl+V");
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
             StaHost.Pump(Short);
             var noticeWidth = rig.Window.ActualWidth;
             CenterX().ShouldBe(centerX, 0.5);
@@ -184,11 +184,11 @@ public class PillPresenterTests
     }
 
     [Fact]
-    public void ShowNotice_ShowsTheTextThenHidesAfterAboutOneAndAHalfSeconds()
+    public void ShowNotice_Info_ShowsTheTextThenHidesAfterAboutOneAndAHalfSeconds()
     {
         WithPill(rig =>
         {
-            rig.Pill.ShowNotice("Saved to history");
+            rig.Pill.ShowNotice("Saved to history", NoticeKind.Info);
             StaHost.Pump(Short);
 
             rig.Vm.Mode.ShouldBe(PillMode.Notice);
@@ -204,14 +204,44 @@ public class PillPresenterTests
     }
 
     [Fact]
+    public void ShowNotice_Problem_StaysForAboutFourAndAHalfSeconds()
+    {
+        WithPill(rig =>
+        {
+            var clock = Stopwatch.StartNew();
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
+
+            StaHost.Pump(TimeSpan.FromSeconds(3));
+            rig.Window.IsVisible.ShouldBeTrue(); // a 1.5 s notice would be gone
+
+            StaHost.PumpUntil(() => !rig.Window.IsVisible, TimeSpan.FromSeconds(4)).ShouldBeTrue();
+            clock.Elapsed.ShouldBeInRange(TimeSpan.FromMilliseconds(4200), TimeSpan.FromMilliseconds(5500));
+        });
+    }
+
+    [Fact]
+    public void ShowNotice_InfoAfterAProblem_UsesTheShorterTime()
+    {
+        WithPill(rig =>
+        {
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
+            rig.Pill.ShowNotice("Loading model…", NoticeKind.Info);
+            var clock = Stopwatch.StartNew();
+
+            StaHost.PumpUntil(() => !rig.Window.IsVisible, TimeSpan.FromSeconds(4)).ShouldBeTrue();
+            clock.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(2400));
+        });
+    }
+
+    [Fact]
     public void ShowNotice_CalledAgain_RestartsTheHideTimer()
     {
         WithPill(rig =>
         {
-            rig.Pill.ShowNotice("Loading model…");
+            rig.Pill.ShowNotice("Loading model…", NoticeKind.Info);
             StaHost.Pump(TimeSpan.FromSeconds(1));
 
-            rig.Pill.ShowNotice("Loading model…");
+            rig.Pill.ShowNotice("Loading model…", NoticeKind.Info);
             var secondShown = Stopwatch.StartNew();
             StaHost.Pump(TimeSpan.FromSeconds(1)); // 2 s after the first call; its timer would have hidden the pill at 1.5 s
 
@@ -286,7 +316,7 @@ public class PillPresenterTests
     {
         WithPill(rig =>
         {
-            rig.Pill.ShowNotice("Loading model…");
+            rig.Pill.ShowNotice("Loading model…", NoticeKind.Info);
             if (next == PillMode.Starting)
             {
                 rig.Pill.ShowStarting();

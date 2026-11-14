@@ -43,6 +43,7 @@ public sealed class DictationControllerTests : IDisposable
     private readonly IAudioArchive _audioArchive = Substitute.For<IAudioArchive>();
     private readonly IPillPresenter _pill = Substitute.For<IPillPresenter>();
     private readonly ISoundCues _cues = Substitute.For<ISoundCues>();
+    private readonly IUserNotifier _notifier = Substitute.For<IUserNotifier>();
     private readonly ISettingsService _settings = Substitute.For<ISettingsService>();
     private readonly IVocabularyService _vocabulary = Substitute.For<IVocabularyService>();
     private readonly IKeyStateProbe _keys = Substitute.For<IKeyStateProbe>();
@@ -116,7 +117,9 @@ public sealed class DictationControllerTests : IDisposable
             Arg.Is<HistoryEntryAddedNotification>(n => n.Entry == _added.Single()), Arg.Any<CancellationToken>());
         _pill.Received(1).ShowTranscribing();
         _pill.Received(1).Hide();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
+        _notifier.DidNotReceiveWithAnyArgs().Notify(default!, default!);
+        _cues.DidNotReceive().PlayProblem();
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
         AssertTimerStopped();
@@ -135,9 +138,55 @@ public sealed class DictationControllerTests : IDisposable
         await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
         _history.DidNotReceiveWithAnyArgs().Add(default!, default!, default);
         _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default); // 300 ms: an accidental tap ends silently
+        _cues.DidNotReceive().PlayProblem();
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
         AssertTimerStopped();
+    }
+
+    [Theory]
+    [InlineData(999, false)]
+    [InlineData(1000, true)]
+    [InlineData(4000, true)]
+    public async Task Release_WithoutSpeech_SaysNothingWasHeardOnlyAfterASecondOfAudio(int audioMs, bool notice)
+    {
+        _chunksOnStart = [];
+        _recorder.Stop().Returns(new float[16 * audioMs]); // a muted microphone delivers silence
+
+        HoldAndRelease();
+        await Finished();
+
+        await _engine.DidNotReceiveWithAnyArgs().TranscribeAsync(default!, default!, Ct);
+        if (notice)
+        {
+            _pill.Received(1).ShowNotice("Didn't hear anything", NoticeKind.Problem);
+            _pill.DidNotReceive().Hide();
+            _cues.Received(1).PlayProblem();
+        }
+        else
+        {
+            _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
+            _pill.Received(1).Hide();
+            _cues.DidNotReceive().PlayProblem();
+        }
+
+        _notifier.DidNotReceiveWithAnyArgs().Notify(default!, default!); // nothing was lost
+        _machine.State.ShouldBe(DictationState.Idle);
+    }
+
+    [Fact]
+    public async Task HighNoSpeechProbability_LongRecording_SaysNothingWasHeard()
+    {
+        _recorder.Stop().Returns(Sine(milliseconds: 2000, amplitude: 0.1f));
+        _engine.TranscribeAsync(Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new TranscriptionResult("Thank you.", 0.8f));
+
+        HoldAndRelease();
+        await Finished();
+
+        _pill.Received(1).ShowNotice("Didn't hear anything", NoticeKind.Problem);
+        await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
     }
 
     [Fact]
@@ -232,8 +281,10 @@ public sealed class DictationControllerTests : IDisposable
         HoldAndRelease();
         await Finished();
 
-        _pill.Received(1).ShowNotice("Copied — press Ctrl+V");
+        _pill.Received(1).ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
         _pill.DidNotReceive().Hide();
+        _cues.Received(1).PlayProblem();
+        _notifier.Received(1).Notify("Murmur couldn't paste your text", "It's on the clipboard. Press Ctrl+V to paste it.");
         _history.Received(1).Add("Hello world.", "Task Manager", false);
         _machine.State.ShouldBe(DictationState.Idle);
     }
@@ -249,8 +300,9 @@ public sealed class DictationControllerTests : IDisposable
 
         await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
         _history.Received(1).Add("Hello world.", "", false);
-        _pill.Received(1).ShowNotice("Saved to history");
+        _pill.Received(1).ShowNotice("Saved to history", NoticeKind.Problem);
         _pill.DidNotReceive().Hide();
+        _notifier.Received(1).Notify("Murmur saved your text to History", Arg.Any<string>());
         await _mediator.Received(1).Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>());
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
@@ -479,7 +531,7 @@ public sealed class DictationControllerTests : IDisposable
         await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
         _history.DidNotReceiveWithAnyArgs().Add(default!, default!, default);
         _pill.Received(1).Hide();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
     }
 
     [Fact]
@@ -532,7 +584,7 @@ public sealed class DictationControllerTests : IDisposable
         _history.DidNotReceiveWithAnyArgs().Add(default!, default!, default);
         _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!);
         _pill.Received(1).Hide();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
@@ -556,7 +608,7 @@ public sealed class DictationControllerTests : IDisposable
         _history.Received(1).Add("Hello world.", "Notepad", true); // the text is in the target app
         await _mediator.Received(1).Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>());
         _pill.Received(1).Hide(); // by the Esc; nothing touches the pill afterwards
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
@@ -606,7 +658,7 @@ public sealed class DictationControllerTests : IDisposable
 
         _history.Received(1).Add("Hello world.", "", false);
         _pill.Received(1).Hide();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
@@ -623,7 +675,7 @@ public sealed class DictationControllerTests : IDisposable
 
         _history.Received(1).Add("Hello world.", "Notepad", true);
         _pill.Received(1).Hide();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
@@ -638,7 +690,7 @@ public sealed class DictationControllerTests : IDisposable
         Received.InOrder(() =>
         {
             _pill.ShowStarting();
-            _pill.ShowNotice("Microphone unavailable"); // replaces the pill shown before the microphone was opened
+            _pill.ShowNotice("Microphone unavailable", NoticeKind.Problem); // replaces the pill shown before the microphone was opened
         });
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
@@ -774,7 +826,7 @@ public sealed class DictationControllerTests : IDisposable
         mic.ReleasedWhileOpening.ShouldBeFalse();
         await _engine.DidNotReceiveWithAnyArgs().TranscribeAsync(default!, default!, Ct);
         _pill.Received(1).Hide();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         _machine.State.ShouldBe(DictationState.Idle);
         logs.Outcomes.ShouldBe(["cancelled"]);
     }
@@ -800,7 +852,7 @@ public sealed class DictationControllerTests : IDisposable
         Received.InOrder(() =>
         {
             _pill.ShowStarting();
-            _pill.ShowNotice("Microphone unavailable"); // replaces the pill shown before the microphone was opened
+            _pill.ShowNotice("Microphone unavailable", NoticeKind.Problem); // replaces the pill shown before the microphone was opened
         });
         _recorder.DidNotReceive().Cancel();
         _machine.State.ShouldBe(DictationState.Idle);
@@ -832,7 +884,7 @@ public sealed class DictationControllerTests : IDisposable
         mic.Open();
         await ui.RunUntilCompleteAsync(Controller.CurrentWork, WaitLimit);
 
-        _pill.Received(1).ShowNotice("Microphone unavailable");
+        _pill.Received(1).ShowNotice("Microphone unavailable", NoticeKind.Problem);
         _pill.DidNotReceive().ShowTranscribing();
         _pill.DidNotReceive().Hide();
         _recorder.DidNotReceive().Stop();
@@ -999,7 +1051,7 @@ public sealed class DictationControllerTests : IDisposable
 
         RaiseCaptureFailed();
 
-        _pill.Received(1).ShowNotice("Microphone unavailable");
+        _pill.Received(1).ShowNotice("Microphone unavailable", NoticeKind.Problem);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
         AssertTimerStopped();
@@ -1041,7 +1093,7 @@ public sealed class DictationControllerTests : IDisposable
 
         DownPastArmDelay();
 
-        _pill.Received(1).ShowNotice(expected);
+        _pill.Received(1).ShowNotice(expected, state == EngineState.Error ? NoticeKind.Problem : NoticeKind.Info);
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
@@ -1057,7 +1109,7 @@ public sealed class DictationControllerTests : IDisposable
         await Finished();
 
         await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
     }
 
     [Fact]
@@ -1067,7 +1119,7 @@ public sealed class DictationControllerTests : IDisposable
 
         DownPastArmDelay();
 
-        _pill.Received(1).ShowNotice("Loading speech model…");
+        _pill.Received(1).ShowNotice("Loading speech model…", NoticeKind.Info);
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
     }
 
@@ -1102,17 +1154,18 @@ public sealed class DictationControllerTests : IDisposable
 
         _time.Advance(TimeSpan.FromMilliseconds(1));
 
-        _pill.Received(1).ShowNotice("Speech engine unavailable — open Murmur");
+        _pill.Received(1).ShowNotice("Speech engine unavailable — open Murmur", NoticeKind.Problem);
         _pill.DidNotReceive().ShowListening();
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
-        _cues.ReceivedCalls().ShouldBeEmpty();
+        _cues.DidNotReceive().PlayStart();
+        _cues.Received(1).PlayProblem(); // the press did nothing: the engine has failed
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
         AssertTimerStopped();
 
         Up(); // its release starts nothing either
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
-        _pill.Received(1).ShowNotice(Arg.Any<string>());
+        _pill.Received(1).ShowNotice(Arg.Any<string>(), Arg.Any<NoticeKind>());
     }
 
     [Fact]
@@ -1127,7 +1180,7 @@ public sealed class DictationControllerTests : IDisposable
         _time.Advance(TimeSpan.FromMilliseconds(100));
         Up();
 
-        _pill.Received(1).ShowNotice("Loading speech model…");
+        _pill.Received(1).ShowNotice("Loading speech model…", NoticeKind.Info);
         _pill.DidNotReceive().ShowListening();
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
         _cues.ReceivedCalls().ShouldBeEmpty();
@@ -1148,7 +1201,7 @@ public sealed class DictationControllerTests : IDisposable
         _time.Advance(ArmDelay);
 
         _recorder.Received(1).Start(Arg.Any<string?>());
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         _machine.State.ShouldBe(DictationState.HoldRecording);
     }
 
@@ -1166,7 +1219,7 @@ public sealed class DictationControllerTests : IDisposable
         Signal(HotkeySignal.HotkeyDown);
 
         // A combo is swallowed, so it cannot be part of another app's shortcut: there is nothing to wait for.
-        _pill.Received(1).ShowNotice("Loading speech model…");
+        _pill.Received(1).ShowNotice("Loading speech model…", NoticeKind.Info);
         _recorder.DidNotReceiveWithAnyArgs().Start(default);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
@@ -1182,7 +1235,7 @@ public sealed class DictationControllerTests : IDisposable
         HoldAndRelease();
         await Finished();
 
-        _pill.Received(1).ShowNotice("Transcription failed");
+        _pill.Received(1).ShowNotice("Transcription failed", NoticeKind.Problem);
         await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
         _history.DidNotReceiveWithAnyArgs().Add(default!, default!, default);
         _machine.State.ShouldBe(DictationState.Idle);
@@ -1200,7 +1253,7 @@ public sealed class DictationControllerTests : IDisposable
         await Finished();
 
         _history.Received(1).Add("Hello world.", "", false);
-        _pill.Received(1).ShowNotice("Saved to history");
+        _pill.Received(1).ShowNotice("Saved to history", NoticeKind.Problem);
         await _mediator.Received(1).Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>());
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
@@ -1217,7 +1270,7 @@ public sealed class DictationControllerTests : IDisposable
         await _inserter.Received(1).InsertAsync("Hello world.", Arg.Any<CancellationToken>());
         _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!); // the text is in the target app already
         _pill.Received(1).Hide();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         await _mediator.DidNotReceiveWithAnyArgs().Publish(default(HistoryEntryAddedNotification)!, Ct);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
@@ -1233,14 +1286,14 @@ public sealed class DictationControllerTests : IDisposable
         HoldAndRelease();
         await Finished();
 
-        _pill.Received(1).ShowNotice("Copied — press Ctrl+V");
+        _pill.Received(1).ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
         _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!); // the inserter left it on the clipboard already
     }
 
     [Theory]
-    [InlineData(true, "Copied — press Ctrl+V")]
-    [InlineData(false, "Transcription failed")]
-    public async Task HandsFreeTimeLimit_HistoryAddThrows_FallsBackToTheClipboard(bool copyWorks, string notice)
+    [InlineData(true, "Copied — press Ctrl+V", "Murmur couldn't paste your text")]
+    [InlineData(false, "Transcription failed", "Murmur couldn't keep your text")]
+    public async Task HandsFreeTimeLimit_HistoryAddThrows_FallsBackToTheClipboard(bool copyWorks, string notice, string title)
     {
         _history.Add(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>()).Returns(_ => throw new IOException("locked"));
         _inserter.TryCopy(Arg.Any<string>()).Returns(copyWorks);
@@ -1250,15 +1303,16 @@ public sealed class DictationControllerTests : IDisposable
         await Finished();
 
         _inserter.Received(1).TryCopy("Hello world.");
-        _pill.Received(1).ShowNotice(notice);
-        _pill.DidNotReceive().ShowNotice("Saved to history");
+        _pill.Received(1).ShowNotice(notice, NoticeKind.Problem);
+        _pill.DidNotReceive().ShowNotice("Saved to history", NoticeKind.Problem);
+        _notifier.Received(1).Notify(title, Arg.Any<string>());
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
     [Theory]
-    [InlineData(true, "Copied — press Ctrl+V")]
-    [InlineData(false, "Transcription failed")]
-    public async Task InsertThrows_HistoryAddThrows_FallsBackToTheClipboard(bool copyWorks, string notice)
+    [InlineData(true, "Copied — press Ctrl+V", "Murmur couldn't paste your text")]
+    [InlineData(false, "Transcription failed", "Murmur couldn't keep your text")]
+    public async Task InsertThrows_HistoryAddThrows_FallsBackToTheClipboard(bool copyWorks, string notice, string title)
     {
         _inserter.InsertAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException<InsertResult>(new Win32Exception(5, "Clipboard busy")));
@@ -1269,8 +1323,9 @@ public sealed class DictationControllerTests : IDisposable
         await Finished();
 
         _inserter.Received(1).TryCopy("Hello world.");
-        _pill.Received(1).ShowNotice(notice);
-        _pill.DidNotReceive().ShowNotice("Saved to history");
+        _pill.Received(1).ShowNotice(notice, NoticeKind.Problem);
+        _pill.DidNotReceive().ShowNotice("Saved to history", NoticeKind.Problem);
+        _notifier.Received(1).Notify(title, Arg.Any<string>());
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
@@ -1354,6 +1409,36 @@ public sealed class DictationControllerTests : IDisposable
 
         _cues.DidNotReceive().PlayStart();
         _cues.DidNotReceive().PlayStop();
+    }
+
+    [Fact]
+    public async Task SoundCuesOff_TextNotPasted_NoProblemCue()
+    {
+        _settings.Load().Returns(MurmurSettings.Default with { SoundCues = false });
+        _inserter.InsertAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new InsertResult(InsertOutcome.LeftOnClipboard, "Task Manager"));
+
+        HoldAndRelease();
+        await Finished();
+
+        _pill.Received(1).ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
+        _cues.DidNotReceive().PlayProblem();
+    }
+
+    [Theory]
+    [InlineData(EngineState.Loading, true, false)]
+    [InlineData(EngineState.Error, true, true)]
+    [InlineData(EngineState.Error, false, false)]
+    public void EngineNotReady_PlaysTheProblemCueOnlyForAFailedEngineWithCuesOn(EngineState state, bool soundCues, bool cue)
+    {
+        _settings.Load().Returns(MurmurSettings.Default with { SoundCues = soundCues });
+        _engine.Status.Returns(new EngineStatus(state, "base"));
+        _engine.CanTranscribe.Returns(false);
+
+        DownPastArmDelay();
+
+        _cues.Received(cue ? 1 : 0).PlayProblem();
+        _notifier.DidNotReceiveWithAnyArgs().Notify(default!, default!);
     }
 
     [Fact]
@@ -1509,7 +1594,7 @@ public sealed class DictationControllerTests : IDisposable
 
         await _inserter.DidNotReceiveWithAnyArgs().InsertAsync(default!, Ct);
         _history.Received(1).Add("Hello world.", "", false);
-        _pill.Received(1).ShowNotice("Saved to history");
+        _pill.Received(1).ShowNotice("Saved to history", NoticeKind.Problem);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.IsHotkeyHeld.ShouldBeFalse();
         _matcher.DictationActive.ShouldBeFalse();
@@ -1674,9 +1759,9 @@ public sealed class DictationControllerTests : IDisposable
         _keys.Received(1).IsKeyDown(RightCtrl);
 
         RaiseCaptureFailed();
-        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!);
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
         ui.RunPending();
-        _pill.Received(1).ShowNotice("Microphone unavailable");
+        _pill.Received(1).ShowNotice("Microphone unavailable", NoticeKind.Problem);
         _machine.State.ShouldBe(DictationState.Idle);
     }
 
@@ -1789,7 +1874,7 @@ public sealed class DictationControllerTests : IDisposable
             return new DictationController(
                 _machine, _matcher, _recorder, _engine,
                 postProcessors ?? [new TranscriptCleaner(), new VocabularyReplacer(_vocabulary)],
-                inserter ?? _inserter, _history, _audioArchive, _pill, _cues, _settings, _vocabulary, _keys, _mediator,
+                inserter ?? _inserter, _history, _audioArchive, _pill, _cues, _notifier, _settings, _vocabulary, _keys, _mediator,
                 _time);
         }
         finally

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Murmur.UI.Pill;
 
-/// <summary>The few Win32 calls the pill needs: its extended window styles and the foreground monitor.</summary>
+/// <summary>The few Win32 calls the pill needs: its extended window styles, the foreground monitor and moving it there.</summary>
 internal static partial class PillNative
 {
     internal const int GWL_EXSTYLE = -20;
@@ -16,6 +16,10 @@ internal static partial class PillNative
     internal const int WS_EX_TOPMOST = 0x00000008;
 
     internal const int PillExStyles = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_TOPMOST;
+
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
 
     private const uint MONITOR_DEFAULTTONEAREST = 2;
     private const int MDT_EFFECTIVE_DPI = 0;
@@ -55,12 +59,23 @@ internal static partial class PillNative
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetMonitorInfo(nint hMonitor, ref MONITORINFO lpmi);
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
     [LibraryImport("shcore.dll")]
     private static partial int GetDpiForMonitor(nint hMonitor, int dpiType, out uint dpiX, out uint dpiY);
 
     /// <summary>Adds the pill's extended styles (never-activate, tool window, click-through, topmost) to <paramref name="hwnd"/>.</summary>
     internal static void ApplyPillExStyles(nint hwnd) =>
         SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | PillExStyles);
+
+    /// <summary>
+    /// Moves <paramref name="hwnd"/>'s top-left corner to (<paramref name="x"/>, <paramref name="y"/>) in physical pixels,
+    /// without resizing, reordering or activating it.
+    /// </summary>
+    internal static bool MoveTo(nint hwnd, int x, int y) =>
+        SetWindowPos(hwnd, 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 
     /// <summary>
     /// The work area (screen minus the taskbar) of the monitor holding the foreground window, in physical pixels,

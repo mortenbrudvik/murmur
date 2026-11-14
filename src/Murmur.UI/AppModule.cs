@@ -54,6 +54,7 @@ public class AppModule : Module
         builder.RegisterType<PillWindow>().SingleInstance();
         builder.RegisterType<PillPresenter>().As<IPillPresenter>().SingleInstance();
         builder.RegisterType<TrayIconHost>().SingleInstance();
+        builder.RegisterType<TrayUserNotifier>().As<IUserNotifier>().SingleInstance();
     }
 
     private static void RegisterCore(ContainerBuilder builder)

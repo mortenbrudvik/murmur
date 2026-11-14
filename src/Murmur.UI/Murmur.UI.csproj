@@ -8,6 +8,7 @@
     <!-- Resolved from this project file so it also works for "dotnet run" on the project, not only solution builds -->
     <WebAppDir>$(MSBuildThisFileDirectory)..\WebApp\</WebAppDir>
     <ApplicationIcon>Assets\tray-ready.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
