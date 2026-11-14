@@ -30,6 +30,9 @@ public partial class SplashWindow : Window
             new DoubleAnimation(0, SplashTimeline.End, new Duration(TimeSpan.FromSeconds(SplashTimeline.End))));
     }
 
+    /// <summary>The canvas's clock, in seconds: 0 until <see cref="Play"/>.</summary>
+    internal double CanvasTime => Canvas.Time;
+
     /// <summary>The user clicked the splash or pressed a key: show the main window now.</summary>
     public event Action? SkipRequested;
 
