@@ -477,8 +477,11 @@ public partial class App : Application
             var version = Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString();
             return !string.IsNullOrEmpty(version);
         }
-        catch
+        catch (Exception ex)
         {
+            // Usually WebView2RuntimeNotFoundException, but any failure is reported to the user as a missing runtime,
+            // so the log must say which it was.
+            Log.Warning(ex, "Could not find the WebView2 runtime");
             return false;
         }
     }

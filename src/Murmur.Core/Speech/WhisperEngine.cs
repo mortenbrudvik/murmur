@@ -662,15 +662,16 @@ public sealed class WhisperEngine(
         }
     }
 
-    private static void Cancel(Operation operation)
+    private void Cancel(Operation operation)
     {
         try
         {
             operation.Cts.Cancel();
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException ex)
         {
             // It ended long ago.
+            _logger.Debug(ex, "The operation to cancel had already ended");
         }
     }
 
