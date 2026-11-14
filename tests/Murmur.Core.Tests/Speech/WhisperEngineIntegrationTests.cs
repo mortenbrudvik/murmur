@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Speech.AudioFormat;
 using System.Speech.Synthesis;
+using Murmur.Core.Audio;
 using Murmur.Core.Hardware;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
@@ -141,14 +142,23 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
         result.Text.ToLowerInvariant().ShouldContain("quick brown fox");
     }
 
+    // A quiet room through a real microphone: noise at about -70 dBFS, above the engine's digital-silence cut-off, so
+    // the model really runs (zeros never reach it; see the next test). The dictation controller's speech detector
+    // drops audio this quiet before it gets here; this checks what the model makes of it should any get through.
     [Fact(Explicit = true)]
-    public async Task Transcribe_Silence_IsEmptyOrNoSpeech()
+    public async Task Transcribe_MicrophoneNoiseFloor_IsEmptyOrNoSpeech()
     {
         var engine = await ReadyAsync();
+        var random = new Random(42);
+        var noise = new float[3 * 16000];
+        for (var i = 0; i < noise.Length; i++)
+            noise[i] = (float)((random.NextDouble() * 2 - 1) * 0.00055); // uniform: RMS = 0.00055 / sqrt(3), about -70 dBFS
+        SpeechDetector.RmsDbfs(noise).ShouldBeInRange(-75f, -65f);
 
-        var result = await engine.TranscribeAsync(new float[3 * 16000], "", TestContext.Current.CancellationToken);
+        var result = await engine.TranscribeAsync(noise, "", TestContext.Current.CancellationToken);
 
-        output.WriteLine($"Silence transcript: \"{result.Text}\" (no-speech {result.MaxNoSpeechProbability:F3})");
+        output.WriteLine($"Noise-floor transcript: \"{result.Text}\" (no-speech {result.MaxNoSpeechProbability:F3})");
+        result.MaxNoSpeechProbability.ShouldNotBe(1f, "the digital-silence shortcut answered, so the model never ran");
         (new TranscriptCleaner().Process(result.Text) == "" || result.MaxNoSpeechProbability >= 0.6f).ShouldBeTrue(
             $"\"{result.Text}\" with no-speech {result.MaxNoSpeechProbability:F3}");
     }
