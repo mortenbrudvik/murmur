@@ -52,9 +52,7 @@ public partial class MainViewModel : ObservableObject
         var url = origin + "/index.html";
 #endif
 
-        var tempPath = Path.Combine(Path.GetTempPath(), "Murmur");
-
-        _handler = new WebViewHandler(WebView, url, tempPath)
+        _handler = new WebViewHandler(WebView, url, paths.WebView2Directory)
         {
             HostObject = bridge,
             HostObjectName = HostObjectName,

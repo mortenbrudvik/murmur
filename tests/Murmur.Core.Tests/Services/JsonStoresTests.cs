@@ -279,6 +279,7 @@ public sealed class JsonStoresTests : IDisposable
         _paths.ModelsDirectory.ShouldBe(Path.Combine(_root, "models"));
         _paths.AudioDirectory.ShouldBe(Path.Combine(_root, "audio"));
         _paths.LogsDirectory.ShouldBe(Path.Combine(_root, "Logs"));
+        _paths.WebView2Directory.ShouldBe(Path.Combine(_root, "WebView2"));
     }
 
     [Fact]
