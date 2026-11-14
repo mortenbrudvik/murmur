@@ -42,7 +42,7 @@ public sealed class SettingsHandlerTests
         bool startWithWindows = false, bool keepAudio = false, bool keepMicrophoneReady = false) =>
         new(hotkey ?? CtrlShiftSpace, microphoneId, soundCues, startWithWindows, keepAudio, keepMicrophoneReady);
 
-    private UpdateSettingsHandler UpdateHandler() => new(_settings, _mediator);
+    private UpdateSettingsHandler UpdateHandler() => new(_settings, _mediator, FakeKeyboardLayout.Unmapped);
 
     [Fact]
     public async Task GetSettings_ReturnsTheStoredSettings()
@@ -87,6 +87,39 @@ public sealed class SettingsHandlerTests
         var saved = _saved.ShouldNotBeNull();
         saved.Hotkey.ShouldBe(Previous);
         saved.SoundCues.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(255)]
+    [InlineData(100_000)]
+    public async Task UpdateSettings_VirtualKeyOutOfRange_KeepsPrevious(int virtualKey)
+    {
+        var result = await UpdateHandler().Handle(
+            Update(hotkey: new HotkeyDefinition(virtualKey, HotkeyModifiers.Ctrl, "Ctrl+?")), CancellationToken.None);
+
+        result.Hotkey.ShouldBe(Previous);
+    }
+
+    /// <summary>The name is only for show, but it is stored and shown in Settings, so the page does not get to pick it.</summary>
+    [Fact]
+    public async Task UpdateSettings_HotkeyDisplayName_IsMadeFromTheKeyAndModifiers()
+    {
+        var sent = new HotkeyDefinition(0x20, HotkeyModifiers.Ctrl | HotkeyModifiers.Shift, new string('x', 10_000));
+
+        var result = await UpdateHandler().Handle(Update(hotkey: sent), CancellationToken.None);
+
+        result.Hotkey.ShouldBe(CtrlShiftSpace);
+        _saved!.Hotkey.DisplayName.ShouldBe("Ctrl+Shift+Space");
+    }
+
+    [Fact]
+    public async Task UpdateSettings_ModifierOnlyHotkey_IsNamedAsTheCaptureNamesIt()
+    {
+        var result = await UpdateHandler().Handle(
+            Update(hotkey: new HotkeyDefinition(RightCtrl, HotkeyModifiers.None, "")), CancellationToken.None);
+
+        result.Hotkey.DisplayName.ShouldBe("Right Ctrl");
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using MediatR;
+using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 
@@ -19,20 +20,25 @@ public sealed class SettingsUpdatedNotification(MurmurSettings settings) : INoti
 }
 
 /// <summary>
-/// Saves the settings and announces them. A hotkey that is missing or not usable keeps the previous one, and a blank
-/// microphone id means the Windows default (null). Only the fields in the request change; the setup and model fields
-/// stay as they are stored.
+/// Saves the settings and announces them. A hotkey that is missing or not usable keeps the previous one, and a usable
+/// one is saved under the name made here from its key and modifiers, as the capture names it, not the name the page
+/// sent. A blank microphone id means the Windows default (null). Only the fields in the request change; the setup and
+/// model fields stay as they are stored.
 /// </summary>
-public class UpdateSettingsHandler(ISettingsService settingsService, IMediator mediator)
+/// <param name="layout">Names the hotkey's key the way <see cref="HotkeyCaptureSession"/> does.</param>
+public class UpdateSettingsHandler(ISettingsService settingsService, IMediator mediator, IKeyboardLayout layout)
     : IRequestHandler<UpdateSettingsRequest, MurmurSettings>
 {
     public async Task<MurmurSettings> Handle(UpdateSettingsRequest request, CancellationToken ct)
     {
         var microphoneId = string.IsNullOrWhiteSpace(request.MicrophoneId) ? null : request.MicrophoneId;
+        var hotkey = request.Hotkey is { IsValid: true } requested
+            ? requested with { DisplayName = KeyNames.Describe(requested.VirtualKey, requested.Modifiers, layout) }
+            : null;
 
         var settings = settingsService.Update(current => current with
         {
-            Hotkey = request.Hotkey is { IsValid: true } ? request.Hotkey : current.Hotkey,
+            Hotkey = hotkey ?? current.Hotkey,
             MicrophoneId = microphoneId,
             SoundCues = request.SoundCues,
             StartWithWindows = request.StartWithWindows,

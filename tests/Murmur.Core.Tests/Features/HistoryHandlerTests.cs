@@ -63,6 +63,19 @@ public sealed class HistoryHandlerTests
         _history.Received(1).Query(null, 200, null);
     }
 
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    [InlineData(500, 500)]
+    [InlineData(501, 500)]
+    [InlineData(int.MaxValue, 500)]
+    public async Task GetHistory_LimitOutOfRange_IsClampedTo1Through500(int asked, int expected)
+    {
+        await new GetHistoryHandler(_history).Handle(new GetHistoryRequest(Limit: asked), CancellationToken.None);
+
+        _history.Received(1).Query(null, expected, null);
+    }
+
     [Fact]
     public async Task GetHistory_PassesTheCursor()
     {

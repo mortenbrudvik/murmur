@@ -31,10 +31,14 @@ public sealed record HotkeyDefinition(int VirtualKey, HotkeyModifiers Modifiers,
         (VirtualKey == 0x09 && (Modifiers & (HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0)
         || (VirtualKey == 0x73 && Modifiers.HasFlag(HotkeyModifiers.Alt));
 
-    /// <summary>Modifier-only, an F1-F24 key, or any key combined with at least one modifier — never a reserved shortcut.</summary>
+    /// <summary>
+    /// Modifier-only, an F1-F24 key, or any key combined with at least one modifier — never a reserved shortcut, and
+    /// always a virtual-key code Windows can report (1 through 254).
+    /// </summary>
     [JsonIgnore]
     public bool IsValid =>
-        !IsReservedShortcut
+        VirtualKey is >= 1 and <= 254
+        && !IsReservedShortcut
         && (IsModifierOnly
             || VirtualKey is >= 0x70 and <= 0x87
             || Modifiers != HotkeyModifiers.None);

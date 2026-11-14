@@ -225,6 +225,23 @@ public class RequestJsonContractTests
         request.ShouldBe(new OpenLinkRequest(expected));
     }
 
+    /// <summary>
+    /// A number, or a name the enum does not have, is refused: the bridge then answers with an error instead of handing
+    /// a handler a value no member has.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(OpenLinkRequest), """{"target":7}""")]
+    [InlineData(typeof(OpenLinkRequest), """{"target":"0"}""")]
+    [InlineData(typeof(OpenLinkRequest), """{"target":"homePage"}""")]
+    [InlineData(typeof(SetModelChoiceRequest), """{"model":1}""")]
+    [InlineData(typeof(UpdateSetupStateRequest), """{"step":42}""")]
+    [InlineData(typeof(UpdateSettingsRequest), """{"hotkey":{"virtualKey":32,"modifiers":3,"displayName":"x"},"soundCues":true,"startWithWindows":false,"keepAudio":false}""")]
+    [InlineData(typeof(UpdateSettingsRequest), """{"hotkey":{"virtualKey":32,"modifiers":"ctrl, hyper","displayName":"x"},"soundCues":true,"startWithWindows":false,"keepAudio":false}""")]
+    public void Requests_EnumAsNumberOrUnknownName_AreRefused(Type requestType, string json)
+    {
+        Should.Throw<System.Text.Json.JsonException>(() => JsonUtils.Deserialize(json, requestType));
+    }
+
     [Fact]
     public void ParameterlessSetupRequests_DeserializeFromAnEmptyObject()
     {
