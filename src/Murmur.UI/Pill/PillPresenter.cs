@@ -12,10 +12,10 @@ namespace Murmur.UI.Pill;
 /// Drives the pill from any thread. Every call is queued to the window's dispatcher in call order; the window is
 /// never activated, so the app being dictated into keeps focus.
 /// </summary>
-public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPresenter
+public sealed class PillPresenter : IPillPresenter
 {
-    private static readonly TimeSpan InfoDuration = TimeSpan.FromSeconds(1.5);
-    private static readonly TimeSpan ProblemDuration = TimeSpan.FromSeconds(4.5);
+    internal static readonly TimeSpan DefaultInfoDuration = TimeSpan.FromSeconds(1.5);
+    internal static readonly TimeSpan DefaultProblemDuration = TimeSpan.FromSeconds(4.5);
 
     // Send runs each call ahead of lower-priority work already queued (hotkey signals, recorder chunks, rendering), but it
     // cannot interrupt work that is running: the pill shows only once the UI thread is free (so the microphone opens off
@@ -23,6 +23,11 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     private const DispatcherPriority CallPriority = DispatcherPriority.Send;
 
     private readonly ILogger _logger = Log.ForContext<PillPresenter>();
+    private readonly PillWindow _window;
+    private readonly PillViewModel _vm;
+    private readonly TimeSpan _infoDuration;
+    private readonly TimeSpan _problemDuration;
+    private readonly Func<(Rect WorkAreaDip, double Dpi)>? _foregroundWorkArea;
 
     private DispatcherTimer? _noticeTimer;
     private bool _shownBefore;
@@ -31,6 +36,29 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     // that DPI.
     private Rect _workAreaDip;
     private double _monitorDpi = 96;
+
+    public PillPresenter(PillWindow window, PillViewModel vm)
+        : this(window, vm, DefaultInfoDuration, DefaultProblemDuration)
+    {
+    }
+
+    /// <summary>
+    /// Test seam: how long each kind of notice stays, so tests need not wait out the real times, and where the
+    /// foreground window's monitor is (null asks Windows).
+    /// </summary>
+    internal PillPresenter(
+        PillWindow window, PillViewModel vm, TimeSpan infoDuration, TimeSpan problemDuration,
+        Func<(Rect WorkAreaDip, double Dpi)>? foregroundWorkArea = null)
+    {
+        _window = window;
+        _vm = vm;
+        _infoDuration = infoDuration;
+        _problemDuration = problemDuration;
+        _foregroundWorkArea = foregroundWorkArea;
+    }
+
+    /// <summary>How long the notice on show now stays; null when none is counting down. For tests.</summary>
+    internal TimeSpan? NoticeDuration => _noticeTimer is { IsEnabled: true } timer ? timer.Interval : null;
 
     public void ShowStarting() => Post(() =>
     {
@@ -44,7 +72,7 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
         Show(PillMode.Listening);
     });
 
-    public void PushLevel(float rmsDbfs) => Post(() => vm.PushLevel(rmsDbfs));
+    public void PushLevel(float rmsDbfs) => Post(() => _vm.PushLevel(rmsDbfs));
 
     public void ShowTranscribing() => Post(() =>
     {
@@ -54,12 +82,12 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 
     public void ShowNotice(string text, NoticeKind kind) => Post(() =>
     {
-        vm.NoticeText = text;
+        _vm.NoticeText = text;
         Show(PillMode.Notice);
-        RestartNoticeTimer(kind == NoticeKind.Problem ? ProblemDuration : InfoDuration);
+        RestartNoticeTimer(kind == NoticeKind.Problem ? _problemDuration : _infoDuration);
 
         // The pill is never focused, so a screen reader would not notice the change by itself.
-        window.Announce(text);
+        _window.Announce(text);
     });
 
     public void Hide() => Post(() =>
@@ -69,7 +97,7 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     });
 
     private void Post(Action action) =>
-        window.Dispatcher.BeginInvoke(CallPriority, new Action(() =>
+        _window.Dispatcher.BeginInvoke(CallPriority, new Action(() =>
         {
             try
             {
@@ -84,16 +112,19 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 
     private void Show(PillMode mode)
     {
-        var wasHidden = !window.IsVisible;
-        vm.Mode = mode;
+        var wasHidden = !_window.IsVisible;
+        var previous = _vm.Mode;
+        _vm.Mode = mode;
 
-        if (wasHidden)
+        // The monitor is chosen when the pill appears, and again after a notice: a notice ends a dictation (or says why
+        // one could not start), so whatever comes next is a new press, maybe in a window on another monitor. Within a
+        // dictation the pill stays where it is.
+        if (wasHidden || previous == PillMode.Notice)
         {
-            (_workAreaDip, _monitorDpi) = GetForegroundWorkArea();
+            (_workAreaDip, _monitorDpi) = _foregroundWorkArea?.Invoke() ?? GetForegroundWorkArea();
         }
 
-        // Also when already visible: the capsule changes width between modes and must stay centered.
-        // The monitor is only chosen when the pill appears.
+        // Also when the monitor stays: the capsule changes width between modes and must stay centered.
         Reposition();
 
         if (wasHidden)
@@ -103,12 +134,12 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 
             // ShowActivated is false and the window is WS_EX_NOACTIVATE, so WPF shows it with SW_SHOWNOACTIVATE.
             // Calling ShowWindow directly would leave WPF thinking the window is collapsed, and it would never lay out or render.
-            window.Show();
+            _window.Show();
 
             // Observed: the first Show of a window whose handle already existed sizes it about 25 DIPs wider than its
             // content, which would stretch the capsule off-center. A fresh layout pass corrects it.
-            window.InvalidateMeasure();
-            window.UpdateLayout();
+            _window.InvalidateMeasure();
+            _window.UpdateLayout();
 
             if (stopwatch is not null)
                 _logger.Debug("First pill Show took {Milliseconds:F1} ms", stopwatch.Elapsed.TotalMilliseconds);
@@ -118,12 +149,12 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     private void HideNow()
     {
         // Nothing to hide before the first Show, and a never-shown window is best left untouched.
-        if (window.IsVisible)
+        if (_window.IsVisible)
         {
-            window.Hide();
+            _window.Hide();
         }
 
-        vm.Mode = PillMode.Hidden;
+        _vm.Mode = PillMode.Hidden;
     }
 
     /// <summary>
@@ -135,13 +166,13 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     private void Reposition()
     {
         // Resize the window now, so that it is never seen at its new position with its old size.
-        window.UpdateLayout();
+        _window.UpdateLayout();
 
-        var topLeft = PillPlacement.Compute(_workAreaDip, window.MeasureCapsule());
+        var topLeft = PillPlacement.Compute(_workAreaDip, _window.MeasureCapsule());
         var scale = _monitorDpi / 96.0;
         var x = (int)Math.Round((topLeft.X - PillWindow.ShadowMargin.Left) * scale);
         var y = (int)Math.Round((topLeft.Y - PillWindow.ShadowMargin.Top) * scale);
-        if (!PillNative.MoveTo(new WindowInteropHelper(window).EnsureHandle(), x, y))
+        if (!PillNative.MoveTo(new WindowInteropHelper(_window).EnsureHandle(), x, y))
         {
             _logger.Warning("Could not move the pill to ({X}, {Y})", x, y);
         }
@@ -155,7 +186,7 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
     {
         if (!PillNative.TryGetForegroundWorkArea(out var workArea, out var dpi))
         {
-            return (SystemParameters.WorkArea, VisualTreeHelper.GetDpi(window).PixelsPerInchX);
+            return (SystemParameters.WorkArea, VisualTreeHelper.GetDpi(_window).PixelsPerInchX);
         }
 
         var scale = 96.0 / dpi;
@@ -179,7 +210,7 @@ public sealed class PillPresenter(PillWindow window, PillViewModel vm) : IPillPr
 
     private DispatcherTimer CreateNoticeTimer()
     {
-        var timer = new DispatcherTimer(DispatcherPriority.Normal, window.Dispatcher);
+        var timer = new DispatcherTimer(DispatcherPriority.Normal, _window.Dispatcher);
         timer.Tick += (_, _) =>
         {
             timer.Stop();

@@ -4,6 +4,7 @@
         xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:pill="clr-namespace:Murmur.UI.Pill"
+        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
         mc:Ignorable="po"
         Title="Murmur recording indicator"
         WindowStyle="None"
@@ -45,7 +46,9 @@
       </Style.Triggers>
     </Style>
 
-    <!-- Three dots that pulse in turn (1 s cycle, 0.15 s apart) for as long as they are visible. -->
+    <!-- Three dots that pulse in turn (1 s cycle, 0.15 s apart) for as long as they are visible. The control's Tag says
+         whether Windows' animation effects are on (Settings > Accessibility > Visual effects); with them off the dots
+         stand still, half lit. -->
     <ControlTemplate x:Key="PulsingDotsTemplate" TargetType="Control">
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <Ellipse x:Name="Dot1" Width="4" Height="4" Opacity="0.25" Fill="{DynamicResource PillAccentBrush}" />
@@ -53,8 +56,24 @@
         <Ellipse x:Name="Dot3" Width="4" Height="4" Opacity="0.25" Margin="3,0,0,0" Fill="{DynamicResource PillAccentBrush}" />
       </StackPanel>
       <ControlTemplate.Triggers>
-        <Trigger Property="IsVisible" Value="True">
-          <Trigger.EnterActions>
+        <Trigger Property="Tag">
+          <Trigger.Value>
+            <sys:Boolean>False</sys:Boolean>
+          </Trigger.Value>
+          <Setter TargetName="Dot1" Property="Opacity" Value="0.6" />
+          <Setter TargetName="Dot2" Property="Opacity" Value="0.6" />
+          <Setter TargetName="Dot3" Property="Opacity" Value="0.6" />
+        </Trigger>
+        <MultiTrigger>
+          <MultiTrigger.Conditions>
+            <Condition Property="IsVisible" Value="True" />
+            <Condition Property="Tag">
+              <Condition.Value>
+                <sys:Boolean>True</sys:Boolean>
+              </Condition.Value>
+            </Condition>
+          </MultiTrigger.Conditions>
+          <MultiTrigger.EnterActions>
             <BeginStoryboard Name="Pulse">
               <Storyboard>
                 <DoubleAnimation Storyboard.TargetName="Dot1" Storyboard.TargetProperty="Opacity"
@@ -68,11 +87,11 @@
                                  EasingFunction="{StaticResource PulseEasing}" />
               </Storyboard>
             </BeginStoryboard>
-          </Trigger.EnterActions>
-          <Trigger.ExitActions>
+          </MultiTrigger.EnterActions>
+          <MultiTrigger.ExitActions>
             <RemoveStoryboard BeginStoryboardName="Pulse" />
-          </Trigger.ExitActions>
-        </Trigger>
+          </MultiTrigger.ExitActions>
+        </MultiTrigger>
       </ControlTemplate.Triggers>
     </ControlTemplate>
   </Window.Resources>
@@ -160,7 +179,11 @@
       </StackPanel>
 
       <!-- Transcribing: three pulsing dots -->
-      <Control Template="{StaticResource PulsingDotsTemplate}" Focusable="False" IsTabStop="False">
+      <Control x:Name="TranscribingDots"
+               Template="{StaticResource PulsingDotsTemplate}"
+               Tag="{DynamicResource {x:Static SystemParameters.ClientAreaAnimationKey}}"
+               Focusable="False"
+               IsTabStop="False">
         <Control.Style>
           <Style TargetType="Control" BasedOn="{StaticResource ModeSection}">
             <Style.Triggers>
