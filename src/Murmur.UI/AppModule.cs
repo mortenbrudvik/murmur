@@ -118,7 +118,7 @@ public class AppModule : Module
 
     private static void RegisterDictation(ContainerBuilder builder)
     {
-        builder.Register(c => new HotkeyMatcher(c.Resolve<ISettingsService>().Load().Hotkey)).SingleInstance();
+        builder.Register(c => new HotkeyMatcher(c.Resolve<ISettingsService>().Load().Hotkey, c.Resolve<IKeyStateProbe>())).SingleInstance();
         builder.RegisterType<HotkeyCaptureCoordinator>().SingleInstance();
         // Written by App once the keyboard hook has started (or failed to); read by the tray and the web app.
         builder.RegisterType<InputStatus>().SingleInstance();

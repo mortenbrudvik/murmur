@@ -20,7 +20,7 @@ public sealed class InputHookHostTests
 
     private static readonly HotkeyDefinition RightAlt = new(VkRightAlt, HotkeyModifiers.None, "Right Alt");
 
-    private readonly HotkeyMatcher _matcher = new(HotkeyDefinition.Default);
+    private readonly HotkeyMatcher _matcher = new(HotkeyDefinition.Default, Substitute.For<IKeyStateProbe>());
     private readonly HotkeyCaptureCoordinator _coordinator = new(TimeProvider.System, Substitute.For<IKeyboardLayout>());
     private readonly IKeyboardSender _keyboard = Substitute.For<IKeyboardSender>();
     private readonly ManualTime _time = new();

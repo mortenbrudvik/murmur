@@ -1,5 +1,6 @@
 using Murmur.Core.Input;
 using Murmur.Core.Models;
+using NSubstitute;
 using Shouldly;
 
 namespace Murmur.Core.Tests.Input;
@@ -11,11 +12,13 @@ public sealed class HotkeyMatcherTests
     private const int RightShift = 0xA1;
     private const int LeftShift = 0xA0;
     private const int LeftAlt = 0xA4;
+    private const int RightAlt = 0xA5;
     private const int LeftWin = 0x5B;
     private const int Space = 0x20;
     private const int Escape = 0x1B;
     private const int KeyC = 0x43;
     private const int KeyD = 0x44;
+    private const int KeyL = 0x4C;
     private const int KeyV = 0x56;
     private const int F12 = 0x7B;
 
@@ -32,12 +35,12 @@ public sealed class HotkeyMatcherTests
 
     private static MatchResult Result(HotkeySignal signal, bool swallow) => new(signal, swallow);
 
-    private static HotkeyMatcher NewMatcher() => new(HotkeyDefinition.Default);
+    private static HotkeyMatcher NewMatcher() => new(HotkeyDefinition.Default, AllKeysDown.Instance);
 
     /// <summary>A Ctrl+Alt+D matcher with the hotkey held down.</summary>
     private static HotkeyMatcher PressCtrlAltD()
     {
-        var matcher = new HotkeyMatcher(CtrlAltD);
+        var matcher = new HotkeyMatcher(CtrlAltD, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftAlt));
         matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
@@ -141,7 +144,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_CtrlShiftSpace_Swallowed()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
 
         matcher.OnKey(Down(LeftCtrl)).ShouldBe(Result(HotkeySignal.None, false));
         matcher.OnKey(Down(LeftShift)).ShouldBe(Result(HotkeySignal.None, false));
@@ -154,7 +157,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_MainKeyAlone_PassesThrough()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
 
         matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.None, false));
         matcher.OnKey(Up(Space)).ShouldBe(Result(HotkeySignal.None, false));
@@ -163,7 +166,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_RightSideModifiers_Match()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(RightCtrl));
         matcher.OnKey(Down(RightShift));
 
@@ -173,7 +176,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_ExtraModifier_PassesThrough()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
         matcher.OnKey(Down(LeftAlt));
@@ -184,7 +187,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_ReleasedModifier_NoLongerCounts()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
         matcher.OnKey(Up(LeftShift));
@@ -195,7 +198,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_BothCtrlKeysDown_ReleasingOneKeepsCtrl()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(RightCtrl));
         matcher.OnKey(Up(RightCtrl));
@@ -207,7 +210,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_GenericModifierCodes_Count()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(0x11));
         matcher.OnKey(Down(0x10));
 
@@ -217,7 +220,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_AutoRepeat_SingleDownAndRepeatsSwallowed()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
 
@@ -229,7 +232,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_ModifiersReleasedBeforeMainKey_StillSignalsUp()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
         matcher.OnKey(Down(Space));
@@ -261,7 +264,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_CtrlSpace_CtrlReleasedFirst_SpaceRepeatsAndUpStaySwallowed()
     {
-        var matcher = new HotkeyMatcher(CtrlSpace);
+        var matcher = new HotkeyMatcher(CtrlSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
         matcher.OnKey(Up(LeftCtrl)).ShouldBe(Result(HotkeySignal.None, false));
@@ -320,7 +323,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_WithoutModifiers_RepeatsStaySwallowedWhateverOtherModifiersDo()
     {
-        var matcher = new HotkeyMatcher(new HotkeyDefinition(F12, HotkeyModifiers.None, "F12"));
+        var matcher = new HotkeyMatcher(new HotkeyDefinition(F12, HotkeyModifiers.None, "F12"), AllKeysDown.Instance);
         matcher.OnKey(Down(F12)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Up(LeftCtrl));
@@ -349,7 +352,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void NoteModifiersReleased_WhenNotHeld_ChangesNothing()
     {
-        var matcher = new HotkeyMatcher(CtrlAltD);
+        var matcher = new HotkeyMatcher(CtrlAltD, AllKeysDown.Instance);
 
         matcher.NoteModifiersReleased();
 
@@ -363,7 +366,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_OtherKeyWhileHeld_NotSwallowed()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
         matcher.OnKey(Down(Space));
@@ -374,7 +377,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_HeldModifierRepeat_IsNotOtherInput()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
         matcher.OnKey(Down(Space));
@@ -385,7 +388,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_NewModifierWhileHeld_IsOtherInput()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
         matcher.OnKey(Down(Space));
@@ -396,7 +399,7 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void Combo_ModifierAsMainKey_OwnModifierDoesNotCount()
     {
-        var matcher = new HotkeyMatcher(new HotkeyDefinition(RightShift, HotkeyModifiers.Ctrl, "Ctrl+Right Shift"));
+        var matcher = new HotkeyMatcher(new HotkeyDefinition(RightShift, HotkeyModifiers.Ctrl, "Ctrl+Right Shift"), AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
 
         matcher.OnKey(Down(RightShift)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
@@ -524,13 +527,83 @@ public sealed class HotkeyMatcherTests
     [Fact]
     public void ResetHeld_KeepsTrackedModifiers()
     {
-        var matcher = new HotkeyMatcher(CtrlShiftSpace);
+        var matcher = new HotkeyMatcher(CtrlShiftSpace, AllKeysDown.Instance);
         matcher.OnKey(Down(LeftCtrl));
         matcher.OnKey(Down(LeftShift));
 
         matcher.ResetHeld();
 
         matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+    }
+
+    // Win+L: Windows switches to the lock screen and the hook never sees Win or L go up.
+    [Fact]
+    public void ComboHotkey_AnotherModifiersKeyUpWasMissed_StillStartsOnTheNextPress()
+    {
+        var keys = KeysDown(LeftCtrl);
+        var matcher = new HotkeyMatcher(CtrlSpace, keys);
+        matcher.OnKey(Down(LeftWin));
+        matcher.OnKey(Down(KeyL));
+
+        matcher.OnKey(Down(LeftCtrl));
+
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+    }
+
+    // Ctrl held while a UAC prompt took the desktop: its key-up was missed, and Space alone must still be a space.
+    [Fact]
+    public void ComboHotkey_ItsModifiersKeyUpWasMissed_MainKeyAloneDoesNotStart()
+    {
+        var keys = KeysDown();
+        var matcher = new HotkeyMatcher(CtrlSpace, keys);
+        matcher.OnKey(Down(LeftCtrl));
+
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.None, false));
+        matcher.IsHotkeyHeld.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ComboHotkey_ExtraModifierReallyHeld_DoesNotStart()
+    {
+        var keys = KeysDown(LeftCtrl, LeftShift);
+        var matcher = new HotkeyMatcher(CtrlSpace, keys);
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(LeftShift));
+
+        matcher.OnKey(Down(Space)).ShouldBe(Result(HotkeySignal.None, false));
+    }
+
+    // On AltGr layouts Windows holds a fake Left Ctrl down with Right Alt. The hook filters its events out, so the key
+    // state must never add a modifier the matcher did not see: AltGr+D is not Ctrl+Alt+D.
+    [Fact]
+    public void ComboHotkey_KeyStateShowsAModifierTheHookNeverSaw_DoesNotStart()
+    {
+        var keys = KeysDown(LeftCtrl, RightAlt);
+        var matcher = new HotkeyMatcher(CtrlAltD, keys);
+        matcher.OnKey(Down(RightAlt));
+
+        matcher.OnKey(Down(KeyD)).ShouldBe(Result(HotkeySignal.None, false));
+    }
+
+    // A swallowed key never reaches the key state, so a main key that is itself a modifier reads as up while held.
+    [Fact]
+    public void ComboHotkey_MainKeyIsAModifierThatReadsAsUp_ItsRepeatsStaySwallowed()
+    {
+        var keys = KeysDown(LeftCtrl);
+        var matcher = new HotkeyMatcher(new HotkeyDefinition(RightShift, HotkeyModifiers.Ctrl, "Ctrl+Right Shift"), keys);
+        matcher.OnKey(Down(LeftCtrl));
+        matcher.OnKey(Down(RightShift)).ShouldBe(Result(HotkeySignal.HotkeyDown, true));
+
+        matcher.OnKey(Down(RightShift)).ShouldBe(Result(HotkeySignal.None, true));
+        matcher.OnKey(Up(RightShift)).ShouldBe(Result(HotkeySignal.HotkeyUp, true));
+    }
+
+    /// <summary>A key state in which exactly <paramref name="virtualKeys"/> are down.</summary>
+    private static IKeyStateProbe KeysDown(params int[] virtualKeys)
+    {
+        var keys = Substitute.For<IKeyStateProbe>();
+        keys.IsKeyDown(Arg.Any<int>()).Returns(call => virtualKeys.Contains(call.Arg<int>()));
+        return keys;
     }
 
     [Fact]

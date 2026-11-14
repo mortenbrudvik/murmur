@@ -11,6 +11,7 @@ using Murmur.Core.Insertion;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.Core.Tests.Input;
 using Murmur.Core.Text;
 using NSubstitute;
 using Serilog;
@@ -34,7 +35,7 @@ public sealed class DictationControllerTests : IDisposable
     private static readonly float[] Speech = Sine(milliseconds: 300, amplitude: 0.1f);
 
     private readonly DictationStateMachine _machine = new(DictationTimings.Default);
-    private readonly HotkeyMatcher _matcher = new(HotkeyDefinition.Default);
+    private readonly HotkeyMatcher _matcher = new(HotkeyDefinition.Default, AllKeysDown.Instance);
     private readonly IAudioRecorder _recorder = Substitute.For<IAudioRecorder>();
     private readonly ISpeechEngine _engine = Substitute.For<ISpeechEngine>();
     private readonly ITextInserter _inserter = Substitute.For<ITextInserter>();

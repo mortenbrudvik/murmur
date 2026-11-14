@@ -5,6 +5,7 @@ using Murmur.Core.Features.Settings;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
+using Murmur.Core.Tests.Input;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Shouldly;
@@ -141,7 +142,7 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task SettingsUpdatedHandler_AppliesHotkeyAndStartup()
     {
-        var matcher = new HotkeyMatcher(Previous);
+        var matcher = new HotkeyMatcher(Previous, AllKeysDown.Instance);
         var handler = new SettingsUpdatedHandler(matcher, _startup);
         var settings = new MurmurSettings(CtrlShiftSpace, StartWithWindows: false);
 
@@ -154,7 +155,7 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task SettingsUpdatedHandler_StartupRegistrationFails_StillAppliesHotkeyAndDoesNotThrow()
     {
-        var matcher = new HotkeyMatcher(Previous);
+        var matcher = new HotkeyMatcher(Previous, AllKeysDown.Instance);
         _startup.When(s => s.Apply(Arg.Any<bool>())).Throw(new UnauthorizedAccessException("blocked by policy"));
         var handler = new SettingsUpdatedHandler(matcher, _startup);
 
@@ -168,7 +169,7 @@ public sealed class SettingsHandlerTests
     public async Task CaptureHotkey_ReturnsCapturedDefinition()
     {
         var coordinator = new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>());
-        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous), coordinator);
+        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), coordinator);
 
         // Handle runs synchronously up to its first real wait, so the capture is already active here.
         var pending = handler.Handle(new CaptureHotkeyRequest(), CancellationToken.None);
@@ -184,7 +185,7 @@ public sealed class SettingsHandlerTests
     public async Task CaptureHotkey_ForgetsAHotkeyPressStillHeld_BeforeCapturing()
     {
         // The user clicked a button, so a held hotkey is stale: a lost key-up would otherwise make the next press look like auto-repeat.
-        var matcher = new HotkeyMatcher(HotkeyDefinition.Default);
+        var matcher = new HotkeyMatcher(HotkeyDefinition.Default, AllKeysDown.Instance);
         matcher.OnKey(new KeyInput(RightCtrl, IsDown: true, IsInjected: false));
         matcher.IsHotkeyHeld.ShouldBeTrue();
         var handler = new CaptureHotkeyHandler(matcher, new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
@@ -199,7 +200,7 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task CaptureHotkey_NothingPressedWithinTenSeconds_ReturnsNull()
     {
-        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous), new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
+        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
 
         var pending = handler.Handle(new CaptureHotkeyRequest(), CancellationToken.None);
         _time.Advance(TimeSpan.FromSeconds(9));

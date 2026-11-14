@@ -31,12 +31,16 @@ public readonly record struct MatchResult(HotkeySignal Signal, bool Swallow);
 /// <item>Another key-down while the hotkey is held → <see cref="HotkeySignal.OtherInputWhileHeld"/>, not swallowed.</item>
 /// <item>Esc while <see cref="DictationActive"/> → <see cref="HotkeySignal.Escape"/>, swallowed down and up.</item>
 /// <item>Injected input (such as Murmur's own Ctrl+V) is ignored entirely.</item>
+/// <item>A modifier whose key-up the hook never saw (Windows took the keyboard away: Win+L, a UAC prompt) is forgotten
+/// when a combo's main key next goes down, by reading the real key state, so it cannot block or fake the combo.</item>
 /// </list>
 /// Called from the keyboard hook's thread, while the controller reads and resets it from the UI thread: every member
 /// is thread-safe (state under a lock, <see cref="DictationActive"/> volatile).
 /// </summary>
-public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
+public sealed class HotkeyMatcher(HotkeyDefinition hotkey, IKeyStateProbe keys)
 {
+    private readonly IKeyStateProbe _keys = keys;
+
     private const int VkEscape = 0x1B;
 
     private readonly Lock _gate = new();
@@ -225,6 +229,12 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey)
             if (_held && !_modifiersReleased)
                 return new MatchResult(HotkeySignal.None, true);
 
+            // A modifier's key-up never reaches the hook when Windows takes the keyboard away while it is held: Win+L,
+            // Ctrl+Alt+Del, a UAC prompt, an elevated window coming to the front. The modifier would then count as
+            // held for good: a combo would stop matching until that key was pressed again, or its main key alone
+            // would start a dictation.
+            _modifiers.ForgetReleased(_keys, exceptVk: _hotkey.VirtualKey);
+
             // The main key may itself be a modifier key; it must not count towards its own combo.
             if (_modifiers.Current(exceptVk: _hotkey.VirtualKey) != _hotkey.Modifiers)
             {
@@ -288,6 +298,24 @@ internal sealed class ModifierKeyTracker
             _down |= 1u << slot;
         else
             _down &= ~(1u << slot);
+    }
+
+    /// <summary>
+    /// Forgets every modifier recorded as down that <paramref name="keys"/> reads as up: its key-up was missed. Only
+    /// ever forgets. A key the events never showed is not added, because the key state also holds keys the hook leaves
+    /// out on purpose (the fake Left Ctrl that comes with AltGr). <paramref name="exceptVk"/> is left alone: a combo's
+    /// main key is swallowed, so it reads as up while it is held.
+    /// </summary>
+    public void ForgetReleased(IKeyStateProbe keys, int exceptVk)
+    {
+        if (_down == 0)
+            return;
+
+        foreach (var vk in Keys)
+        {
+            if (vk != exceptVk && IsDown(vk) && !keys.IsKeyDown(vk))
+                Set(vk, down: false);
+        }
     }
 
     /// <summary>The side-agnostic modifiers currently held, optionally leaving one key out.</summary>

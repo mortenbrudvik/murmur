@@ -101,7 +101,7 @@ public sealed class InputHookStarterTests
     /// <summary>A host whose hook thread is never started: Start fails or succeeds as told, and both are written down.</summary>
     private sealed class RecordingHost(string name, List<string> log, Exception? failure)
         : InputHookHost(
-            new HotkeyMatcher(HotkeyDefinition.Default),
+            new HotkeyMatcher(HotkeyDefinition.Default, Substitute.For<IKeyStateProbe>()),
             new HotkeyCaptureCoordinator(TimeProvider.System, Substitute.For<IKeyboardLayout>()),
             Substitute.For<IKeyboardSender>(),
             TimeProvider.System,
