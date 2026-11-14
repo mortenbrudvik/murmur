@@ -12,12 +12,13 @@ namespace Murmur.Core.Input;
 /// Install, use and dispose on one thread that runs a message loop (Murmur gives it a dedicated thread): low-level
 /// hooks are called on the installing thread's message loop, and Windows silently removes a hook whose callback is
 /// too slow. The callbacks therefore only translate the event, call the handler and return; no I/O, no logging, and
-/// no exception is ever allowed to escape into native code.
+/// no exception is ever allowed to escape into native code. The first exception each callback catches is logged from
+/// the thread pool, so a broken handler leaves a trace without slowing the hook down.
 /// </para>
 /// </summary>
 public sealed class InputHooks : IDisposable
 {
-    private readonly ILogger _logger = Log.ForContext<InputHooks>();
+    private readonly ILogger _logger;
 
     // The delegates live in fields for the object's whole lifetime: native code holds function pointers to them,
     // so the GC must never collect them while a hook is installed.
@@ -30,10 +31,19 @@ public sealed class InputHooks : IDisposable
     private nint _keyboardHook;
     private nint _mouseHook;
     private bool _mouseHookFailureLogged;
+    private bool _keyboardCallbackFailureLogged;
+    private bool _mouseCallbackFailureLogged;
     private bool _disposed;
 
     public InputHooks()
+        : this(Log.ForContext<InputHooks>())
     {
+    }
+
+    /// <summary>Creates the hooks with the given logger; for tests, which must not swap the global logger.</summary>
+    internal InputHooks(ILogger logger)
+    {
+        _logger = logger;
         _keyboardProc = KeyboardProc;
         _mouseProc = MouseProc;
         _keyboardProcPointer = Marshal.GetFunctionPointerForDelegate(_keyboardProc);
@@ -114,25 +124,11 @@ public sealed class InputHooks : IDisposable
 
     private unsafe nint KeyboardProc(int nCode, nint wParam, nint lParam)
     {
-        try
+        if (nCode == NativeMethods.HC_ACTION)
         {
-            if (nCode == NativeMethods.HC_ACTION && KeyHandler is { } handler)
-            {
-                var message = (int)wParam;
-                var isDown = message is NativeMethods.WM_KEYDOWN or NativeMethods.WM_SYSKEYDOWN;
-                var data = (NativeMethods.KBDLLHOOKSTRUCT*)lParam;
-                if ((isDown || message is NativeMethods.WM_KEYUP or NativeMethods.WM_SYSKEYUP)
-                    && !IsAltGrFakeCtrl(data->vkCode, data->scanCode))
-                {
-                    var injected = (data->flags & NativeMethods.LLKHF_INJECTED) != 0;
-                    if (handler(new KeyInput((int)data->vkCode, isDown, injected)))
-                        return 1;
-                }
-            }
-        }
-        catch (Exception)
-        {
-            // Never unwind into native code. The event passes through untouched.
+            var data = (NativeMethods.KBDLLHOOKSTRUCT*)lParam;
+            if (OnKeyboardEvent((int)wParam, data->vkCode, data->scanCode, data->flags))
+                return 1;
         }
 
         return NativeMethods.CallNextHookEx(0, nCode, wParam, lParam);
@@ -140,21 +136,105 @@ public sealed class InputHooks : IDisposable
 
     private unsafe nint MouseProc(int nCode, nint wParam, nint lParam)
     {
-        try
+        if (nCode == NativeMethods.HC_ACTION)
         {
-            if (nCode == NativeMethods.HC_ACTION && MouseHandler is { } handler && IsButtonDownOrWheel((int)wParam))
-            {
-                var data = (NativeMethods.MSLLHOOKSTRUCT*)lParam;
-                if ((data->flags & NativeMethods.LLMHF_INJECTED) == 0)
-                    handler();
-            }
-        }
-        catch (Exception)
-        {
-            // Never unwind into native code. Mouse events are never swallowed.
+            var data = (NativeMethods.MSLLHOOKSTRUCT*)lParam;
+            OnMouseEvent((int)wParam, data->flags);
         }
 
         return NativeMethods.CallNextHookEx(0, nCode, wParam, lParam);
+    }
+
+    /// <summary>
+    /// The keyboard callback's body for one HC_ACTION event: translates it, calls <see cref="KeyHandler"/> and returns
+    /// true to swallow the event. Never throws: if the handler throws, the event passes through untouched and the
+    /// first such exception is logged.
+    /// </summary>
+    internal bool OnKeyboardEvent(int message, uint vkCode, uint scanCode, uint flags)
+    {
+        try
+        {
+            return KeyHandler is { } handler
+                   && TryTranslateKey(message, vkCode, scanCode, flags, out var input)
+                   && handler(input);
+        }
+        catch (Exception ex)
+        {
+            // Never unwind into native code. The event passes through untouched.
+            if (!_keyboardCallbackFailureLogged)
+            {
+                _keyboardCallbackFailureLogged = true;
+                QueueCallbackFailureLog(ex, "keyboard");
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The mouse callback's body for one HC_ACTION event: calls <see cref="MouseHandler"/> if
+    /// <see cref="IsReportedMouseEvent"/> says so. Mouse events are never swallowed. Never throws: if the handler
+    /// throws, the first such exception is logged.
+    /// </summary>
+    internal void OnMouseEvent(int message, uint flags)
+    {
+        try
+        {
+            if (MouseHandler is { } handler && IsReportedMouseEvent(message, flags))
+                handler();
+        }
+        catch (Exception ex)
+        {
+            // Never unwind into native code.
+            if (!_mouseCallbackFailureLogged)
+            {
+                _mouseCallbackFailureLogged = true;
+                QueueCallbackFailureLog(ex, "mouse");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Translates a low-level keyboard message into the handler's input. False for anything but a key down or up
+    /// (WM_KEYDOWN, WM_SYSKEYDOWN, WM_KEYUP, WM_SYSKEYUP) and for the synthetic Left Ctrl that precedes AltGr
+    /// (<see cref="IsAltGrFakeCtrl"/>).
+    /// </summary>
+    internal static bool TryTranslateKey(int message, uint vkCode, uint scanCode, uint flags, out KeyInput input)
+    {
+        var isDown = message is NativeMethods.WM_KEYDOWN or NativeMethods.WM_SYSKEYDOWN;
+        var isUp = message is NativeMethods.WM_KEYUP or NativeMethods.WM_SYSKEYUP;
+        if ((!isDown && !isUp) || IsAltGrFakeCtrl(vkCode, scanCode))
+        {
+            input = default;
+            return false;
+        }
+
+        var injected = (flags & NativeMethods.LLKHF_INJECTED) != 0;
+        input = new KeyInput((int)vkCode, isDown, injected);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a low-level mouse message reaches the handler: a button down or wheel event that was not injected.
+    /// </summary>
+    internal static bool IsReportedMouseEvent(int message, uint flags) =>
+        IsButtonDownOrWheel(message) && (flags & NativeMethods.LLMHF_INJECTED) == 0;
+
+    /// <summary>Logs a callback failure from the thread pool, so the hook thread returns at once.</summary>
+    private void QueueCallbackFailureLog(Exception exception, string hook)
+    {
+        try
+        {
+            var logger = _logger;
+            ThreadPool.QueueUserWorkItem(_ => logger.Error(
+                exception,
+                "The {Hook} hook callback failed; the event was passed on, and further failures are not logged",
+                hook));
+        }
+        catch (Exception)
+        {
+            // Nothing more can be done from inside a hook.
+        }
     }
 
     /// <summary>
