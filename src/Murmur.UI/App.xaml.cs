@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Autofac;
 using MediatR;
 using Murmur.Common;
@@ -22,6 +23,7 @@ using Murmur.Core.Setup;
 using Murmur.Core.Speech;
 using Murmur.Interop;
 using Murmur.UI.Pill;
+using Murmur.UI.Splash;
 using Murmur.UI.Tray;
 using Serilog;
 using Wpf.Ui.Appearance;
@@ -44,6 +46,11 @@ public partial class App : Application
     private InputHookHost? _inputHooks;
     private TrayIconHost? _tray;
 
+    /// <summary>The splash while it is up; null on a sign-in start and once it has handed over to the main window.</summary>
+    private SplashWindow? _splash;
+    private SplashViewModel? _splashModel;
+    private SplashGate? _splashGate;
+
     /// <summary>Set once Murmur is really exiting; until then closing the main window only hides it.</summary>
     public static bool IsQuitting { get; private set; }
 
@@ -51,15 +58,23 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        RunStartup(() => Start(e.Args));
+    }
+
+    /// <summary>
+    /// Runs a part of start-up and ends Murmur with a message if it throws. Start-up runs as dispatcher operations, so
+    /// an exception escaping one would be swallowed by the DispatcherUnhandledException handler and leave a process
+    /// with no window, perhaps no tray icon, and the single-instance mutex held, so that every later launch would only
+    /// signal it and exit.
+    /// </summary>
+    private void RunStartup(Action part)
+    {
         try
         {
-            Start(e.Args);
+            part();
         }
         catch (Exception ex)
         {
-            // OnStartup runs as a dispatcher operation, so an exception escaping it would be swallowed by the
-            // DispatcherUnhandledException handler and leave a process with no window, perhaps no tray icon, and the
-            // single-instance mutex held, so that every later launch would only signal it and exit.
             FailStartup(ex);
         }
     }
@@ -117,10 +132,39 @@ public partial class App : Application
         // 4. Murmur lives in the tray: windows opening and closing never end it, only Quit does.
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+        // The theme is fixed to dark and applied before any window is created to avoid a flicker.
+        ApplicationThemeManager.Apply(ApplicationTheme.Dark);
+
+        // The splash goes up now, before the container, the main window and WebView2 exist: that wait is what it is
+        // for. Not on a sign-in start, which stays silent in the tray. The package probe is the one the container
+        // registers later; it is cheap and has no state.
+        if (ShouldShowSplash(launch, new PackageIdentity()))
+        {
+            ShowSplash();
+
+            // The rest of start-up takes the UI thread for a good part of a second (measured: about 0.4 s on the
+            // owner's PC), and a window is only drawn when the dispatcher is free. So it waits one turn, at a priority
+            // below rendering: the splash is drawn first and start-up goes on behind it. Its animation and its clock
+            // begin when start-up is done and frames can be drawn again; otherwise the animation's opening would never
+            // be seen and the splash would close before its minimum time on screen.
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () => RunStartup(() =>
+            {
+                FinishStart(launch);
+                BeginSplash();
+            }));
+            return;
+        }
+
+        FinishStart(launch);
+    }
+
+    /// <summary>Everything from the container on: steps 5 to 13. Runs behind the splash when there is one.</summary>
+    private void FinishStart(LaunchArguments launch)
+    {
         // 5. Container and API
         _container = AutofacBootstrapper.Bootstrap();
 
-        // Set once, here, before any window exists and so before any IPC can read or take it.
+        // Set once, here, before the main window exists and so before any IPC can read or take it.
         _container.Resolve<LaunchOptions>().OpenPage = launch.Page;
 
         // Decides how Murmur starts with Windows (see AppModule.RegisterStartup) and how it tells a sign-in start.
@@ -154,13 +198,17 @@ public partial class App : Application
         // that read; touching the store here does it off the UI thread while the rest of start-up goes on.
         PreloadHistoryAsync(_container.Resolve<IHistoryStore>()).FireAndForget();
 
-        // 6. The theme is fixed to dark and applied before any window is created to avoid a flicker.
-        ApplicationThemeManager.Apply(ApplicationTheme.Dark);
+        // 6. The splash closes once the web UI has drawn its first page (and its minimum time has passed).
+        _container.Resolve<UiReadiness>().BecameReady += () => _splashGate?.MarkReady();
 
         // Created before the pill and set explicitly: WPF makes the first window it sees the MainWindow, and that
-        // must never be the pill. Its WebView only starts when the window is first shown.
+        // must never be the pill or the splash. Its WebView only starts when the window is first shown.
         _mainWindow = _container.Resolve<MainWindow>();
         MainWindow = _mainWindow;
+
+        // The preloaded window is shown but not drawn (see MainWindow.Preload). Its taskbar button is there, and a
+        // click on it activates a window nobody can see: take that as "show me the window now".
+        _mainWindow.Activated += (_, _) => SkipSplash();
 
         // 7. The pill's window handle exists from the start, so its first Show is quick.
         var pill = _container.Resolve<PillWindow>();
@@ -204,17 +252,82 @@ public partial class App : Application
         var input = _container.Resolve<InputStatus>();
         engine.StatusChanged += status => Dispatcher.BeginInvoke(() => NotifyTray(notifier, settings, input, status));
 
+        // The splash's status line follows the engine too, for as long as the splash is up.
+        _splashModel?.Apply(engine.Status);
+        engine.StatusChanged += status => Dispatcher.BeginInvoke(() => _splashModel?.Apply(status));
+
         StartSpeechAsync(engine, _container.Resolve<IGpuInfo>(), _container.Resolve<SetupCoordinator>()).FireAndForget();
 
         // 11. Start with Windows
         ApplyStartupRegistration(_container);
 
-        // 12. Second launches
-        _guard.ListenForShowRequests(ShowMainWindow);
+        // 12. Second launches. The guard was acquired in step 3, before this part of start-up.
+        _guard!.ListenForShowRequests(ShowMainWindow);
 
-        // 13. Started at sign-in, Murmur stays in the tray.
+        // 13. Started at sign-in, Murmur stays in the tray. Otherwise the window opens: behind the splash while that
+        // is up, so its page loads unseen and the splash hands over to a window that is already drawn.
         if (!IsSignInStart(launch, identity))
-            ShowMainWindow();
+        {
+            if (_splash is not null)
+                _mainWindow.Preload();
+            else
+                ShowMainWindow();
+        }
+    }
+
+    /// <summary>
+    /// Puts the splash on screen, at rest: its animation and its clock start in <see cref="BeginSplash"/>. When it
+    /// closes is the gate's decision: the UI has drawn and the minimum time has passed, the user skipped it, or the
+    /// timeout ran out.
+    /// </summary>
+    private void ShowSplash()
+    {
+        _splashModel = new SplashViewModel(new AppInfo(new PackageIdentity(), MurmurPaths.Default).Version);
+        _splash = new SplashWindow(_splashModel);
+        _splash.SkipRequested += SkipSplash;
+
+        // WPF made the splash the MainWindow, being the first window created. It is not: see step 6.
+        MainWindow = null;
+
+        _splashGate = new SplashGate(TimeProvider.System, SplashGate.DefaultMinimum, SplashGate.DefaultTimeout);
+        // Raised on whichever thread closed the gate: a timer's, the IPC call's that reported the UI ready, or this one.
+        _splashGate.Closed += reason => Dispatcher.BeginInvoke(() => CloseSplash(reason));
+        _splash.Show();
+    }
+
+    /// <summary>
+    /// Start-up is done and the UI thread is free: the splash's animation starts, and with it the clock that decides
+    /// when it closes. Nothing to do if it was closed in the meantime.
+    /// </summary>
+    private void BeginSplash()
+    {
+        _splash?.Play();
+        _splashGate?.Start();
+    }
+
+    /// <summary>Closes the splash now, if it is up: a click or a key on it, or any request for the main window.</summary>
+    private void SkipSplash() => _splashGate?.Skip();
+
+    /// <summary>
+    /// The hand-over: the main window becomes visible and the splash fades out. The window takes the focus only if
+    /// Murmur still has it (<see cref="SplashHandoff"/>). If start-up has not got as far as the main window yet (an
+    /// early skip), there is nothing to reveal: step 13 finds the splash gone and shows the window itself.
+    /// </summary>
+    private void CloseSplash(SplashCloseReason reason)
+    {
+        if (_splash is not { } splash)
+            return;
+
+        Log.Information("The splash closes: {Reason}", reason);
+        _splash = null;
+        _splashModel = null;
+        _splashGate?.Dispose();
+        _splashGate = null;
+
+        if (!IsQuitting && _mainWindow is { IsVisible: true } window)
+            window.Reveal(SplashHandoff.ShouldActivate(WindowNative.ForegroundProcessId(), (uint)Environment.ProcessId));
+
+        splash.FadeOutAndCloseAsync().FireAndForget();
     }
 
     /// <summary>
@@ -265,6 +378,13 @@ public partial class App : Application
     internal static bool IsSignInStart(LaunchArguments launch, IPackageIdentity identity) =>
         !launch.Restarted
         && (launch.Minimized || (identity.IsPackaged && PackagedStartupRegistration.IsStartupActivation()));
+
+    /// <summary>
+    /// The splash is for a start that goes on to show the window: started by hand, or restarted from Settings. Murmur
+    /// starting with Windows stays silent in the tray.
+    /// </summary>
+    internal static bool ShouldShowSplash(LaunchArguments launch, IPackageIdentity identity) =>
+        !IsSignInStart(launch, identity);
 
     /// <summary>
     /// Starts a new Murmur on Settings and quits this one. The new instance waits for this one to let go of the
@@ -446,6 +566,14 @@ public partial class App : Application
         if (IsQuitting || _mainWindow is null)
             return;
 
+        // While the splash is up the window is on its way: asking for it (the tray, a second launch) only cuts the
+        // splash short, and the hand-over shows the window.
+        if (_splash is not null)
+        {
+            SkipSplash();
+            return;
+        }
+
         _mainWindow.Reveal(activate: true);
     }
 
@@ -466,6 +594,14 @@ public partial class App : Application
     private void StopInputAndTray()
     {
         IsQuitting = true;
+
+        // A splash still up goes at once, without its hand-over.
+        _splashGate?.Dispose();
+        _splashGate = null;
+        _splash?.Close();
+        _splash = null;
+        _splashModel = null;
+
         _inputHooks?.Dispose();
         _tray?.Dispose();
         _appCts.Cancel();

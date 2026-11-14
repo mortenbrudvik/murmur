@@ -73,7 +73,19 @@ horizontally, top at 46; the line's flat ends are extended to the window's edges
 | 0.3 – 0.6 | The status line (§5.4) fades in near the bottom, and the version in the bottom right corner, small and dim. Both stay until the splash closes. |
 | 0.9 – 1.65 | The waveform dies down while every point of the line moves to its place on the icon's line (ease in-out). |
 | 1.45 – 1.9 | The tile (gradient `#56A0FF`, `#7A78FF`, `#AE62F2`) fades in and grows from 90 % to 100 %, with a soft glow behind it. Inside the tile the line turns white; outside it dims to about 40 %. |
-| 1.95 – 2.5 | "Murmur" is typed below the tile, one letter every 85 ms, with a caret in the accent colour. After the last letter the caret blinks until the splash closes, or for about a second on a slow start. |
+| 1.75 – 2.2 | "Murmur" is typed below the tile, one letter every 85 ms, with a caret in the accent colour. After the last letter the caret blinks until the splash closes, or for about a second on a slow start. |
+
+**Changed while building (2026-11-15), both from measurements on the owner's PC:**
+
+- *The typing starts 0.2 s earlier than in the mock-up (1.75 s, not 1.95 s).* With the mock-up's timing the last
+  letter appeared at 2.375 s and the splash could close at 2.5 s, so the finished name was on screen for about a
+  tenth of a second. It now stands for a third of a second.
+- *The timeline counts from when start-up is done, not from when the splash appears.* Showing the splash takes about
+  0.5 s, and the rest of start-up then keeps the UI thread busy for about 0.4 s more, during which nothing can
+  animate. So the splash is drawn at once, at rest (the line lying flat), start-up goes on behind it, and the
+  animation and the 2.5 s minimum of §5.3 begin when start-up has finished. The splash is therefore on screen for
+  about 3 s in all: roughly half a second at rest, then the 2.5 s. Counting from when it appears instead would hide
+  the animation's opening and close the splash before its name was typed.
 
 **One difference from the mock-up (approved by the owner):** in the mock-up the status line appears only
 at 2.5 s and the sequence runs to 4.3 s. With the 2.5 s minimum of §5.3 the splash would usually close just as the
@@ -95,8 +107,9 @@ it is on screen while the rest of start-up runs. It must not become `Application
 
 ### 5.3 When it closes
 
-It closes when **both** are true: the web UI has drawn its first page, and 2.5 s have passed since it appeared (the
-owner accepted this minimum so the name finishes typing). Then the main window is shown and the splash fades out over
+It closes when **both** are true: the web UI has drawn its first page, and 2.5 s have passed since its animation
+began (the owner accepted this minimum so the name finishes typing; see the note in §5.1 on when the animation
+begins). The 8 s timeout below counts from the same moment. Then the main window is shown and the splash fades out over
 about 150 ms.
 
 - **Focus:** the splash takes the foreground when it appears, as the main window does today. When it closes, the main
