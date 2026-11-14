@@ -20,20 +20,20 @@ public sealed class InputHookStarter(Func<InputHookHost> createHost, TimeProvide
     public Exception? Failure { get; private set; }
 
     /// <summary>
-    /// Starts a host and returns it. The first attempt runs on the caller's thread, as a direct start would; the second
-    /// one on whichever thread the wait ends on. Returns null, with <see cref="Failure"/> set, if both attempts fail.
-    /// Never throws.
+    /// Starts a host and returns it. The first host is made and its thread started on the caller's thread; the rest runs
+    /// on the thread pool, and nothing blocks the caller's thread. Returns null, with <see cref="Failure"/> set, if both
+    /// attempts fail. Never throws.
     /// </summary>
     public async Task<InputHookHost?> StartAsync()
     {
-        var host = TryStart();
+        var host = await TryStartAsync().ConfigureAwait(false);
         if (host is not null)
             return host;
 
         _logger.Warning(Failure, "Could not install the keyboard hook; trying once more in {Delay}", RetryDelay);
         await Task.Delay(RetryDelay, time).ConfigureAwait(false);
 
-        host = TryStart();
+        host = await TryStartAsync().ConfigureAwait(false);
         if (host is null)
             _logger.Error(Failure, "Could not install the keyboard hook; dictation is unavailable");
         else
@@ -42,13 +42,13 @@ public sealed class InputHookStarter(Func<InputHookHost> createHost, TimeProvide
         return host;
     }
 
-    private InputHookHost? TryStart()
+    private async Task<InputHookHost?> TryStartAsync()
     {
         InputHookHost? host = null;
         try
         {
             host = createHost();
-            host.Start();
+            await host.StartAsync().ConfigureAwait(false);
             Failure = null;
             return host;
         }

@@ -17,7 +17,7 @@ namespace Murmur.UI;
 /// (opening a Bluetooth microphone, WebView2 work, a garbage collection); this thread only ever runs the callbacks.
 /// </para>
 /// <para>
-/// Not sealed, with <see cref="Start"/>, <see cref="Dispose"/> and <see cref="Install"/> virtual, only so that
+/// Not sealed, with <see cref="StartAsync"/>, <see cref="Dispose"/> and <see cref="Install"/> virtual, only so that
 /// <see cref="InputHookStarter"/> and the race between a slow install and a Dispose can be tested without installing
 /// a real hook.
 /// </para>
@@ -53,9 +53,14 @@ public partial class InputHookHost(
     /// <summary>True once <see cref="Dispose"/> was called.</summary>
     internal bool IsDisposed => _disposed;
 
-    /// <summary>Starts the hook thread and waits until the keyboard hook is installed.</summary>
+    /// <summary>
+    /// Starts the hook thread and completes once the keyboard hook is installed, without blocking the caller's thread
+    /// meanwhile. Continues on the thread pool.
+    /// </summary>
     /// <exception cref="Win32Exception">The keyboard hook could not be installed.</exception>
-    public virtual void Start()
+    /// <exception cref="TimeoutException">The hook thread did not install the hook in time.</exception>
+    /// <exception cref="OperationCanceledException">The host was disposed while the hook was being installed.</exception>
+    public virtual async Task StartAsync()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_thread is not null)
@@ -71,22 +76,15 @@ public partial class InputHookHost(
         };
         _thread.Start();
 
-        bool completed;
         try
         {
-            completed = started.Task.Wait(StartTimeout);
+            // Rethrows the installation failure itself, if any.
+            await started.Task.WaitAsync(StartTimeout).ConfigureAwait(false);
         }
-        catch (AggregateException)
+        catch (TimeoutException) when (!started.Task.IsCompleted)
         {
-            // Wait wraps a failure in an AggregateException; GetResult below rethrows the failure itself.
-            completed = true;
-        }
-
-        if (!completed)
             throw new TimeoutException("The input hook thread did not start in time.");
-
-        // Rethrows the installation failure, if any, on the caller's thread.
-        started.Task.GetAwaiter().GetResult();
+        }
     }
 
     /// <summary>Removes the hooks on their own thread, ends its message loop and waits briefly for it to exit.</summary>
@@ -147,7 +145,7 @@ public partial class InputHookHost(
         return result.Swallow;
     }
 
-    /// <summary>Installs the keyboard hook on the hook thread. Virtual for the same reason as <see cref="Start"/>.</summary>
+    /// <summary>Installs the keyboard hook on the hook thread. Virtual for the same reason as <see cref="StartAsync"/>.</summary>
     protected virtual void Install(InputHooks hooks) => hooks.Install();
 
     private void Run(TaskCompletionSource started)

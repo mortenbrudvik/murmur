@@ -360,9 +360,9 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Starts the keyboard hook, which <see cref="InputHookStarter"/> tries twice: the first attempt runs here, the wait
-    /// and the second attempt do not hold up the UI thread. What the hook needs is resolved before the first attempt,
-    /// so a service that cannot be built still fails the start-up instead of passing for a refused hook.
+    /// Starts the keyboard hook, which <see cref="InputHookStarter"/> tries twice without holding up the UI thread. What
+    /// the hook needs is resolved here, before the first attempt, so a service that cannot be built still fails the
+    /// start-up instead of passing for a refused hook.
     /// </summary>
     private Task StartInputHooksAsync(IContainer container, DictationController controller)
     {

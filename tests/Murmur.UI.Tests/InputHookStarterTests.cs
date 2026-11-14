@@ -109,11 +109,10 @@ public sealed class InputHookStarterTests
     {
         public string Name { get; } = name;
 
-        public override void Start()
+        public override Task StartAsync()
         {
             log.Add($"{Name}.Start");
-            if (failure is not null)
-                throw failure;
+            return failure is null ? Task.CompletedTask : Task.FromException(failure);
         }
 
         public override void Dispose() => log.Add($"{Name}.Dispose");

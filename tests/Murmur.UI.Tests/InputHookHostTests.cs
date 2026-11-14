@@ -139,9 +139,9 @@ public sealed class InputHookHostTests
     }
 
     [Fact]
-    public void StartThenDispose_RunsAndEndsTheHookThread()
+    public async Task StartThenDispose_RunsAndEndsTheHookThread()
     {
-        _host.Start();
+        await _host.StartAsync();
         _host.IsRunning.ShouldBeTrue();
 
         _host.Dispose();
@@ -159,7 +159,7 @@ public sealed class InputHookHostTests
     public async Task Start_DisposedWhileTheHooksAreBeingInstalled_DoesNotKeepThem()
     {
         using var host = new SlowInstallHost(_matcher, _coordinator, _keyboard, _time);
-        var start = Task.Run(host.Start, TestContext.Current.CancellationToken);
+        var start = host.StartAsync();
         host.Installing.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ShouldBeTrue();
 
         var dispose = Task.Run(host.Dispose, TestContext.Current.CancellationToken);
@@ -167,7 +167,7 @@ public sealed class InputHookHostTests
         host.Installed.Set();
         await dispose;
 
-        // Start does not report a host that was disposed meanwhile as started.
+        // StartAsync does not report a host that was disposed meanwhile as started.
         var failure = await Record.ExceptionAsync(() => start);
         failure.ShouldNotBeNull().ShouldBeAssignableTo<OperationCanceledException>();
         WaitUntil(() => !host.IsRunning, StopWait).ShouldBeTrue("the hook thread should have ended");
@@ -175,26 +175,44 @@ public sealed class InputHookHostTests
 
     /// <summary>Guards the seam above: with the install let through, the host runs until it is disposed.</summary>
     [Fact]
-    public void StartThenDispose_WithAnInstallThatSucceeds_RunsAndEndsTheHookThread()
+    public async Task StartThenDispose_WithAnInstallThatSucceeds_RunsAndEndsTheHookThread()
     {
         using var host = new SlowInstallHost(_matcher, _coordinator, _keyboard, _time);
         host.Installed.Set();
 
-        host.Start();
+        await host.StartAsync();
         host.IsRunning.ShouldBeTrue();
         host.Dispose();
 
         WaitUntil(() => !host.IsRunning, StopWait).ShouldBeTrue("the hook thread should have ended");
     }
 
+    /// <summary>
+    /// Start-up calls this on the UI thread, which must not wait for the hook thread: the call returns while the hook is
+    /// still being installed, and the task completes once it is.
+    /// </summary>
+    [Fact]
+    public async Task StartAsync_WhileTheHookIsBeingInstalled_ReturnsWithoutWaitingForIt()
+    {
+        using var host = new SlowInstallHost(_matcher, _coordinator, _keyboard, _time);
+
+        var start = host.StartAsync();
+        host.Installing.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ShouldBeTrue();
+
+        start.IsCompleted.ShouldBeFalse();
+        host.Installed.Set();
+        await start.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        host.IsRunning.ShouldBeTrue();
+    }
+
     /// <summary>The caller (and the status the web app shows) gets the installation failure itself, not a wrapper around it.</summary>
     [Fact]
-    public void Start_TheInstallFails_ThrowsTheFailureItself()
+    public async Task Start_TheInstallFails_ThrowsTheFailureItself()
     {
         using var host = new SlowInstallHost(_matcher, _coordinator, _keyboard, _time) { InstallFailure = new Win32Exception(5) };
         host.Installed.Set();
 
-        var failure = Should.Throw<Win32Exception>(host.Start);
+        var failure = await Should.ThrowAsync<Win32Exception>(host.StartAsync);
 
         failure.NativeErrorCode.ShouldBe(5);
         WaitUntil(() => !host.IsRunning, StopWait).ShouldBeTrue("the hook thread should have ended");
@@ -209,7 +227,7 @@ public sealed class InputHookHostTests
     /// <summary>
     /// Waits until <paramref name="condition"/> holds or <paramref name="timeout"/> passes; returns whether it held. The
     /// hook thread is still unwinding (removing its hooks, leaving its method) for a moment after the call that ended it
-    /// returns: Start rethrows an install failure as soon as the thread reports it, and Dispose only waits for the thread
+    /// returns: StartAsync rethrows an install failure as soon as the thread reports it, and Dispose only waits for the thread
     /// for a limited time. A thread that has stopped is therefore waited for, not asserted at once.
     /// </summary>
     private static bool WaitUntil(Func<bool> condition, TimeSpan timeout) => SpinWait.SpinUntil(condition, timeout);
