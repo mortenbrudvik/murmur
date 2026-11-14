@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { contentSecurityPolicy } from './build/contentSecurityPolicy.ts'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), contentSecurityPolicy()],
   server: {
     port: 5223,
   },
