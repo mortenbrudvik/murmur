@@ -35,6 +35,20 @@ public class RequestJsonContractTests
         request.SoundCues.ShouldBeTrue();
         request.StartWithWindows.ShouldBeFalse();
         request.KeepAudio.ShouldBeFalse();
+        request.KeepMicrophoneReady.ShouldBeFalse(); // left out of the JSON: off
+    }
+
+    [Fact]
+    public void UpdateSettingsRequest_KeepMicrophoneReady_IsReadFromTheJson()
+    {
+        const string json = """
+            {"hotkey":{"virtualKey":32,"modifiers":"ctrl","displayName":"Ctrl+Space"},"microphoneId":null,"soundCues":true,"startWithWindows":false,"keepAudio":false,"keepMicrophoneReady":true}
+            """;
+
+        var request = (UpdateSettingsRequest?)JsonUtils.Deserialize(json, typeof(UpdateSettingsRequest));
+
+        request.ShouldNotBeNull();
+        request.KeepMicrophoneReady.ShouldBeTrue();
     }
 
     [Fact]

@@ -17,6 +17,7 @@ const settings: MurmurSettings = {
   soundCues: true,
   startWithWindows: false,
   keepAudio: false,
+  keepMicrophoneReady: false,
 };
 
 /** An entry from today, at the given local time. */

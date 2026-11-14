@@ -66,7 +66,10 @@ public class AppModule : Module
         builder.RegisterType<VocabularyService>().As<IVocabularyService>().SingleInstance();
         builder.RegisterType<HistoryStore>().As<IHistoryStore>().SingleInstance();
         builder.RegisterType<AudioArchive>().As<IAudioArchive>().SingleInstance();
+        // The dictation recorder. Owned by the container, which disposes it on exit and so releases a microphone that
+        // "keep the microphone ready" was holding open.
         builder.RegisterType<AudioRecorder>().As<IAudioRecorder>().SingleInstance();
+        builder.RegisterType<MicrophoneReadiness>().SingleInstance();
         // The setup page's microphone test has a recorder of its own, so it never collides with a dictation. Owned by
         // the container, which disposes it on exit and so stops a test that is still running.
         builder.Register(c => new MicrophoneLevelMonitor(() => new AudioRecorder(), c.Resolve<IMediator>(), c.Resolve<TimeProvider>()))

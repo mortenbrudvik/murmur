@@ -83,6 +83,10 @@ public enum MicTestState
 /// <param name="SetupStep">The setup step the user stopped at; null until the first-run decision is made.</param>
 /// <param name="SetupCompleted">Setup was finished or skipped, so it is not shown again.</param>
 /// <param name="CudaTipDismissed">The user closed the tip about installing CUDA for a faster GPU.</param>
+/// <param name="KeepMicrophoneReady">
+/// Keep the microphone open while Murmur runs, so a dictation starts without the microphone's start-up delay. Off by
+/// default: Windows then shows the microphone as in use all the time, which the user has to have asked for.
+/// </param>
 public sealed record MurmurSettings(
     HotkeyDefinition Hotkey,
     string? MicrophoneId = null,
@@ -92,7 +96,8 @@ public sealed record MurmurSettings(
     SpeechModelId? SpeechModel = null,
     SetupStep? SetupStep = null,
     bool SetupCompleted = false,
-    bool CudaTipDismissed = false)
+    bool CudaTipDismissed = false,
+    bool KeepMicrophoneReady = false)
 {
     public static MurmurSettings Default { get; } = new(HotkeyDefinition.Default);
 }

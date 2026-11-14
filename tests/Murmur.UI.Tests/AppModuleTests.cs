@@ -4,6 +4,7 @@ using MediatR;
 using Murmur.Core.Audio;
 using Murmur.Core.Features.App;
 using Murmur.Core.Features.Models;
+using Murmur.Core.Features.Settings;
 using Murmur.Core.Features.Setup;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
@@ -69,6 +70,20 @@ public sealed class AppModuleTests
         container.Resolve<IRequestHandler<GetInputStatusRequest, InputStatus>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StartMicTestRequest, MicTestResult>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StopMicTestRequest>>().ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// Saved settings reach the running app through this handler, which needs the microphone-readiness service; and
+    /// there must be one such service, so that what App applies at start and what the handler applies later run in order.
+    /// </summary>
+    [Fact]
+    public void Bootstrap_ResolvesTheSettingsUpdatedHandlerAndOneMicrophoneReadiness()
+    {
+        using var container = AutofacBootstrapper.Bootstrap();
+
+        container.Resolve<IEnumerable<INotificationHandler<SettingsUpdatedNotification>>>()
+            .ShouldContain(handler => handler is SettingsUpdatedHandler);
+        container.Resolve<MicrophoneReadiness>().ShouldBeSameAs(container.Resolve<MicrophoneReadiness>());
     }
 
     /// <summary>

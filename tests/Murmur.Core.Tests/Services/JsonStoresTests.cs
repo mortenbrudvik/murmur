@@ -66,6 +66,15 @@ public sealed class JsonStoresTests : IDisposable
         loaded.SetupStep.ShouldBeNull();
         loaded.SetupCompleted.ShouldBeFalse();
         loaded.CudaTipDismissed.ShouldBeFalse();
+        loaded.KeepMicrophoneReady.ShouldBeFalse(); // opt-in: an upgrade never starts holding the microphone open
+    }
+
+    [Fact]
+    public void Settings_KeepMicrophoneReady_RoundTrips()
+    {
+        NewSettingsService().Save(MurmurSettings.Default with { KeepMicrophoneReady = true });
+
+        NewSettingsService().Load().KeepMicrophoneReady.ShouldBeTrue();
     }
 
     [Fact]

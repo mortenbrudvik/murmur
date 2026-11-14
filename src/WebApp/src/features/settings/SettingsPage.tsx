@@ -11,7 +11,7 @@ import type { EngineStatus, MurmurSettings } from "../../types/domain";
 /** Which group of settings the last change came from, so a failed save is reported next to it. */
 type Group = "hotkey" | "microphone" | "options";
 
-type ToggleField = "soundCues" | "startWithWindows" | "keepAudio";
+type ToggleField = "soundCues" | "startWithWindows" | "keepAudio" | "keepMicrophoneReady";
 
 const TOGGLES: { field: ToggleField; label: string; hint: string }[] = [
   { field: "soundCues", label: "Sound cues", hint: "Play a short sound when recording starts and stops." },
@@ -20,6 +20,14 @@ const TOGGLES: { field: ToggleField; label: string; hint: string }[] = [
     field: "keepAudio",
     label: "Keep audio recordings",
     hint: "Save each dictation's audio with its history entry. When off, audio is discarded after transcription.",
+  },
+  {
+    field: "keepMicrophoneReady",
+    label: "Keep the microphone ready",
+    hint:
+      "Dictation starts at once instead of waiting for the microphone to start. Windows shows the microphone as in use " +
+      "while Murmur runs, and a Bluetooth headset may stay in call mode, which lowers its sound quality. Nothing is " +
+      "recorded until you dictate.",
   },
 ];
 

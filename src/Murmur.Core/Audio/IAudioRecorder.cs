@@ -24,21 +24,43 @@ public interface IAudioRecorder
     event Action<Exception>? CaptureFailed;
 
     /// <summary>
+    /// Whether the microphone stays open between recordings, so that <see cref="Start"/> has nothing to open and audio
+    /// comes at once. Off by default. While it is on, <see cref="Stop"/> and <see cref="Cancel"/> end the recording but
+    /// leave the device open: Windows shows the microphone as in use, and what it hears is thrown away until the next
+    /// <see cref="Start"/>. Turning it off releases a device that is open with no recording; a recording in progress
+    /// releases it when it ends.
+    /// </summary>
+    bool KeepOpen { get; set; }
+
+    /// <summary>
+    /// Opens the microphone ahead of a recording, when <see cref="KeepOpen"/> is on: the given device, or the Windows
+    /// default when <paramref name="deviceId"/> is <see langword="null"/>. Does nothing when <see cref="KeepOpen"/> is
+    /// off, when that device is open already or while a recording is in progress; a different device that is open is
+    /// released first. Opening can take seconds, so call it off the UI thread.
+    /// </summary>
+    /// <exception cref="AudioDeviceException">The device is missing, unavailable or cannot be opened.</exception>
+    void Prepare(string? deviceId);
+
+    /// <summary>
     /// Starts capturing from the given device, or from the Windows default capture device
-    /// (<c>Role.Console</c>) when <paramref name="deviceId"/> is <see langword="null"/>.
+    /// (<c>Role.Console</c>) when <paramref name="deviceId"/> is <see langword="null"/>. With <see cref="KeepOpen"/>
+    /// on, a device that is already open is used as it is.
     /// </summary>
     /// <exception cref="AudioDeviceException">The device is missing, unavailable or cannot be opened.</exception>
     /// <exception cref="InvalidOperationException">A recording is already in progress.</exception>
     void Start(string? deviceId);
 
     /// <summary>
-    /// Stops capturing, releases the device and returns every 16 kHz mono sample recorded since
-    /// <see cref="Start"/>. No <see cref="SamplesAvailable"/> is raised once this returns. Returns an empty
-    /// array when not recording.
+    /// Ends the recording, releases the device (unless <see cref="KeepOpen"/> is on) and returns every 16 kHz mono
+    /// sample recorded since <see cref="Start"/>. No <see cref="SamplesAvailable"/> is raised once this returns.
+    /// Returns an empty array when not recording.
     /// </summary>
     float[] Stop();
 
-    /// <summary>Stops capturing, releases the device and discards the samples. A no-op when not recording.</summary>
+    /// <summary>
+    /// Ends the recording, releases the device (unless <see cref="KeepOpen"/> is on) and discards the samples. A
+    /// no-op when not recording.
+    /// </summary>
     void Cancel();
 
     /// <summary>Lists the active capture endpoints; <see cref="MicrophoneInfo.IsDefault"/> marks the Console default.</summary>

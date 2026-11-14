@@ -9,7 +9,8 @@ public record UpdateSettingsRequest(
     string? MicrophoneId,
     bool SoundCues,
     bool StartWithWindows,
-    bool KeepAudio) : IRequest<MurmurSettings>;
+    bool KeepAudio,
+    bool KeepMicrophoneReady = false) : IRequest<MurmurSettings>;
 
 /// <summary>Published after the settings were saved, so the running app can adopt them.</summary>
 public sealed class SettingsUpdatedNotification(MurmurSettings settings) : INotification
@@ -36,6 +37,7 @@ public class UpdateSettingsHandler(ISettingsService settingsService, IMediator m
             SoundCues = request.SoundCues,
             StartWithWindows = request.StartWithWindows,
             KeepAudio = request.KeepAudio,
+            KeepMicrophoneReady = request.KeepMicrophoneReady,
         });
         await mediator.Publish(new SettingsUpdatedNotification(settings), ct).ConfigureAwait(false);
         return settings;

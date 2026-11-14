@@ -7,111 +7,216 @@ using Serilog;
 namespace Murmur.Core.Audio;
 
 /// <summary>
-/// WASAPI shared-mode microphone capture, converted to 16 kHz mono float. The device is opened by
+/// WASAPI shared-mode microphone capture, converted to 16 kHz mono float. By default the device is opened by
 /// <see cref="Start"/> and released by <see cref="Stop"/>/<see cref="Cancel"/>, so Windows' "microphone in
 /// use" indicator is only on while recording.
+/// <para>
+/// With <see cref="KeepOpen"/> on, the device stays open (and the indicator on) between recordings, so a recording
+/// starts without the device's start-up delay. Nothing is kept of what the open microphone hears in between: its
+/// buffers are dropped unconverted, and no event is raised for them.
+/// </para>
 /// </summary>
-public sealed class AudioRecorder : IAudioRecorder
+public sealed class AudioRecorder : IAudioRecorder, IDisposable
 {
+    /// <summary>How long <see cref="Dispose"/> waits for the lock before it leaves an open in flight to its owner.</summary>
+    private static readonly TimeSpan DisposeLockWait = TimeSpan.FromMilliseconds(200);
+
     private readonly ILogger _logger = Log.ForContext<AudioRecorder>();
     private readonly Func<string?, ICaptureDevice> _openDevice;
+    private readonly Func<string?> _defaultDeviceId;
 
-    // Guards _session and the sample buffer inside it. The capture thread takes it for every DataAvailable
-    // and raises SamplesAvailable while holding it, so once Stop/Cancel has detached the session (which needs
-    // the same lock) no further event can be raised for that recording. Never hold it while disposing a
-    // capture device: disposing waits for the capture thread, which may be waiting for this lock.
+    // Guards _session, the recording inside it and its sample buffer. The capture thread takes it for every
+    // DataAvailable and raises SamplesAvailable while holding it, so once Stop/Cancel has ended the recording (which
+    // needs the same lock) no further event can be raised for it. Never hold it while disposing a capture device:
+    // disposing waits for the capture thread, which may be waiting for this lock.
     private readonly object _gate = new();
+
+    // The open device. Its Recording is null while the device is only kept open (KeepOpen), between recordings.
     private Session? _session;
 
+    // Written under _gate (Dispose aside), read without it where a stale value is harmless.
+    private volatile bool _keepOpen;
+
     public AudioRecorder()
-        : this(WasapiCaptureDevice.Open)
+        : this(WasapiCaptureDevice.Open, WasapiCaptureDevice.DefaultId)
     {
     }
 
     /// <summary>Test seam: lets tests supply a fake capture device instead of real audio hardware.</summary>
-    internal AudioRecorder(Func<string?, ICaptureDevice> openDevice) => _openDevice = openDevice;
+    /// <param name="defaultDeviceId">The id of the Windows default microphone; none when left out.</param>
+    internal AudioRecorder(Func<string?, ICaptureDevice> openDevice, Func<string?>? defaultDeviceId = null)
+    {
+        _openDevice = openDevice;
+        _defaultDeviceId = defaultDeviceId ?? (static () => null);
+    }
 
     public event Action<float[]>? SamplesAvailable;
 
     public event Action<Exception>? CaptureFailed;
 
+    public bool KeepOpen
+    {
+        get => _keepOpen;
+        set
+        {
+            Session? idle = null;
+            lock (_gate)
+            {
+                _keepOpen = value;
+                if (!value)
+                    idle = DetachIfIdle();
+            }
+
+            if (idle is not null)
+            {
+                ReleaseQuietly(idle.Device);
+                _logger.Information("The microphone is no longer kept open");
+            }
+        }
+    }
+
+    public void Prepare(string? deviceId)
+    {
+        if (!_keepOpen)
+            return;
+
+        var wantedId = deviceId ?? _defaultDeviceId();
+        Session? other = null;
+        lock (_gate)
+        {
+            // A recording keeps the device it has; it stays open afterwards.
+            if (!_keepOpen || _session is { Recording: not null })
+                return;
+
+            if (_session is { } open)
+            {
+                if (open.Device.Id == wantedId)
+                    return;
+
+                other = open;
+                _session = null;
+            }
+        }
+
+        ReleaseQuietly(other?.Device);
+
+        ICaptureDevice? device;
+        Session? opened;
+        Exception? failure;
+        lock (_gate)
+        {
+            // Turned off, or a recording opened the device, while the other one was being released.
+            if (!_keepOpen || _session is not null)
+                return;
+
+            opened = Open(deviceId, record: false, out device, out failure);
+        }
+
+        if (failure is not null)
+            ThrowOpenFailure(deviceId, device, failure);
+
+        _logger.Information("Keeping {Device} open between dictations ({Format})", opened!.Device.Name, opened.Format);
+    }
+
     public void Start(string? deviceId)
     {
-        ICaptureDevice? device = null;
-        Session? started = null;
-        Exception? failure = null;
+        // Only a device kept open can be there already, and only then is the default device's id worth reading.
+        var wantedId = _keepOpen ? deviceId ?? _defaultDeviceId() : null;
+        Session? kept = null;
+        Session? other = null;
+        lock (_gate)
+        {
+            if (_session is { Recording: not null })
+                throw new InvalidOperationException("A recording is already in progress.");
 
+            if (_session is { } open)
+            {
+                if (wantedId is not null && open.Device.Id == wantedId)
+                {
+                    // Nothing that can fail comes after this while the lock is held.
+                    open.Recording = new Recording(open.Format.SampleRate);
+                    kept = open;
+                }
+                else
+                {
+                    // Another microphone was chosen, or Windows has a new default: this one is no longer wanted.
+                    other = open;
+                    _session = null;
+                }
+            }
+        }
+
+        if (kept is not null)
+        {
+            _logger.Debug("Recording started from {Device}, which was kept open ({Format})", kept.Device.Name, kept.Format);
+            return;
+        }
+
+        ReleaseQuietly(other?.Device);
+
+        ICaptureDevice? device;
+        Session? started;
+        Exception? failure;
         lock (_gate)
         {
             if (_session is not null)
                 throw new InvalidOperationException("A recording is already in progress.");
 
-            try
-            {
-                device = _openDevice(deviceId);
-                if (!SampleConverter.IsSupported(device.WaveFormat))
-                    throw new AudioDeviceException(
-                        $"The microphone '{device.Name}' uses an unsupported audio format ({device.WaveFormat}).");
-
-                var session = new Session(device);
-                device.DataAvailable += (_, e) => OnDataAvailable(session, e);
-                device.RecordingStopped += (_, e) => OnRecordingStopped(session, e);
-
-                // Attached before StartRecording so the very first buffer is not dropped. Nothing that can
-                // fail (logging, COM property reads) happens after StartRecording while the lock is held.
-                _session = session;
-                device.StartRecording();
-                started = session;
-            }
-            catch (Exception ex)
-            {
-                _session = null;
-                failure = ex;
-            }
+            started = Open(deviceId, record: true, out device, out failure);
         }
 
-        if (failure is null)
-        {
-            _logger.Debug("Recording started from {Device} ({Format})", started!.Device.Name, started.Format);
-            return;
-        }
+        if (failure is not null)
+            ThrowOpenFailure(deviceId, device, failure);
 
-        // Outside the lock: if StartRecording got as far as launching the capture thread, that thread may be
-        // waiting for _gate in OnDataAvailable, and disposing the device waits for it to finish.
-        ReleaseQuietly(device);
-
-        if (failure is AudioDeviceException)
-            ExceptionDispatchInfo.Capture(failure).Throw();
-
-        throw new AudioDeviceException(
-            deviceId is null
-                ? $"Could not start recording from the default microphone: {failure.Message}"
-                : $"Could not start recording from microphone '{deviceId}': {failure.Message}",
-            failure);
+        _logger.Debug("Recording started from {Device} ({Format})", started!.Device.Name, started.Format);
     }
 
     public float[] Stop()
     {
-        var session = Detach();
-        if (session is null)
+        var recording = EndRecording(out var released);
+        if (recording is null)
             return [];
 
-        ReleaseQuietly(session.Device);
+        ReleaseQuietly(released?.Device);
 
-        // Safe without the lock: the session is detached, so the capture thread no longer appends to it.
-        var samples = session.Samples.ToArray();
+        // Safe without the lock: the recording is ended, so the capture thread no longer appends to it.
+        var samples = recording.Samples.ToArray();
         _logger.Debug("Recording stopped, {Count} samples", samples.Length);
         return samples;
     }
 
     public void Cancel()
     {
-        var session = Detach();
-        if (session is null)
+        if (EndRecording(out var released) is null)
             return;
 
-        ReleaseQuietly(session.Device);
+        ReleaseQuietly(released?.Device);
         _logger.Debug("Recording cancelled");
+    }
+
+    /// <summary>
+    /// Stops keeping the microphone open and releases it. A recording in progress keeps the device until its
+    /// <see cref="Stop"/> or <see cref="Cancel"/>, which then releases it. Never waits for a device that is still
+    /// being opened (it can take seconds, and this runs on the UI thread when the app exits): that open's owner
+    /// releases it, as it would without <see cref="KeepOpen"/>.
+    /// </summary>
+    public void Dispose()
+    {
+        _keepOpen = false;
+        if (!Monitor.TryEnter(_gate, DisposeLockWait))
+            return;
+
+        Session? idle;
+        try
+        {
+            idle = DetachIfIdle();
+        }
+        finally
+        {
+            Monitor.Exit(_gate);
+        }
+
+        ReleaseQuietly(idle?.Device);
     }
 
     public IReadOnlyList<MicrophoneInfo> ListMicrophones()
@@ -154,24 +259,109 @@ public sealed class AudioRecorder : IAudioRecorder
         }
     }
 
-    private Session? Detach()
+    /// <summary>
+    /// With <see cref="_gate"/> held and no device open: opens <paramref name="deviceId"/> and starts it, recording
+    /// from its first buffer when <paramref name="record"/>, otherwise only kept open. On failure nothing is left
+    /// open here: <paramref name="failure"/> says why and <paramref name="device"/> is what the caller must release,
+    /// outside the lock.
+    /// </summary>
+    private Session? Open(string? deviceId, bool record, out ICaptureDevice? device, out Exception? failure)
     {
-        lock (_gate)
+        device = null;
+        failure = null;
+        try
         {
-            var session = _session;
-            _session = null;
+            device = _openDevice(deviceId);
+            if (!SampleConverter.IsSupported(device.WaveFormat))
+                throw new AudioDeviceException(
+                    $"The microphone '{device.Name}' uses an unsupported audio format ({device.WaveFormat}).");
+
+            var session = new Session(device);
+            if (record)
+                session.Recording = new Recording(session.Format.SampleRate);
+
+            device.DataAvailable += (_, e) => OnDataAvailable(session, e);
+            device.RecordingStopped += (_, e) => OnRecordingStopped(session, e);
+
+            // Attached before StartRecording so the very first buffer is not dropped. Nothing that can
+            // fail (logging, COM property reads) happens after StartRecording while the lock is held.
+            _session = session;
+            device.StartRecording();
             return session;
+        }
+        catch (Exception ex)
+        {
+            _session = null;
+            failure = ex;
+            return null;
         }
     }
 
-    /// <summary>Detaches <paramref name="session"/> if it is still the current one (Stop/Cancel may have won).</summary>
-    private bool TryDetach(Session session)
+    /// <summary>Releases what a failed <see cref="Open"/> left and throws its failure as an <see cref="AudioDeviceException"/>.</summary>
+    private void ThrowOpenFailure(string? deviceId, ICaptureDevice? device, Exception failure)
+    {
+        // Outside the lock: if StartRecording got as far as launching the capture thread, that thread may be
+        // waiting for _gate in OnDataAvailable, and disposing the device waits for it to finish.
+        ReleaseQuietly(device);
+
+        if (failure is AudioDeviceException)
+            ExceptionDispatchInfo.Capture(failure).Throw();
+
+        throw new AudioDeviceException(
+            deviceId is null
+                ? $"Could not start recording from the default microphone: {failure.Message}"
+                : $"Could not start recording from microphone '{deviceId}': {failure.Message}",
+            failure);
+    }
+
+    /// <summary>
+    /// Ends the recording in progress and returns it, or null when there is none. The device stays open when
+    /// <see cref="KeepOpen"/> is on; otherwise it comes back as <paramref name="released"/>, for the caller to release
+    /// outside the lock.
+    /// </summary>
+    private Recording? EndRecording(out Session? released)
+    {
+        released = null;
+        lock (_gate)
+        {
+            if (_session is not { Recording: { } recording } session)
+                return null;
+
+            session.Recording = null;
+            if (!_keepOpen)
+            {
+                _session = null;
+                released = session;
+            }
+
+            return recording;
+        }
+    }
+
+    /// <summary>With <see cref="_gate"/> held: takes out a device that is open with no recording, for the caller to release.</summary>
+    private Session? DetachIfIdle()
+    {
+        if (_session is not { Recording: null } idle)
+            return null;
+
+        _session = null;
+        return idle;
+    }
+
+    /// <summary>
+    /// Takes out <paramref name="session"/> if it is still the open device (Stop/Cancel may have won) and says whether
+    /// it was recording.
+    /// </summary>
+    private bool TryDetach(Session session, out bool wasRecording)
     {
         lock (_gate)
         {
+            wasRecording = false;
             if (!ReferenceEquals(_session, session))
                 return false;
 
+            wasRecording = session.Recording is not null;
+            session.Recording = null;
             _session = null;
             return true;
         }
@@ -186,12 +376,16 @@ public sealed class AudioRecorder : IAudioRecorder
             if (!ReferenceEquals(_session, session))
                 return;
 
+            // Only kept open: nobody is recording, so what the microphone hears goes nowhere.
+            if (session.Recording is not { } recording)
+                return;
+
             float[] chunk;
             try
             {
                 var interleaved = SampleConverter.ToFloat(e.Buffer.AsSpan(0, e.BytesRecorded), session.Format);
                 var mono = SampleConverter.ToMono(interleaved, session.Format.Channels);
-                chunk = session.Resampler.Process(mono);
+                chunk = recording.Resampler.Process(mono);
             }
             catch (Exception ex)
             {
@@ -203,7 +397,7 @@ public sealed class AudioRecorder : IAudioRecorder
             if (chunk.Length == 0)
                 return;
 
-            session.Samples.AddRange(chunk);
+            recording.Samples.AddRange(chunk);
 
             try
             {
@@ -223,10 +417,19 @@ public sealed class AudioRecorder : IAudioRecorder
         if (e.Exception is null)
             return;
 
-        if (!TryDetach(session))
+        if (!TryDetach(session, out var wasRecording))
         {
             // Stop/Cancel got there first (or the recording never got going); nobody is waiting for this.
             _logger.Warning(e.Exception, "Audio capture reported an error while shutting down");
+            return;
+        }
+
+        if (!wasRecording)
+        {
+            // Only kept open (the microphone was unplugged, say): nobody loses a recording, and the next Start
+            // opens whatever microphone is there then.
+            _logger.Warning(e.Exception, "The microphone kept open between dictations failed; it will be opened again when next needed");
+            ReleaseQuietly(session.Device);
             return;
         }
 
@@ -258,13 +461,21 @@ public sealed class AudioRecorder : IAudioRecorder
         }
     }
 
+    /// <summary>An open device, with the recording that is being made from it, if any.</summary>
     private sealed class Session(ICaptureDevice device)
     {
         public ICaptureDevice Device { get; } = device;
 
         public WaveFormat Format { get; } = device.WaveFormat;
 
-        public Resampler16k Resampler { get; } = new(device.WaveFormat.SampleRate);
+        /// <summary>Null while the device is only kept open. Guarded by the recorder's lock.</summary>
+        public Recording? Recording { get; set; }
+    }
+
+    /// <summary>One recording: its samples so far, and a resampler of its own so that it starts from a clean filter.</summary>
+    private sealed class Recording(int sourceRate)
+    {
+        public Resampler16k Resampler { get; } = new(sourceRate);
 
         public List<float> Samples { get; } = [];
     }

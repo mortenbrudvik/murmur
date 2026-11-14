@@ -39,8 +39,8 @@ public sealed class SettingsHandlerTests
 
     private static UpdateSettingsRequest Update(
         HotkeyDefinition? hotkey = null, string? microphoneId = null, bool soundCues = true,
-        bool startWithWindows = false, bool keepAudio = false) =>
-        new(hotkey ?? CtrlShiftSpace, microphoneId, soundCues, startWithWindows, keepAudio);
+        bool startWithWindows = false, bool keepAudio = false, bool keepMicrophoneReady = false) =>
+        new(hotkey ?? CtrlShiftSpace, microphoneId, soundCues, startWithWindows, keepAudio, keepMicrophoneReady);
 
     private UpdateSettingsHandler UpdateHandler() => new(_settings, _mediator);
 
@@ -64,6 +64,15 @@ public sealed class SettingsHandlerTests
         var expected = new MurmurSettings(CtrlShiftSpace, "mic-2", SoundCues: true, StartWithWindows: false, KeepAudio: false);
         result.ShouldBe(expected);
         _saved.ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_KeepMicrophoneReady_IsSaved()
+    {
+        var result = await UpdateHandler().Handle(Update(keepMicrophoneReady: true), CancellationToken.None);
+
+        result.KeepMicrophoneReady.ShouldBeTrue();
+        _saved!.KeepMicrophoneReady.ShouldBeTrue();
     }
 
     [Fact]
@@ -140,10 +149,37 @@ public sealed class SettingsHandlerTests
     }
 
     [Fact]
+    public async Task SettingsUpdatedHandler_KeepMicrophoneReadyOn_KeepsTheChosenMicrophoneOpen()
+    {
+        var readiness = new MicrophoneReadiness(_recorder);
+        var handler = new SettingsUpdatedHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), _startup, readiness);
+        var settings = new MurmurSettings(CtrlShiftSpace, "mic-2", KeepMicrophoneReady: true);
+
+        await handler.Handle(new SettingsUpdatedNotification(settings), CancellationToken.None);
+        await readiness.Pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        _recorder.Received(1).KeepOpen = true;
+        _recorder.Received(1).Prepare("mic-2");
+    }
+
+    [Fact]
+    public async Task SettingsUpdatedHandler_KeepMicrophoneReadyOff_StopsKeepingTheMicrophoneOpen()
+    {
+        var readiness = new MicrophoneReadiness(_recorder);
+        var handler = new SettingsUpdatedHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), _startup, readiness);
+
+        await handler.Handle(new SettingsUpdatedNotification(new MurmurSettings(CtrlShiftSpace)), CancellationToken.None);
+        await readiness.Pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        _recorder.Received(1).KeepOpen = false;
+        _recorder.DidNotReceiveWithAnyArgs().Prepare(default);
+    }
+
+    [Fact]
     public async Task SettingsUpdatedHandler_AppliesHotkeyAndStartup()
     {
         var matcher = new HotkeyMatcher(Previous, AllKeysDown.Instance);
-        var handler = new SettingsUpdatedHandler(matcher, _startup);
+        var handler = new SettingsUpdatedHandler(matcher, _startup, new MicrophoneReadiness(_recorder));
         var settings = new MurmurSettings(CtrlShiftSpace, StartWithWindows: false);
 
         await handler.Handle(new SettingsUpdatedNotification(settings), CancellationToken.None);
@@ -157,7 +193,7 @@ public sealed class SettingsHandlerTests
     {
         var matcher = new HotkeyMatcher(Previous, AllKeysDown.Instance);
         _startup.When(s => s.Apply(Arg.Any<bool>())).Throw(new UnauthorizedAccessException("blocked by policy"));
-        var handler = new SettingsUpdatedHandler(matcher, _startup);
+        var handler = new SettingsUpdatedHandler(matcher, _startup, new MicrophoneReadiness(_recorder));
 
         await handler.Handle(new SettingsUpdatedNotification(new MurmurSettings(CtrlShiftSpace, StartWithWindows: true)), CancellationToken.None);
 

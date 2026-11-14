@@ -5,6 +5,7 @@ using System.Windows.Interop;
 using Autofac;
 using MediatR;
 using Murmur.Common;
+using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
 using Murmur.Core.Features.App;
 using Murmur.Core.Features.Engine;
@@ -176,6 +177,10 @@ public partial class App : Application
         var controller = _container.Resolve<DictationController>();
         StartInputHooksAsync(_container, controller).FireAndForget();
 
+        // With "keep the microphone ready" on, the microphone opens now, in the background, so that the first
+        // dictation is as quick as the ones after it.
+        KeepMicrophoneReady(_container.Resolve<MicrophoneReadiness>(), _container.Resolve<ISettingsService>());
+
         // "Restart Murmur" is asked for by an IPC handler, on a pool thread.
         _container.Resolve<AppLifecycle>().RestartRequested += () => Dispatcher.BeginInvoke(Restart);
 
@@ -292,6 +297,22 @@ public partial class App : Application
         var notice = notifier.OnStatus(status, _mainWindow?.IsActive == true, hotkeyName, input.HookInstalled);
         if (notice is not null)
             _tray?.ShowNotification(notice.Title, notice.Message);
+    }
+
+    /// <summary>
+    /// Applies the saved "keep the microphone ready" setting. Settings that cannot be read leave it off, which is its
+    /// default; that must not keep Murmur from starting.
+    /// </summary>
+    private static void KeepMicrophoneReady(MicrophoneReadiness microphone, ISettingsService settings)
+    {
+        try
+        {
+            microphone.Apply(settings.Load());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(ex, "Could not read the settings to keep the microphone ready");
+        }
     }
 
     private static string ReadHotkeyName(ISettingsService settings)

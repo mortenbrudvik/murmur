@@ -63,7 +63,7 @@ export function useSettings(): {
   }, []);
 
   // The server replaces the whole document (a missing flag would reset to false), so every save sends
-  // all five fields, and what it returns is what the page shows: an unusable hotkey comes back unchanged.
+  // all six fields, and what it returns is what the page shows: an unusable hotkey comes back unchanged.
   const send = useCallback(async (doc: MurmurSettings) => {
     setSaveError(null);
     try {
@@ -73,6 +73,7 @@ export function useSettings(): {
         soundCues: doc.soundCues,
         startWithWindows: doc.startWithWindows,
         keepAudio: doc.keepAudio,
+        keepMicrophoneReady: doc.keepMicrophoneReady,
       });
       latest.current = saved;
       setSettings(saved);

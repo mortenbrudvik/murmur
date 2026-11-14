@@ -12,6 +12,8 @@ public sealed class AudioRecorderTests
 
     private sealed class FakeCaptureDevice(WaveFormat? format = null) : ICaptureDevice
     {
+        public string Id { get; init; } = "fake";
+
         public string Name => "Fake microphone";
 
         public WaveFormat WaveFormat { get; } = format ?? WaveFormat.CreateIeeeFloatWaveFormat(16000, 1);
@@ -343,5 +345,282 @@ public sealed class AudioRecorderTests
         recorder.Stop();
 
         failures.ShouldBe(0);
+    }
+
+    /// <summary>A recorder that keeps its microphone open, with the ids it was asked to open and a default device to change.</summary>
+    private sealed class KeepOpenRig
+    {
+        private int _next;
+
+        public KeepOpenRig(params FakeCaptureDevice[] devices)
+        {
+            Recorder = new AudioRecorder(
+                id =>
+                {
+                    Opened.Add(id);
+                    return devices[_next++];
+                },
+                () => DefaultId) { KeepOpen = true };
+        }
+
+        public AudioRecorder Recorder { get; }
+
+        /// <summary>The device id of every open, in order (null for the default device).</summary>
+        public List<string?> Opened { get; } = [];
+
+        public string? DefaultId { get; set; } = "mic-a";
+    }
+
+    [Fact]
+    public void Stop_KeepOpen_ReturnsTheSamplesAndLeavesTheDeviceOpen()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+
+        rig.Recorder.Start(null);
+        device.Emit(0.1f, 0.2f);
+        var samples = rig.Recorder.Stop();
+
+        samples.ShouldBe([0.1f, 0.2f]);
+        device.DisposeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Start_KeepOpenAndTheSameDevice_RecordsFromTheOpenDeviceFromThenOn()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        var raised = new List<float>();
+        rig.Recorder.SamplesAvailable += chunk => raised.AddRange(chunk);
+        rig.Recorder.Start(null);
+        device.Emit(0.1f);
+        rig.Recorder.Stop();
+        raised.Clear();
+
+        device.Emit(0.5f); // between two dictations: heard by nobody
+        rig.Recorder.Start(null);
+        device.Emit(0.2f, 0.3f);
+        var samples = rig.Recorder.Stop();
+
+        samples.ShouldBe([0.2f, 0.3f]);
+        raised.ShouldBe([0.2f, 0.3f]);
+        rig.Opened.Count.ShouldBe(1);
+        device.DisposeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Start_KeepOpenAndAnotherDevice_ReleasesTheOpenOneAndOpensTheOther()
+    {
+        var first = new FakeCaptureDevice { Id = "mic-a" };
+        var second = new FakeCaptureDevice { Id = "mic-b" };
+        var rig = new KeepOpenRig(first, second);
+        rig.Recorder.Start("mic-a");
+        rig.Recorder.Stop();
+
+        rig.Recorder.Start("mic-b");
+        second.Emit(0.4f);
+
+        rig.Recorder.Stop().ShouldBe([0.4f]);
+        rig.Opened.ShouldBe(["mic-a", "mic-b"]);
+        first.DisposeCount.ShouldBe(1);
+        second.DisposeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Start_KeepOpenAndTheDefaultDeviceChanged_OpensTheNewDefault()
+    {
+        var first = new FakeCaptureDevice { Id = "mic-a" };
+        var second = new FakeCaptureDevice { Id = "mic-b" };
+        var rig = new KeepOpenRig(first, second);
+        rig.Recorder.Start(null);
+        rig.Recorder.Stop();
+
+        rig.DefaultId = "mic-b"; // the owner picked another default microphone in Windows
+        rig.Recorder.Start(null);
+
+        rig.Opened.Count.ShouldBe(2);
+        first.DisposeCount.ShouldBe(1);
+        second.DisposeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Cancel_KeepOpen_DiscardsTheSamplesAndLeavesTheDeviceOpen()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        rig.Recorder.Start(null);
+        device.Emit(0.1f);
+
+        rig.Recorder.Cancel();
+
+        device.DisposeCount.ShouldBe(0);
+        rig.Recorder.Stop().ShouldBeEmpty();
+        rig.Recorder.Start(null);
+        rig.Recorder.Stop().ShouldBeEmpty(); // the cancelled recording's audio is gone
+        rig.Opened.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void KeepOpen_TurnedOffBetweenRecordings_ReleasesTheDevice()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        rig.Recorder.Start(null);
+        rig.Recorder.Stop();
+
+        rig.Recorder.KeepOpen = false;
+
+        device.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void KeepOpen_TurnedOffWhileRecording_ReleasesTheDeviceWhenTheRecordingStops()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        rig.Recorder.Start(null);
+        device.Emit(0.1f);
+
+        rig.Recorder.KeepOpen = false;
+        device.DisposeCount.ShouldBe(0); // the recording goes on
+
+        rig.Recorder.Stop().ShouldBe([0.1f]);
+        device.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Prepare_KeepOpen_OpensTheDeviceSoThatStartOpensNothing()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        var raised = 0;
+        rig.Recorder.SamplesAvailable += _ => raised++;
+
+        rig.Recorder.Prepare(null);
+        device.Emit(0.5f); // nobody is recording yet
+        rig.Recorder.Start(null);
+        device.Emit(0.2f);
+
+        rig.Recorder.Stop().ShouldBe([0.2f]);
+        raised.ShouldBe(1);
+        rig.Opened.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Prepare_KeepOpenOff_OpensNothing()
+    {
+        var rig = new KeepOpenRig(new FakeCaptureDevice());
+        rig.Recorder.KeepOpen = false;
+
+        rig.Recorder.Prepare(null);
+
+        rig.Opened.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Prepare_AlreadyOpenOnThatDeviceOrRecording_OpensNothing()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+
+        rig.Recorder.Prepare(null);
+        rig.Recorder.Prepare(null);
+        rig.Recorder.Start(null);
+        rig.Recorder.Prepare("mic-b"); // the recording keeps its microphone
+
+        rig.Opened.Count.ShouldBe(1);
+        device.DisposeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Prepare_AnotherDeviceThanTheOpenOne_SwitchesToIt()
+    {
+        var first = new FakeCaptureDevice { Id = "mic-a" };
+        var second = new FakeCaptureDevice { Id = "mic-b" };
+        var rig = new KeepOpenRig(first, second);
+        rig.Recorder.Prepare("mic-a");
+
+        rig.Recorder.Prepare("mic-b");
+
+        rig.Opened.ShouldBe(["mic-a", "mic-b"]);
+        first.DisposeCount.ShouldBe(1);
+        second.DisposeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Prepare_TheDeviceCannotBeOpened_ThrowsAudioDeviceExceptionAndStartStillWorks()
+    {
+        var broken = new FakeCaptureDevice { Id = "mic-a", OnStartRecording = () => throw new COMException("in use") };
+        var working = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(broken, working);
+
+        Should.Throw<AudioDeviceException>(() => rig.Recorder.Prepare(null));
+
+        broken.DisposeCount.ShouldBe(1);
+        rig.Recorder.Start(null);
+        working.Emit(0.3f);
+        rig.Recorder.Stop().ShouldBe([0.3f]);
+    }
+
+    [Fact]
+    public void DeviceFailsBetweenRecordings_RaisesNoCaptureFailedAndTheNextStartOpensItAgain()
+    {
+        var failing = new FakeCaptureDevice { Id = "mic-a" };
+        var next = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(failing, next);
+        var failures = 0;
+        rig.Recorder.CaptureFailed += _ => failures++;
+        rig.Recorder.Start(null);
+        rig.Recorder.Stop();
+
+        failing.Fail(new COMException("Device unplugged"));
+
+        failures.ShouldBe(0); // nobody was recording
+        failing.DisposeCount.ShouldBe(1);
+        rig.Recorder.Start(null);
+        next.Emit(0.2f);
+        rig.Recorder.Stop().ShouldBe([0.2f]);
+        rig.Opened.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void DeviceFailsWhileRecording_KeepOpen_StillRaisesCaptureFailed()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        var failures = 0;
+        rig.Recorder.CaptureFailed += _ => failures++;
+        rig.Recorder.Start(null);
+
+        device.Fail(new COMException("Device unplugged"));
+
+        failures.ShouldBe(1);
+        device.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Dispose_ReleasesADeviceKeptOpen()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        rig.Recorder.Start(null);
+        rig.Recorder.Stop();
+
+        rig.Recorder.Dispose();
+
+        device.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Dispose_WhileRecording_ReleasesTheDeviceWhenTheRecordingStops()
+    {
+        var device = new FakeCaptureDevice { Id = "mic-a" };
+        var rig = new KeepOpenRig(device);
+        rig.Recorder.Start(null);
+
+        rig.Recorder.Dispose();
+        rig.Recorder.Cancel();
+
+        device.DisposeCount.ShouldBe(1);
     }
 }

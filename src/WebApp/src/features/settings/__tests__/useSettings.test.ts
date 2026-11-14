@@ -20,6 +20,7 @@ const stored: MurmurSettings = {
   soundCues: true,
   startWithWindows: false,
   keepAudio: true,
+  keepMicrophoneReady: true,
 };
 
 function updateCalls() {
@@ -69,7 +70,7 @@ describe("useSettings", () => {
     expect(result.current.settings).toBeNull();
   });
 
-  it("saves all five fields and adopts the server's result", async () => {
+  it("saves all six fields and adopts the server's result", async () => {
     mockEchoServer();
     const { result } = await loaded();
     // The server keeps the previous hotkey when it cannot use the new one.
@@ -85,6 +86,7 @@ describe("useSettings", () => {
       soundCues: false,
       startWithWindows: false,
       keepAudio: true,
+      keepMicrophoneReady: true,
     });
     expect(result.current.settings).toEqual(serverResult);
     expect(result.current.error).toBeNull();

@@ -80,6 +80,45 @@ public sealed class AudioRecorderIntegrationTests(ITestOutputHelper output)
         elapsedMs.ShouldBeLessThan(150);
     }
 
+    /// <summary>
+    /// What "keep the microphone ready" is for: a recording from a microphone that is already open gets its first
+    /// audio within a buffer or two, whatever the device took to start the first time.
+    /// </summary>
+    [Fact]
+    public void KeepOpen_SecondRecording_GetsItsFirstAudioAtOnce()
+    {
+        using var recorder = new AudioRecorder { KeepOpen = true };
+        SkipWithoutMicrophone(recorder);
+
+        var first = MillisecondsToFirstAudio(recorder);
+        Thread.Sleep(500); // open, with nobody recording
+        var second = MillisecondsToFirstAudio(recorder);
+
+        output.WriteLine($"First audio: {first:F0} ms after Start when the microphone had to be opened, {second:F0} ms when it was kept open.");
+        second.ShouldBeLessThan(250);
+    }
+
+    /// <summary>Records from the default microphone until the first audio arrives and returns how long that took.</summary>
+    private static double MillisecondsToFirstAudio(AudioRecorder recorder)
+    {
+        using var firstChunk = new ManualResetEventSlim();
+        void OnSamples(float[] chunk) => firstChunk.Set();
+
+        recorder.SamplesAvailable += OnSamples;
+        var stopwatch = Stopwatch.StartNew();
+        recorder.Start(null);
+        try
+        {
+            firstChunk.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).ShouldBeTrue("no audio arrived within 10 s");
+            return stopwatch.Elapsed.TotalMilliseconds;
+        }
+        finally
+        {
+            recorder.Stop();
+            recorder.SamplesAvailable -= OnSamples;
+        }
+    }
+
     [Fact]
     public void ListMicrophones_HasExactlyOneDefault()
     {

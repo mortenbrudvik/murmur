@@ -188,7 +188,9 @@ those change before submission.
 > window's process (PROCESS_QUERY_LIMITED_INFORMATION) to label the history entry and to detect an
 > elevated target, into which it does not paste. Microphone audio is captured (WASAPI) only while the
 > hotkey is held or a hands-free recording is running, is transcribed on the device, and never leaves
-> it. Murmur's only network request is a one-time download of the speech model from huggingface.co.
+> it. A user who turns on "Keep the microphone ready" (off by default) keeps the microphone open while
+> Murmur runs, so that dictation starts without delay; what it hears between dictations is discarded
+> unread. Murmur's only network request is a one-time download of the speech model from huggingface.co.
 
 ### 7. Pricing, availability, properties
 
