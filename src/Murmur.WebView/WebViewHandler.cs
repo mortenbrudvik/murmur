@@ -37,6 +37,32 @@ public class WebViewHandler
         WebView.Source = new Uri(url);
     }
 
+    /// <summary>
+    /// Whether a right-click shows the browser's context menu when DevTools are off. Text fields (the
+    /// vocabulary editor, history search, the setup practice box) keep it for Cut/Copy/Paste, and so does
+    /// selected text for Copy; everywhere else it would only offer Back, Reload, Save as and Print.
+    /// </summary>
+    public static bool ShouldShowContextMenu(bool isEditable, bool hasSelection) => isEditable || hasSelection;
+
+    private void ApplySettings(CoreWebView2Settings settings)
+    {
+        // DevTools and browser shortcuts (F12, F5/Ctrl+R reload, Ctrl+P, Ctrl+F, zoom keys) follow EnableDevTools,
+        // so Debug keeps them and Release and Store builds do not. Editing keys (Ctrl+C/V/X/A/Z) are not affected.
+        settings.AreDevToolsEnabled = EnableDevTools;
+        settings.AreBrowserAcceleratorKeysEnabled = EnableDevTools;
+
+        // Kept on so text fields have Cut/Copy/Paste; ContextMenuRequested hides it elsewhere in Release.
+        settings.AreDefaultContextMenusEnabled = true;
+
+        settings.AreDefaultScriptDialogsEnabled = false;
+        settings.IsStatusBarEnabled = false;
+        settings.IsZoomControlEnabled = false;
+        // Debug keeps the error page so a stopped Vite dev server says so instead of showing a blank window.
+        settings.IsBuiltInErrorPageEnabled = EnableDevTools;
+        settings.IsPasswordAutosaveEnabled = false;
+        settings.IsGeneralAutofillEnabled = false;
+    }
+
     protected async Task InitializeAsync()
     {
         try
@@ -48,6 +74,18 @@ public class WebViewHandler
                     AllowSingleSignOnUsingOSPrimaryAccount = false
                 });
             await WebView.EnsureCoreWebView2Async(environment);
+
+            ApplySettings(WebView.CoreWebView2.Settings);
+
+            if (!EnableDevTools)
+            {
+                WebView.CoreWebView2.ContextMenuRequested += (_, args) =>
+                {
+                    var target = args.ContextMenuTarget;
+                    if (!ShouldShowContextMenu(target.IsEditable, target.HasSelection))
+                        args.Handled = true;
+                };
+            }
 
             if (HostObject != null)
             {
