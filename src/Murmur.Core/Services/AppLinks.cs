@@ -13,6 +13,10 @@ public static class AppLinks
         LinkTarget.CudaDownload => "https://developer.nvidia.com/cuda-downloads",
         LinkTarget.NvidiaDriver => "https://www.nvidia.com/Download/index.aspx",
         LinkTarget.MicrophonePrivacy => "ms-settings:privacy-microphone",
+        LinkTarget.Repository => "https://github.com/mortenbrudvik/murmur",
+        LinkTarget.PrivacyPolicy => "https://brudvik.com/murmur/privacy",
+        LinkTarget.License => "https://github.com/mortenbrudvik/murmur/blob/main/LICENSE",
+        LinkTarget.HomePage => "https://brudvik.com",
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown link target."),
     };
 }

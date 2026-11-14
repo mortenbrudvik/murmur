@@ -147,6 +147,7 @@ public partial class App : Application
         registry.Register<OpenLinkRequest>("app", "openLink");
         registry.Register<RestartAppRequest>("app", "restart");
         registry.Register<GetInputStatusRequest>("app", "getInputStatus");
+        registry.Register<GetAboutRequest>("app", "getAbout");
 
         // The history file is read on first use, and the first dictation of a sign-in start would otherwise wait for
         // that read; touching the store here does it off the UI thread while the rest of start-up goes on.

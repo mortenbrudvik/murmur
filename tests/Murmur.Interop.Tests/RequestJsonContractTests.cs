@@ -194,6 +194,11 @@ public class RequestJsonContractTests
     [InlineData("cudaDownload", LinkTarget.CudaDownload)]
     [InlineData("nvidiaDriver", LinkTarget.NvidiaDriver)]
     [InlineData("microphonePrivacy", LinkTarget.MicrophonePrivacy)]
+    [InlineData("repository", LinkTarget.Repository)]
+    [InlineData("privacyPolicy", LinkTarget.PrivacyPolicy)]
+    [InlineData("license", LinkTarget.License)]
+    [InlineData("homePage", LinkTarget.HomePage)]
+    [InlineData("dataFolder", LinkTarget.DataFolder)]
     public void OpenLinkRequest_ReadsTheTargetAsACamelCaseString(string name, LinkTarget expected)
     {
         var request = (OpenLinkRequest?)JsonUtils.Deserialize($$"""{"target":"{{name}}"}""", typeof(OpenLinkRequest));
@@ -247,5 +252,23 @@ public class RequestJsonContractTests
         json.ShouldContain("\"modifiers\":\"ctrl, shift\"");
         json.ShouldContain("\"microphoneId\":null");
         json.ShouldContain("\"soundCues\":true");
+    }
+
+    [Fact]
+    public void AboutInfo_SerializesCamelCaseWithANullSince()
+    {
+        var json = JsonUtils.Serialize(new AboutInfo("1.1.0", "Microsoft Store", @"C:\d", "Windows 11, build 26200", 0, 0, null));
+
+        json.ShouldBe("""{"version":"1.1.0","channel":"Microsoft Store","dataFolder":"C:\\d","windowsBuild":"Windows 11, build 26200","dictations":0,"words":0,"since":null}""");
+    }
+
+    [Fact]
+    public void AboutInfo_SerializesSinceAsAnIsoTimestamp()
+    {
+        var since = new DateTimeOffset(2026, 10, 3, 8, 0, 0, TimeSpan.Zero);
+
+        var json = JsonUtils.Serialize(new AboutInfo("1.1.0", "Built from source", @"C:\d", "Windows 11, build 26200", 2, 5, since));
+
+        json.ShouldContain("\"since\":\"2026-10-03T08:00:00+00:00\"");
     }
 }

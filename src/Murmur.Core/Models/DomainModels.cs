@@ -65,8 +65,30 @@ public enum LinkTarget
 {
     CudaDownload,
     NvidiaDriver,
-    MicrophonePrivacy
+    MicrophonePrivacy,
+    Repository,
+    PrivacyPolicy,
+    License,
+    HomePage,
+
+    /// <summary>Murmur's data folder, opened in Explorer. A path, not an address: see <c>OpenLinkHandler</c>.</summary>
+    DataFolder
 }
+
+/// <summary>
+/// What the About dialog shows that only the shell knows. The history figures are those of <see cref="HistoryTotals"/>.
+/// </summary>
+/// <param name="Version">The three-part version ("1.1.0").</param>
+/// <param name="Channel">"Microsoft Store" or "Built from source".</param>
+/// <param name="WindowsBuild">"Windows 11, build 26200", for "Copy details".</param>
+public sealed record AboutInfo(
+    string Version,
+    string Channel,
+    string DataFolder,
+    string WindowsBuild,
+    int Dictations,
+    long Words,
+    DateTimeOffset? Since);
 
 public enum MicTestState
 {
