@@ -68,6 +68,15 @@ function pushInputStatus(status: InputStatus) {
   act(() => callbacks.forEach((callback) => callback(status)));
 }
 
+/** Delivers an app.showAbout push: the tray menu's About Murmur. */
+function pushShowAbout() {
+  const callbacks = vi.mocked(apiClient.on).mock.calls
+    .filter(([name]) => name === "app.showAbout")
+    .map(([, callback]) => callback as (data: object) => void);
+  expect(callbacks.length).toBeGreaterThan(0);
+  act(() => callbacks.forEach((callback) => callback({})));
+}
+
 describe("App engine status banner", () => {
   beforeEach(() => {
     vi.mocked(apiClient.call).mockReset();
@@ -432,6 +441,48 @@ describe("App About dialog", () => {
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(item);
+  });
+
+  it("opens when the shell asks (About Murmur in the tray menu)", async () => {
+    mockServer(ready);
+    render(<App />);
+    await screen.findByRole("button", { name: "Settings" });
+
+    pushShowAbout();
+
+    expect(await screen.findByRole("dialog", { name: "Murmur" })).toBeTruthy();
+  });
+
+  it("opens over the setup page too, where there is no sidebar", async () => {
+    mockServer(ready, firstRun);
+    render(<App />);
+    await screen.findByRole("button", { name: "Next" });
+
+    pushShowAbout();
+
+    expect(await screen.findByRole("dialog", { name: "Murmur" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+  });
+
+  it("listens for the shell's request before it reports ready, so an early request is not lost", async () => {
+    const order: string[] = [];
+    vi.mocked(apiClient.on).mockImplementation((name) => {
+      order.push(`on:${name}`);
+      return vi.fn();
+    });
+    vi.mocked(apiClient.call).mockImplementation(async (service, method) => {
+      const key = `${service}.${method}`;
+      order.push(`call:${key}`);
+      if (key === "setup.getState") return setupDone;
+      if (key === "history.get") return { entries: [], hasMore: false };
+      return null;
+    });
+
+    render(<App />);
+    await waitFor(() => expect(order).toContain("call:app.ready"));
+
+    expect(order.indexOf("on:app.showAbout")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("on:app.showAbout")).toBeLessThan(order.indexOf("call:app.ready"));
   });
 
   it("is closed until asked for", async () => {

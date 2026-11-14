@@ -49,6 +49,15 @@ public class EventHandlerTests
     }
 
     [Fact]
+    public async Task ShowAboutEventHandler_PublishesAppShowAbout()
+    {
+        await new ShowAboutEventHandler(_events).Handle(new ShowAboutNotification(), CancellationToken.None);
+
+        // The page only needs to hear the event; the data is an empty object so the message has the usual shape.
+        _events.Received(1).Publish("app.showAbout", Arg.Is<object>(data => JsonUtils.Serialize(data) == "{}"));
+    }
+
+    [Fact]
     public async Task MicLevelEventHandler_PublishesSetupMicLevelWithTheLevel()
     {
         await new MicLevelEventHandler(_events).Handle(new MicLevelNotification(0.5, ended: false), CancellationToken.None);

@@ -538,6 +538,45 @@ public sealed class TrayIconHostTests
         text.ShouldEndWith("…");
     }
 
+    [Fact]
+    public void Show_Menu_HasOpenAboutSeparatorQuit_InThatOrder()
+    {
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ => { }, maxCreateAttempts: 1);
+            host.Show();
+
+            var items = host.Menu.ShouldNotBeNull().Items;
+
+            items.Count.ShouldBe(4);
+            ((System.Windows.Controls.MenuItem)items[0]).Header.ShouldBe("Open Murmur");
+            ((System.Windows.Controls.MenuItem)items[1]).Header.ShouldBe("About Murmur");
+            items[2].ShouldBeOfType<System.Windows.Controls.Separator>();
+            ((System.Windows.Controls.MenuItem)items[3]).Header.ShouldBe("Quit");
+        });
+    }
+
+    [Fact]
+    public void AboutMurmur_Clicked_RaisesAboutRequestedAndNothingElse()
+    {
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ => { }, maxCreateAttempts: 1);
+            var about = 0;
+            var others = 0;
+            host.AboutRequested += () => about++;
+            host.OpenRequested += () => others++;
+            host.QuitRequested += () => others++;
+            host.Show();
+
+            var item = (System.Windows.Controls.MenuItem)host.Menu.ShouldNotBeNull().Items[1];
+            item.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+
+            about.ShouldBe(1);
+            others.ShouldBe(0);
+        });
+    }
+
     private static TrayIconHost NewHostWithCreator(
         Action<H.NotifyIcon.TaskbarIcon> create, int maxCreateAttempts, Action<H.NotifyIcon.TaskbarIcon, string, string>? show = null,
         Func<H.NotifyIcon.TaskbarIcon, bool>? isCreated = null)

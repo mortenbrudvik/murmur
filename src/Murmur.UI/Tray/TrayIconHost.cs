@@ -89,6 +89,9 @@ public sealed partial class TrayIconHost : IDisposable
 
     public event Action? OpenRequested;
 
+    /// <summary>"About Murmur" was picked: show the main window with its About dialog open.</summary>
+    public event Action? AboutRequested;
+
     public event Action? QuitRequested;
 
     /// <summary>
@@ -103,13 +106,15 @@ public sealed partial class TrayIconHost : IDisposable
 
         var open = new MenuItem { Header = "Open Murmur" };
         open.Click += (_, _) => OpenRequested?.Invoke();
+        var about = new MenuItem { Header = "About Murmur" };
+        about.Click += (_, _) => AboutRequested?.Invoke();
         var quit = new MenuItem { Header = "Quit" };
         quit.Click += (_, _) => QuitRequested?.Invoke();
 
         _icon = new TaskbarIcon
         {
             NoLeftClickDelay = true,
-            ContextMenu = new ContextMenu { Items = { open, new Separator(), quit } },
+            ContextMenu = new ContextMenu { Items = { open, about, new Separator(), quit } },
         };
         _icon.TrayLeftMouseUp += (_, _) => OpenRequested?.Invoke();
         _icon.TrayBalloonTipClicked += (_, _) => OpenRequested?.Invoke();
@@ -192,6 +197,9 @@ public sealed partial class TrayIconHost : IDisposable
 
     /// <summary>The tooltip currently shown, or null before <see cref="Show"/>.</summary>
     internal string? ToolTipText => _icon?.ToolTipText;
+
+    /// <summary>The icon's menu, or null before <see cref="Show"/>.</summary>
+    internal ContextMenu? Menu => _icon?.ContextMenu;
 
     public void Dispose()
     {

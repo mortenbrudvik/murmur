@@ -169,6 +169,14 @@ public partial class App : Application
         // 8. Tray. Before the hotkey hooks, so that a hook failure always has an icon to report through.
         _tray = _container.Resolve<TrayIconHost>();
         _tray.OpenRequested += ShowMainWindow;
+
+        // Resolved here, not when first asked: it must be listening before the web UI can report that it has drawn.
+        var about = _container.Resolve<AboutLauncher>();
+        _tray.AboutRequested += () =>
+        {
+            ShowMainWindow();
+            about.Show();
+        };
         _tray.QuitRequested += Quit;
         _tray.Show();
 

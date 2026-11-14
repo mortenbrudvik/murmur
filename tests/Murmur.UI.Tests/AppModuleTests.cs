@@ -69,6 +69,8 @@ public sealed class AppModuleTests
         container.Resolve<IRequestHandler<GetInputStatusRequest, InputStatus>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<GetAboutRequest, AboutInfo>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<UiReadyRequest>>().ShouldNotBeNull();
+        // App resolves it at start, for the tray's About Murmur.
+        container.Resolve<AboutLauncher>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StartMicTestRequest, MicTestResult>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StopMicTestRequest>>().ShouldNotBeNull();
     }
