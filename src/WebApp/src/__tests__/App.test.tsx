@@ -343,6 +343,48 @@ describe("App first-run setup", () => {
   });
 });
 
+describe("App About dialog", () => {
+  beforeEach(() => {
+    vi.mocked(apiClient.call).mockReset();
+    vi.mocked(apiClient.on).mockClear();
+  });
+
+  it("opens from the sidebar's About item, over the page that was showing", async () => {
+    mockServer(ready);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "About" }));
+
+    expect(await screen.findByRole("dialog", { name: "Murmur" })).toBeTruthy();
+    // About is not a page: Settings is still the current one, behind the dialog.
+    expect(screen.getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "About" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("closes again and gives focus back to the About item", async () => {
+    mockServer(ready);
+    render(<App />);
+    const item = await screen.findByRole("button", { name: "About" });
+    item.focus();
+    fireEvent.click(item);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(item);
+  });
+
+  it("is closed until asked for", async () => {
+    mockServer(ready);
+    render(<App />);
+    await screen.findByRole("button", { name: "About" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(callsTo("app.getAbout")).toHaveLength(0);
+  });
+});
+
 function callsTo(key: string) {
   return vi.mocked(apiClient.call).mock.calls.filter(([service, method]) => `${service}.${method}` === key);
 }

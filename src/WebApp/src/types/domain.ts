@@ -51,7 +51,30 @@ export type EngineState = "notStarted" | "downloading" | "loading" | "ready" | "
 export type SpeechModelId = "largeV3Turbo" | "smallEn";
 export type SetupStep = "speechModel" | "microphone" | "tryIt";
 export type GpuAdviceState = "notApplicable" | "cudaInUse" | "installCuda" | "updateDriver";
-export type LinkTarget = "cudaDownload" | "nvidiaDriver" | "microphonePrivacy";
+export type LinkTarget =
+  | "cudaDownload"
+  | "nvidiaDriver"
+  | "microphonePrivacy"
+  | "repository"
+  | "privacyPolicy"
+  | "license"
+  | "homePage"
+  | "dataFolder";
+
+/** What the About dialog shows that only the shell knows; the history figures count what the history holds now. */
+export interface AboutInfo {
+  /** Three parts, from version.json ("1.1.0"). */
+  version: string;
+  /** "Microsoft Store" or "Built from source". */
+  channel: string;
+  dataFolder: string;
+  /** "Windows 11, build 26200". */
+  windowsBuild: string;
+  dictations: number;
+  words: number;
+  /** When the oldest dictation in the history was made (ISO timestamp); null for an empty history. */
+  since: string | null;
+}
 export type MicTestState = "listening" | "accessDenied" | "failed";
 
 /** What to tell the user about CUDA on this PC; gpuName is the graphics card's DXGI description ("NVIDIA GeForce RTX 3060"). */

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import "./App.css";
 import Sidebar from "./components/Sidebar";
+import AboutDialog from "./features/about/AboutDialog";
 import HotkeyUnavailableBanner from "./features/app/HotkeyUnavailableBanner";
 import { useInputStatus } from "./features/app/useInputStatus";
 import HistoryPage from "./features/history/HistoryPage";
@@ -18,6 +19,7 @@ function App() {
   const inputStatus = useInputStatus();
   // Null until the user picks a page: the page the launch asked for (if any) is shown until then.
   const [chosenPage, setChosenPage] = useState<Page | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   // The setup state arrives within milliseconds; showing the normal window first would flash it before the setup.
   if (!setup) return null;
@@ -36,7 +38,7 @@ function App() {
 
   return (
     <div className="shell">
-      <Sidebar page={page} onNavigate={setChosenPage} />
+      <Sidebar page={page} onNavigate={setChosenPage} onAbout={() => setAboutOpen(true)} />
       <div className="main-column">
         <HotkeyUnavailableBanner status={inputStatus} />
         <EngineStatusBanner status={engineStatus} />
@@ -46,6 +48,7 @@ function App() {
           {page === "settings" && <SettingsPage engineStatus={engineStatus} />}
         </main>
       </div>
+      <AboutDialog open={aboutOpen} engineStatus={engineStatus} onClose={() => setAboutOpen(false)} />
     </div>
   );
 }
