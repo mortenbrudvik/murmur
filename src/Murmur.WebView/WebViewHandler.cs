@@ -15,8 +15,17 @@ public class WebViewHandler
         InitialUrl = initialUrl;
         EnvironmentFolderPath = environmentFolderPath;
 
-        WebView.Loaded += (_, _) => InitializeAsync().FireAndForget();
+        WebView.Loaded += (_, _) => StartAsync().FireAndForget();
     }
+
+    private Task? _start;
+
+    /// <summary>
+    /// Starts WebView2 and loads the page, once: later calls return the same task. The control's Loaded event calls
+    /// it, and Loaded is raised again whenever the control rejoins a shown window, which must not set WebView2 up a
+    /// second time. Call on the UI thread.
+    /// </summary>
+    public Task StartAsync() => _start ??= InitializeAsync();
 
     public Action? InitializeComplete { get; set; }
     public Action<Exception>? InitializeFailed { get; set; }

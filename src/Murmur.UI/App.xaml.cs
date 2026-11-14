@@ -446,10 +446,7 @@ public partial class App : Application
         if (IsQuitting || _mainWindow is null)
             return;
 
-        _mainWindow.Show();
-        if (_mainWindow.WindowState == WindowState.Minimized)
-            _mainWindow.WindowState = WindowState.Normal;
-        _mainWindow.Activate();
+        _mainWindow.Reveal(activate: true);
     }
 
     private void Quit()
