@@ -10,3 +10,8 @@ export async function openLink(target: LinkTarget): Promise<void> {
 export async function restartMurmur(): Promise<void> {
   await apiClient.call("app", "restart", {});
 }
+
+/** Quits Murmur, as the tray menu's Quit does: dictation stops and the tray icon goes until Murmur is started again. */
+export async function quitMurmur(): Promise<void> {
+  await apiClient.call("app", "quit", {});
+}

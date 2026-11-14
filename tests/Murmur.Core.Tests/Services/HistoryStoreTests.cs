@@ -35,6 +35,20 @@ public sealed class HistoryStoreTests : IDisposable
     }
 
     [Fact]
+    public void Find_ReturnsTheEntryWithThatIdOrNull()
+    {
+        var store = CreateStore();
+        var first = store.Add("one", "app", true);
+        store.Add("two", "app", true);
+
+        store.Find(first.Id).ShouldBe(first);
+        store.Find(Guid.NewGuid()).ShouldBeNull();
+
+        store.Delete(first.Id);
+        store.Find(first.Id).ShouldBeNull();
+    }
+
+    [Fact]
     public void Add_ThenQuery_NewestFirst()
     {
         var store = CreateStore();

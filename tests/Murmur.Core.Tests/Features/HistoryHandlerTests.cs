@@ -1,5 +1,6 @@
 using Murmur.Core.Audio;
 using Murmur.Core.Features.History;
+using Murmur.Core.Insertion;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using NSubstitute;
@@ -11,6 +12,35 @@ public sealed class HistoryHandlerTests
 {
     private readonly IHistoryStore _history = Substitute.For<IHistoryStore>();
     private readonly IAudioArchive _archive = Substitute.For<IAudioArchive>();
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CopyHistoryEntry_CopiesTheEntrysTextThroughTheInserter(bool copied)
+    {
+        var entry = new HistoryEntry(Guid.NewGuid(), DateTimeOffset.UtcNow, "copy me", "notepad.exe", true);
+        var inserter = Substitute.For<ITextInserter>();
+        _history.Find(entry.Id).Returns(entry);
+        inserter.TryCopy("copy me").Returns(copied);
+
+        var result = await new CopyHistoryEntryHandler(_history, inserter)
+            .Handle(new CopyHistoryEntryRequest(entry.Id), CancellationToken.None);
+
+        result.ShouldBe(copied);
+        inserter.Received(1).TryCopy("copy me");
+    }
+
+    [Fact]
+    public async Task CopyHistoryEntry_UnknownEntry_CopiesNothing()
+    {
+        var inserter = Substitute.For<ITextInserter>();
+
+        var result = await new CopyHistoryEntryHandler(_history, inserter)
+            .Handle(new CopyHistoryEntryRequest(Guid.NewGuid()), CancellationToken.None);
+
+        result.ShouldBeFalse();
+        inserter.DidNotReceiveWithAnyArgs().TryCopy(default!);
+    }
 
     [Fact]
     public async Task GetHistory_PassesSearchAndLimit()

@@ -19,7 +19,7 @@ export default function HistoryEntryCard({ entry, onDelete }: Props) {
         </p>
       </div>
       <div className="history-card-actions">
-        <CopyButton text={entry.text} />
+        <CopyButton entryId={entry.id} />
         <button
           type="button"
           className="history-action history-delete"

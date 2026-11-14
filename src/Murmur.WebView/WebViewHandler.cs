@@ -5,9 +5,29 @@ using Serilog;
 
 namespace Murmur.WebView;
 
+/// <summary>What <see cref="WebViewHandler"/> does about a WebView2 process that failed.</summary>
+public enum ProcessFailureResponse
+{
+    /// <summary>WebView2 recovers by itself (a frame, the GPU or a helper process): only logged.</summary>
+    None,
+
+    /// <summary>The page's renderer exited or hung: the page is reloaded.</summary>
+    Reload,
+
+    /// <summary>
+    /// The page cannot be brought back in this control: the browser process exited, or the renderer kept failing.
+    /// <see cref="WebViewHandler.Unrecoverable"/> is raised.
+    /// </summary>
+    GiveUp,
+}
+
 public class WebViewHandler
 {
+    /// <summary>A renderer that has failed this many times is not reloaded again: it would likely only fail again.</summary>
+    public const int MaxReloads = 3;
+
     private readonly ILogger _logger = Log.ForContext<WebViewHandler>();
+    private int _reloads;
 
     public WebViewHandler(WebView2 webview, string initialUrl, string? environmentFolderPath = null)
     {
@@ -20,6 +40,12 @@ public class WebViewHandler
 
     public Action? InitializeComplete { get; set; }
     public Action<Exception>? InitializeFailed { get; set; }
+
+    /// <summary>
+    /// Raised on the UI thread when a WebView2 process failure leaves the page blank for good (see
+    /// <see cref="ProcessFailureResponse.GiveUp"/>). Only a new WebView2, in practice a restart of the app, brings it back.
+    /// </summary>
+    public Action? Unrecoverable { get; set; }
     public WebView2 WebView { get; private set; }
     public string InitialUrl { get; }
     public string? EnvironmentFolderPath { get; private set; }
@@ -44,6 +70,19 @@ public class WebViewHandler
     /// </summary>
     public static bool ShouldShowContextMenu(bool isEditable, bool hasSelection) => isEditable || hasSelection;
 
+    /// <summary>
+    /// What to do about a failed process of <paramref name="kind"/>, after <paramref name="reloadsSoFar"/> reloads.
+    /// After the browser process exits the control is closed for good. The page's renderer exiting or hanging is
+    /// recovered by a reload, up to <see cref="MaxReloads"/> times. Everything else WebView2 recovers by itself.
+    /// </summary>
+    public static ProcessFailureResponse RespondTo(CoreWebView2ProcessFailedKind kind, int reloadsSoFar) => kind switch
+    {
+        CoreWebView2ProcessFailedKind.BrowserProcessExited => ProcessFailureResponse.GiveUp,
+        CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive =>
+            reloadsSoFar < MaxReloads ? ProcessFailureResponse.Reload : ProcessFailureResponse.GiveUp,
+        _ => ProcessFailureResponse.None,
+    };
+
     private void ApplySettings(CoreWebView2Settings settings)
     {
         // DevTools and browser shortcuts (F12, F5/Ctrl+R reload, Ctrl+P, Ctrl+F, zoom keys) follow EnableDevTools,
@@ -61,6 +100,32 @@ public class WebViewHandler
         settings.IsBuiltInErrorPageEnabled = EnableDevTools;
         settings.IsPasswordAutosaveEnabled = false;
         settings.IsGeneralAutofillEnabled = false;
+    }
+
+    private void OnProcessFailed(CoreWebView2ProcessFailedKind kind, CoreWebView2ProcessFailedReason reason, int exitCode)
+    {
+        _logger.Error("WebView2 process failed: {Kind} ({Reason}, exit code {ExitCode})", kind, reason, exitCode);
+        switch (RespondTo(kind, _reloads))
+        {
+            case ProcessFailureResponse.Reload:
+                _reloads++;
+                _logger.Information("Reloading the page ({Reload} of at most {MaxReloads})", _reloads, MaxReloads);
+                try
+                {
+                    WebView.Reload();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error(ex, "Could not reload the page");
+                    Unrecoverable?.Invoke();
+                }
+
+                break;
+            case ProcessFailureResponse.GiveUp:
+                _logger.Error("The page cannot be recovered in this window; a restart brings it back");
+                Unrecoverable?.Invoke();
+                break;
+        }
     }
 
     protected async Task InitializeAsync()
@@ -104,10 +169,7 @@ public class WebViewHandler
                     CoreWebView2HostResourceAccessKind.Allow);
             }
 
-            WebView.CoreWebView2.ProcessFailed += (sender, args) =>
-            {
-                _logger.Error("WebView2 process failed: {Kind}", args.ProcessFailedKind);
-            };
+            WebView.CoreWebView2.ProcessFailed += (_, args) => OnProcessFailed(args.ProcessFailedKind, args.Reason, args.ExitCode);
 
             WebView.CoreWebView2.NavigationCompleted += (sender, args) =>
             {

@@ -67,6 +67,7 @@ public sealed class AppModuleTests
         container.Resolve<IRequestHandler<SetModelChoiceRequest, ModelChoice>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<OpenLinkRequest>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<RestartAppRequest>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<QuitAppRequest>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<GetInputStatusRequest, InputStatus>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StartMicTestRequest, MicTestResult>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StopMicTestRequest>>().ShouldNotBeNull();

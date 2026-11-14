@@ -46,8 +46,11 @@ public partial class App : Application
     private InputHookHost? _inputHooks;
     private TrayIconHost? _tray;
 
-    /// <summary>Set once Murmur is really exiting; until then closing the main window only hides it.</summary>
-    public static bool IsQuitting { get; private set; }
+    // Knows whether Murmur is really exiting; until then closing the main window only hides it. Null before the
+    // container exists, when there is no window to close yet.
+    private AppLifecycle? _lifecycle;
+
+    private bool IsQuitting => _lifecycle?.IsQuitting == true;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -121,6 +124,7 @@ public partial class App : Application
 
         // 5. Container and API
         _container = AutofacBootstrapper.Bootstrap();
+        _lifecycle = _container.Resolve<AppLifecycle>();
 
         // Set once, here, before any window exists and so before any IPC can read or take it.
         _container.Resolve<LaunchOptions>().OpenPage = launch.Page;
@@ -133,6 +137,7 @@ public partial class App : Application
         registry.Register<GetHistoryRequest>("history", "get");
         registry.Register<DeleteHistoryEntryRequest>("history", "delete");
         registry.Register<ClearHistoryRequest>("history", "clear");
+        registry.Register<CopyHistoryEntryRequest>("history", "copy");
         registry.Register<GetVocabularyRequest>("vocabulary", "get");
         registry.Register<UpdateVocabularyRequest>("vocabulary", "update");
         registry.Register<GetSettingsRequest>("settings", "get");
@@ -148,6 +153,7 @@ public partial class App : Application
         registry.Register<SetModelChoiceRequest>("models", "setChoice");
         registry.Register<OpenLinkRequest>("app", "openLink");
         registry.Register<RestartAppRequest>("app", "restart");
+        registry.Register<QuitAppRequest>("app", "quit");
         registry.Register<GetInputStatusRequest>("app", "getInputStatus");
 
         // The history file is read on first use, and the first dictation of a sign-in start would otherwise wait for
@@ -184,8 +190,9 @@ public partial class App : Application
         // dictation is as quick as the ones after it.
         KeepMicrophoneReady(_container.Resolve<MicrophoneReadiness>(), _container.Resolve<ISettingsService>());
 
-        // "Restart Murmur" is asked for by an IPC handler, on a pool thread.
-        _container.Resolve<AppLifecycle>().RestartRequested += () => Dispatcher.BeginInvoke(Restart);
+        // "Restart Murmur" and "Quit Murmur" are asked for by IPC handlers, on a pool thread.
+        _lifecycle.RestartRequested += () => Dispatcher.BeginInvoke(Restart);
+        _lifecycle.QuitRequested += () => Dispatcher.BeginInvoke(Quit);
 
         // 10. Speech engine: after the first-run decision, downloads the model if needed, loads it and warms it up in
         // the background. Its status changes reach the main window as a notification; subscribed first, so even the
@@ -350,7 +357,7 @@ public partial class App : Application
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
         // Sign-out or shutdown: WPF shuts the app down next, so the main window must really close.
-        IsQuitting = true;
+        _lifecycle?.MarkQuitting();
         base.OnSessionEnding(e);
     }
 
@@ -482,7 +489,7 @@ public partial class App : Application
     /// <summary>Stops taking hotkeys, removes the tray icon and cancels background work (the model download).</summary>
     private void StopInputAndTray()
     {
-        IsQuitting = true;
+        _lifecycle?.MarkQuitting();
         _inputHooks?.Dispose();
         _tray?.Dispose();
         _appCts.Cancel();

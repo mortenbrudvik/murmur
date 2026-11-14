@@ -114,6 +114,16 @@ public class RequestJsonContractTests
     }
 
     [Fact]
+    public void CopyHistoryEntryRequest_ReadsTheIdFromAString()
+    {
+        var id = Guid.NewGuid();
+
+        var request = (CopyHistoryEntryRequest?)JsonUtils.Deserialize($$"""{"id":"{{id}}"}""", typeof(CopyHistoryEntryRequest));
+
+        request.ShouldBe(new CopyHistoryEntryRequest(id));
+    }
+
+    [Fact]
     public void DeleteHistoryEntryRequest_ReadsTheIdFromAString()
     {
         var id = Guid.NewGuid();
@@ -221,6 +231,7 @@ public class RequestJsonContractTests
         JsonUtils.Deserialize("{}", typeof(GetSetupStateRequest)).ShouldBe(new GetSetupStateRequest());
         JsonUtils.Deserialize("{}", typeof(GetModelChoiceRequest)).ShouldBe(new GetModelChoiceRequest());
         JsonUtils.Deserialize("{}", typeof(RestartAppRequest)).ShouldBe(new RestartAppRequest());
+        JsonUtils.Deserialize("{}", typeof(QuitAppRequest)).ShouldBe(new QuitAppRequest());
         JsonUtils.Deserialize("{}", typeof(GetInputStatusRequest)).ShouldBe(new GetInputStatusRequest());
     }
 

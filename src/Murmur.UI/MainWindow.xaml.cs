@@ -1,47 +1,37 @@
 using System.ComponentModel;
-using Murmur.Core.Audio;
-using Murmur.Core.Input;
+using System.Windows;
 using Wpf.Ui.Controls;
 
 namespace Murmur.UI;
 
+/// <summary>Hosts the web UI. Window events are forwarded to <see cref="MainViewModel"/>, which decides what they mean.</summary>
 public partial class MainWindow : FluentWindow
 {
-    public MainWindow(MainViewModel viewModel, HotkeyCaptureCoordinator hotkeyCapture, MicrophoneLevelMonitor micTest)
+    private readonly MainViewModel _viewModel;
+
+    public MainWindow(MainViewModel viewModel)
     {
+        _viewModel = viewModel;
         DataContext = viewModel;
         InitializeComponent();
 
-        // A hotkey capture started from the settings page must not outlive the window's focus: once the owner has
-        // clicked away (or the window hid), the keys pressed next are meant for another app. Likewise a microphone
-        // test from the setup page must not keep the microphone open once nobody can see its meter: hidden or
-        // minimized. The page hears that the test ended and starts it again when the window is back.
-        Deactivated += (_, _) => hotkeyCapture.Cancel();
+        Deactivated += (_, _) => _viewModel.OnWindowDeactivated();
         IsVisibleChanged += (_, e) =>
         {
             if (e.NewValue is false)
-            {
-                hotkeyCapture.Cancel();
-                micTest.StopForWindow();
-            }
+                _viewModel.OnWindowHidden();
         };
         StateChanged += (_, _) =>
         {
-            if (WindowState == System.Windows.WindowState.Minimized)
-                micTest.StopForWindow();
+            if (WindowState == WindowState.Minimized)
+                _viewModel.OnWindowMinimized();
         };
     }
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (App.IsQuitting)
+        if (_viewModel.OnWindowClosing())
         {
-            var webView = (DataContext as MainViewModel)?.WebView;
-            webView?.CoreWebView2?.RemoveHostObjectFromScript("apibridge");
-        }
-        else
-        {
-            // Closing only hides the window: Murmur keeps running in the tray, and the page keeps its state.
             e.Cancel = true;
             Hide();
         }

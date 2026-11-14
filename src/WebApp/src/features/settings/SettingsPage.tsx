@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./SettingsPage.css";
+import { quitMurmur } from "./appActions";
 import CudaTip from "./CudaTip";
 import EngineStatusLine from "./EngineStatusLine";
 import MicrophoneSelect from "./MicrophoneSelect";
@@ -154,6 +155,29 @@ export default function SettingsPage({ engineStatus }: Props) {
           </>
         )}
         <SpeechModelSection status={engineStatus} />
+      </section>
+
+      {/* The tray menu has Quit as well, but it is hard to reach without a mouse. */}
+      <section className="settings-card" aria-labelledby="settings-quit-title">
+        <div className="settings-row">
+          <div className="settings-label">
+            <h2 id="settings-quit-title">Quit Murmur</h2>
+            <p className="settings-hint" id="settings-quit-hint">
+              Stops dictation and removes Murmur from the tray until you start it again. Closing this window only hides
+              it.
+            </p>
+          </div>
+          <div className="settings-control">
+            <button
+              type="button"
+              className="settings-button"
+              aria-describedby="settings-quit-hint"
+              onClick={() => void quitMurmur().catch(() => undefined)}
+            >
+              Quit
+            </button>
+          </div>
+        </div>
       </section>
     </section>
   );

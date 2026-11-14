@@ -44,6 +44,17 @@ public sealed class AppHandlerTests
     }
 
     [Fact]
+    public async Task Quit_RequestsAQuit()
+    {
+        var lifecycle = Substitute.For<IAppLifecycle>();
+
+        await new QuitAppHandler(lifecycle).Handle(new QuitAppRequest(), CancellationToken.None);
+
+        lifecycle.Received(1).RequestQuit();
+        lifecycle.DidNotReceive().RequestRestart();
+    }
+
+    [Fact]
     public void InputStatus_NewOne_SaysTheHookIsInstalled()
     {
         var status = new InputStatus();

@@ -586,6 +586,24 @@ describe("SettingsPage", () => {
     });
   });
 
+  it("quits Murmur from the Quit button", async () => {
+    await renderLoaded();
+
+    fireEvent.click(screen.getByRole("button", { name: "Quit" }));
+
+    await waitFor(() => expect(callsTo("app.quit")).toHaveLength(1));
+    expect(callsTo("app.quit")[0][2]).toEqual({});
+  });
+
+  it("offers Quit even when the settings cannot be loaded", async () => {
+    vi.mocked(apiClient.call).mockRejectedValue(new Error("bridge down"));
+
+    render(<SettingsPage engineStatus={ready} />);
+    await screen.findByRole("alert");
+
+    expect(screen.getByRole("button", { name: "Quit" })).toBeTruthy();
+  });
+
   it("shows an error when the settings cannot be loaded", async () => {
     vi.mocked(apiClient.call).mockRejectedValue(new Error("bridge down"));
 
