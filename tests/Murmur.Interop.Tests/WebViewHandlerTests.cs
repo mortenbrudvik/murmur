@@ -31,4 +31,46 @@ public class WebViewHandlerTests
     {
         WebViewHandler.RespondTo(kind, reloadsSoFar).ShouldBe(expected);
     }
+
+    [Theory]
+    [InlineData("https://murmur.localassets.invalid/index.html", true)]
+    [InlineData("https://murmur.localassets.invalid/", true)]
+    [InlineData("https://murmur.localassets.invalid:443/index.js", true)]
+    [InlineData("HTTPS://MURMUR.LOCALASSETS.INVALID/index.css", true)]
+    [InlineData("https://murmur.localassets.invalid/assets/x.svg?v=1#y", true)]
+    [InlineData("http://murmur.localassets.invalid/index.html", false)]
+    [InlineData("https://murmur.localassets.invalid:8443/index.html", false)]
+    [InlineData("https://murmur.localassets.invalid.example.com/", false)]
+    [InlineData("https://example.com/", false)]
+    [InlineData("http://localhost:5223/", false)]
+    [InlineData("about:blank", false)]
+    [InlineData("data:text/html,hi", false)]
+    [InlineData("file:///C:/Windows/win.ini", false)]
+    [InlineData("not a uri", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsAllowedOrigin_ReleaseOrigin_AllowsOnlyTheVirtualHostOverHttps(string? uri, bool expected)
+    {
+        WebViewHandler.IsAllowedOrigin(uri, ["https://murmur.localassets.invalid"]).ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:5223/", true)]
+    [InlineData("http://localhost:5223/src/main.tsx?t=1", true)]
+    [InlineData("ws://localhost:5223/?token=x", false)]
+    [InlineData("http://localhost/", false)]
+    [InlineData("http://localhost:5224/", false)]
+    [InlineData("https://localhost:5223/", false)]
+    [InlineData("http://127.0.0.1:5223/", false)]
+    [InlineData("https://murmur.localassets.invalid/index.html", false)]
+    public void IsAllowedOrigin_DevServerOrigin_AllowsOnlyThatSchemeHostAndPort(string uri, bool expected)
+    {
+        WebViewHandler.IsAllowedOrigin(uri, ["http://localhost:5223"]).ShouldBe(expected);
+    }
+
+    [Fact]
+    public void IsAllowedOrigin_NoAllowedOrigins_AllowsNothing()
+    {
+        WebViewHandler.IsAllowedOrigin("https://murmur.localassets.invalid/index.html", []).ShouldBeFalse();
+    }
 }

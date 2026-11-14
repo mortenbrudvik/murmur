@@ -45,9 +45,11 @@ public partial class MainViewModel : ObservableObject
         LogsDirectory = paths.LogsDirectory;
 
 #if DEBUG
-        var url = "http://localhost:5223/";
+        const string origin = "http://localhost:5223";
+        var url = origin + "/";
 #else
-        var url = "https://murmur.localassets.invalid/index.html";
+        const string origin = "https://murmur.localassets.invalid";
+        var url = origin + "/index.html";
 #endif
 
         var tempPath = Path.Combine(Path.GetTempPath(), "Murmur");
@@ -56,6 +58,9 @@ public partial class MainViewModel : ObservableObject
         {
             HostObject = bridge,
             HostObjectName = HostObjectName,
+            // Only the page's own origin. In Debug that is the Vite dev server, whose hot-reload websocket does not
+            // raise WebResourceRequested and so needs no entry.
+            AllowedOrigins = [origin],
 #if DEBUG
             EnableDevTools = true,
 #else

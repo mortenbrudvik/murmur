@@ -55,7 +55,13 @@ public class WebViewHandler
     public bool EnableDevTools { get; init; }
     public string? HostWebRootFolder { get; init; }
     public string HostWebHostNameForFolder { get; init; } = "murmur.localassets.invalid";
-    public HashSet<string> AllowedHosts { get; init; } = ["localhost", "murmur.localassets.invalid"];
+
+    /// <summary>
+    /// The origins (scheme, host and port, such as <c>https://murmur.localassets.invalid</c>) the page may navigate to
+    /// and fetch from. Everything else is cancelled or answered with 403, so no other page receives the host object.
+    /// Empty by default: nothing loads until the origin the app is served from is listed.
+    /// </summary>
+    public IReadOnlyList<string> AllowedOrigins { get; init; } = [];
 
     public virtual void Navigate(string url, bool forceRefresh = false)
     {
@@ -69,6 +75,24 @@ public class WebViewHandler
     /// selected text for Copy; everywhere else it would only offer Back, Reload, Save as and Print.
     /// </summary>
     public static bool ShouldShowContextMenu(bool isEditable, bool hasSelection) => isEditable || hasSelection;
+
+    /// <summary>
+    /// Whether <paramref name="uri"/> has the scheme, host and port of one of <paramref name="allowedOrigins"/>. A URI
+    /// that does not parse, or has no host (<c>about:blank</c>, <c>data:</c>, <c>file:</c>), is not allowed.
+    /// </summary>
+    public static bool IsAllowedOrigin(string? uri, IEnumerable<string> allowedOrigins)
+    {
+        var origin = OriginOf(uri);
+        return origin != null && allowedOrigins.Any(allowed => OriginOf(allowed) == origin);
+    }
+
+    /// <summary>The scheme, host and port of <paramref name="uri"/>, lower case and with the port always written out.</summary>
+    private static string? OriginOf(string? uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) || string.IsNullOrEmpty(parsed.Host) || parsed.Port < 0)
+            return null;
+        return $"{parsed.Scheme}://{parsed.IdnHost}:{parsed.Port}".ToLowerInvariant();
+    }
 
     /// <summary>
     /// What to do about a failed process of <paramref name="kind"/>, after <paramref name="reloadsSoFar"/> reloads.
@@ -138,6 +162,7 @@ public class WebViewHandler
                 {
                     AllowSingleSignOnUsingOSPrimaryAccount = false
                 });
+
             await WebView.EnsureCoreWebView2Async(environment);
 
             ApplySettings(WebView.CoreWebView2.Settings);
@@ -162,12 +187,26 @@ public class WebViewHandler
 
             if (!string.IsNullOrEmpty(HostWebRootFolder))
             {
-                // Allow used here because the React app fetches assets cross-origin from the virtual host
+                // The page is served from this host, and its own requests are same-origin, which CORS does not govern.
+                // DenyCors only stops pages from other origins (which the filters below block anyway) reading the files.
                 WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                     HostWebHostNameForFolder,
                     HostWebRootFolder,
-                    CoreWebView2HostResourceAccessKind.Allow);
+                    CoreWebView2HostResourceAccessKind.DenyCors);
             }
+
+            // Every request from the page, its frames and workers: anything outside the allowed origins gets a 403
+            // without reaching the network. The bundled CSP already blocks such requests in Release; this also covers
+            // Debug, which has no CSP, and anything the CSP does not govern.
+            WebView.CoreWebView2.AddWebResourceRequestedFilter(
+                "*", CoreWebView2WebResourceContext.All, CoreWebView2WebResourceRequestSourceKinds.All);
+            WebView.CoreWebView2.WebResourceRequested += (_, args) =>
+            {
+                if (IsAllowedOrigin(args.Request.Uri, AllowedOrigins))
+                    return;
+                _logger.Warning("Blocked request to {Uri}", args.Request.Uri);
+                args.Response = WebView.CoreWebView2.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "");
+            };
 
             WebView.CoreWebView2.ProcessFailed += (_, args) => OnProcessFailed(args.ProcessFailedKind, args.Reason, args.ExitCode);
 
@@ -179,10 +218,10 @@ public class WebViewHandler
                     _logger.Warning("Navigation failed: {WebErrorStatus}", args.WebErrorStatus);
             };
 
+            // The initial about:blank is navigated while the control is created, before these handlers exist.
             WebView.CoreWebView2.NavigationStarting += (sender, args) =>
             {
-                if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) &&
-                    !AllowedHosts.Contains(uri.Host))
+                if (!IsAllowedOrigin(args.Uri, AllowedOrigins))
                 {
                     _logger.Warning("Blocked navigation to {Uri}", args.Uri);
                     args.Cancel = true;
@@ -191,8 +230,7 @@ public class WebViewHandler
 
             WebView.CoreWebView2.FrameNavigationStarting += (sender, args) =>
             {
-                if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) &&
-                    !AllowedHosts.Contains(uri.Host))
+                if (!IsAllowedOrigin(args.Uri, AllowedOrigins))
                 {
                     _logger.Warning("Blocked frame navigation to {Uri}", args.Uri);
                     args.Cancel = true;
