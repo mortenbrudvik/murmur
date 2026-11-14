@@ -2,6 +2,7 @@ using Murmur.Core.Features.App;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
+using Murmur.Core.Setup;
 using NSubstitute;
 using Shouldly;
 
@@ -89,6 +90,16 @@ public sealed class AppHandlerTests
         await new RestartAppHandler(lifecycle).Handle(new RestartAppRequest(), CancellationToken.None);
 
         lifecycle.Received(1).RequestRestart();
+    }
+
+    [Fact]
+    public async Task UiReady_MarksTheUiReady()
+    {
+        var ui = new UiReadiness();
+
+        await new UiReadyHandler(ui).Handle(new UiReadyRequest(), CancellationToken.None);
+
+        ui.IsReady.ShouldBeTrue();
     }
 
     [Fact]

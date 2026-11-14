@@ -343,6 +343,65 @@ describe("App first-run setup", () => {
   });
 });
 
+describe("App ready signal", () => {
+  beforeEach(() => {
+    vi.mocked(apiClient.call).mockReset();
+    vi.mocked(apiClient.on).mockClear();
+  });
+
+  it("tells the shell it has drawn once the setup state has arrived, and only once", async () => {
+    mockServer(ready);
+    render(<App />);
+    await screen.findByRole("button", { name: "Settings" });
+    await waitFor(() => expect(callsTo("app.ready")).toHaveLength(1));
+
+    // More renders (a page change, a status push) must not report again.
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    pushStatus({ ...ready, runtime: "Vulkan" });
+    await act(async () => {});
+
+    expect(callsTo("app.ready")).toHaveLength(1);
+    expect(callsTo("app.ready")[0]).toEqual(["app", "ready", {}]);
+  });
+
+  it("reports ready for the setup page too", async () => {
+    mockServer(ready, firstRun);
+    render(<App />);
+    await screen.findByRole("button", { name: "Next" });
+
+    await waitFor(() => expect(callsTo("app.ready")).toHaveLength(1));
+  });
+
+  it("does not report ready while the setup state is still loading", async () => {
+    let answer: (state: SetupState) => void = () => {};
+    vi.mocked(apiClient.call).mockImplementation((service, method) => {
+      if (`${service}.${method}` === "setup.getState") return new Promise((resolve) => (answer = resolve as (state: SetupState) => void));
+      return Promise.resolve(null);
+    });
+    render(<App />);
+    await act(async () => {});
+
+    expect(callsTo("app.ready")).toHaveLength(0);
+
+    await act(async () => answer(setupDone));
+    await waitFor(() => expect(callsTo("app.ready")).toHaveLength(1));
+  });
+
+  it("carries on when the shell does not take the ready call", async () => {
+    vi.mocked(apiClient.call).mockImplementation(async (service, method) => {
+      const key = `${service}.${method}`;
+      if (key === "app.ready") throw new Error("bridge down");
+      if (key === "setup.getState") return setupDone;
+      if (key === "history.get") return { entries: [], hasMore: false };
+      return null;
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Settings" })).toBeTruthy();
+  });
+});
+
 describe("App About dialog", () => {
   beforeEach(() => {
     vi.mocked(apiClient.call).mockReset();

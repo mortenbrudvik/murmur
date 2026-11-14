@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import Sidebar from "./components/Sidebar";
 import AboutDialog from "./features/about/AboutDialog";
@@ -9,6 +9,7 @@ import EngineStatusBanner from "./features/settings/EngineStatusBanner";
 import SettingsPage from "./features/settings/SettingsPage";
 import { useEngineStatus } from "./features/settings/useEngineStatus";
 import SetupPage from "./features/setup/SetupPage";
+import { apiClient } from "./interop/WebViewApiClient";
 import { useSetupState } from "./features/setup/useSetupState";
 import VocabularyPage from "./features/vocabulary/VocabularyPage";
 import type { Page } from "./types/domain";
@@ -20,6 +21,17 @@ function App() {
   // Null until the user picks a page: the page the launch asked for (if any) is shown until then.
   const [chosenPage, setChosenPage] = useState<Page | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  // Tells the shell that the first real page is on screen (the setup page or the normal window), so that the splash
+  // can hand over to a window that is already drawn. Once: `drawn` only ever goes from false to true.
+  const drawn = setup !== null;
+  useEffect(() => {
+    if (!drawn) return;
+
+    apiClient.call("app", "ready", {}).catch(() => {
+      // The shell does not wait for ever: the splash closes on its own timeout.
+    });
+  }, [drawn]);
 
   // The setup state arrives within milliseconds; showing the normal window first would flash it before the setup.
   if (!setup) return null;

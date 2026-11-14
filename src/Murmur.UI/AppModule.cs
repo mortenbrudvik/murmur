@@ -79,6 +79,7 @@ public class AppModule : Module
         builder.RegisterType<ModelSelection>().SingleInstance();
         builder.RegisterType<AppInfo>().As<IAppInfo>().SingleInstance();
         builder.RegisterType<LaunchOptions>().SingleInstance();
+        builder.RegisterType<UiReadiness>().SingleInstance();
         builder.RegisterType<SetupCoordinator>().SingleInstance();
         builder.RegisterType<ShellLinkOpener>().As<ILinkOpener>().SingleInstance();
         // Also as itself, so that App can subscribe to RestartRequested, which the interface does not carry.
