@@ -35,6 +35,6 @@ public static class IpcLogger
     /// </summary>
     public static bool LogsEvent(string eventName) => eventName != "setup.micLevel";
 
-    private static string Truncate(string value, int maxLength = 200)
-        => value.Length <= maxLength ? value : value[..maxLength] + "...";
+    private static string Truncate(string? value, int maxLength = 200)
+        => value is null ? "(null)" : value.Length <= maxLength ? value : value[..maxLength] + "...";
 }

@@ -74,6 +74,19 @@ public class ApiBridgeTests
         await mediator.DidNotReceive().Send(Arg.Any<object>(), Arg.Any<CancellationToken>());
     }
 
+    // Only a caller other than the web app's client can pass a null string (it always sends JSON text).
+    [Fact]
+    public async Task InvokeMethod_NullString_ReturnsAnErrorInsteadOfThrowing()
+    {
+        var mediator = Substitute.For<IMediator>();
+        var bridge = BridgeFor(mediator);
+
+        var result = await bridge.InvokeMethod("test", "get", null!);
+
+        ShouldBeError(result).ShouldNotBeNullOrWhiteSpace();
+        await mediator.DidNotReceive().Send(Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
     private static ApiBridge BridgeFor(IMediator mediator)
     {
         var registry = new ApiRegistry();
