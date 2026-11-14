@@ -6,6 +6,9 @@ public sealed class MurmurPaths(string root)
     public static MurmurPaths Default { get; } = new(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Murmur"));
 
+    /// <summary>The data root itself: what "Open folder" in the About dialog shows.</summary>
+    public string Root { get; } = root;
+
     public string SettingsFile { get; } = Path.Combine(root, "settings.json");
     public string VocabularyFile { get; } = Path.Combine(root, "vocabulary.json");
     public string HistoryFile { get; } = Path.Combine(root, "history.jsonl");

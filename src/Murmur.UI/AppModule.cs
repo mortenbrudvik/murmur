@@ -77,6 +77,7 @@ public class AppModule : Module
         builder.RegisterType<GpuInfo>().As<IGpuInfo>().SingleInstance();
         builder.RegisterType<CudaRuntimeLocator>().As<ICudaRuntimeLocator>().SingleInstance();
         builder.RegisterType<ModelSelection>().SingleInstance();
+        builder.RegisterType<AppInfo>().As<IAppInfo>().SingleInstance();
         builder.RegisterType<LaunchOptions>().SingleInstance();
         builder.RegisterType<SetupCoordinator>().SingleInstance();
         builder.RegisterType<ShellLinkOpener>().As<ILinkOpener>().SingleInstance();

@@ -5,5 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>14</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- version.json is the one source of the version: build-msix.ps1 reads it for the package, and every assembly
+         carries it for the About dialog and the splash (AppInfo). No commit suffix, so what is shown is what is in the file. -->
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.json')), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 </Project>
