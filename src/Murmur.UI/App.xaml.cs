@@ -51,6 +51,10 @@ public partial class App : Application
 
     private bool IsQuitting => _lifecycle?.IsQuitting == true;
 
+    // A property, not a field: App exists before ConfigureLogging runs, and a context logger taken then would wrap the
+    // silent default logger for good.
+    private static ILogger Logger => Log.ForContext<App>();
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -72,7 +76,7 @@ public partial class App : Application
     {
         // 1. Logging
         ConfigureLogging();
-        Log.Information("Murmur starting");
+        Logger.Information("Murmur starting");
         var launch = LaunchArguments.Parse(args);
 
         // 2. WebView2
@@ -89,19 +93,19 @@ public partial class App : Application
 
         DispatcherUnhandledException += (_, args) =>
         {
-            Log.Error(args.Exception, "UI thread exception");
+            Logger.Error(args.Exception, "UI thread exception");
             args.Handled = args.Exception is not (OutOfMemoryException or StackOverflowException);
         };
 
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
             var ex = args.ExceptionObject as Exception;
-            Log.Fatal(ex, "Unhandled exception");
+            Logger.Fatal(ex, "Unhandled exception");
         };
 
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
-            Log.Error(args.Exception, "Unobserved task exception");
+            Logger.Error(args.Exception, "Unobserved task exception");
             args.SetObserved();
         };
 
@@ -111,7 +115,7 @@ public partial class App : Application
         if (!_guard.TryAcquire(launch.Restarted ? RestartWait : TimeSpan.Zero))
         {
             if (launch.Restarted)
-                Log.Warning("The Murmur that started this one did not exit within {Wait}", RestartWait);
+                Logger.Warning("The Murmur that started this one did not exit within {Wait}", RestartWait);
 
             _guard.SignalExisting();
             Shutdown();
@@ -130,7 +134,7 @@ public partial class App : Application
 
         // Decides how Murmur starts with Windows (see AppModule.RegisterStartup) and how it tells a sign-in start.
         var identity = _container.Resolve<IPackageIdentity>();
-        Log.Information("Running {Channel}", identity.IsPackaged ? "from its MSIX package" : "unpackaged");
+        Logger.Information("Running {Channel}", identity.IsPackaged ? "from its MSIX package" : "unpackaged");
 
         var registry = _container.Resolve<ApiRegistry>();
         registry.Register<GetHistoryRequest>("history", "get");
@@ -234,7 +238,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Could not pre-load the history; it will be read when first needed");
+            Logger.Warning(ex, "Could not pre-load the history; it will be read when first needed");
         }
     }
 
@@ -256,7 +260,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "The first-run decision failed; starting the speech engine anyway");
+            Logger.Error(ex, "The first-run decision failed; starting the speech engine anyway");
         }
 
         await engine.InitializeAsync(_appCts.Token);
@@ -297,14 +301,14 @@ public partial class App : Application
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "Could not read the settings to keep the microphone ready");
+            Logger.Warning(ex, "Could not read the settings to keep the microphone ready");
         }
     }
 
     /// <summary>Leaves nothing behind (no global hooks, no tray icon, no claim on the single instance), says why, and exits.</summary>
     private void FailStartup(Exception ex)
     {
-        Log.Fatal(ex, "Murmur could not start");
+        Logger.Fatal(ex, "Murmur could not start");
         StopInputAndTray();
         _guard?.Dispose();
 
@@ -332,7 +336,7 @@ public partial class App : Application
         _container?.Dispose();
         _guard?.Dispose();
 
-        Log.Information("Murmur stopped");
+        Logger.Information("Murmur stopped");
         Log.CloseAndFlush();
         base.OnExit(e);
     }
@@ -421,7 +425,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Could not update the start-with-Windows entry");
+            Logger.Warning(ex, "Could not update the start-with-Windows entry");
         }
     }
 
@@ -441,7 +445,7 @@ public partial class App : Application
         if (IsQuitting)
             return;
 
-        Log.Information("Quit requested");
+        Logger.Information("Quit requested");
         StopInputAndTray();
 
         // The speech engine is deliberately not disposed: freeing the native model while a transcription may still be
@@ -469,7 +473,7 @@ public partial class App : Application
         {
             // Usually WebView2RuntimeNotFoundException, but any failure is reported to the user as a missing runtime,
             // so the log must say which it was.
-            Log.Warning(ex, "Could not find the WebView2 runtime");
+            Logger.Warning(ex, "Could not find the WebView2 runtime");
             return false;
         }
     }
