@@ -18,13 +18,17 @@ public class MainViewModelTests
 
     private readonly IAudioRecorder _micRecorder = Substitute.For<IAudioRecorder>();
     private readonly HotkeyCaptureCoordinator _hotkeyCapture = new(TimeProvider.System, Substitute.For<IKeyboardLayout>());
-    private readonly AppLifecycle _lifecycle = new();
+    private readonly AppLifecycle _lifecycle;
     private readonly ILinkOpener _links = Substitute.For<ILinkOpener>();
     private readonly MurmurPaths _paths = new(Path.Combine(Path.GetTempPath(), "murmur-vm-tests"));
     private readonly MicrophoneLevelMonitor _micTest;
 
+    // What starting the new Murmur on a restart does; never a real process here.
+    private Action _startNewInstance = () => { };
+
     public MainViewModelTests()
     {
+        _lifecycle = new AppLifecycle(() => _startNewInstance());
         _micTest = new MicrophoneLevelMonitor(() => _micRecorder, Substitute.For<IMediator>(), TimeProvider.System);
     }
 
@@ -119,5 +123,24 @@ public class MainViewModelTests
         restarts.ShouldBe(1);
         quits.ShouldBe(1);
         _links.Received(1).Open(_paths.LogsDirectory);
+    }
+
+    /// <summary>The failure panel's buttons are commands: a failure must leave the app running, not crash it.</summary>
+    [Fact]
+    public void FailurePanelCommands_RestartAndOpenLogFolderFail_DoNotThrow()
+    {
+        var restarts = 0;
+        _lifecycle.RestartRequested += () => restarts++;
+        _startNewInstance = () => throw new System.ComponentModel.Win32Exception(5);
+        _links.When(l => l.Open(Arg.Any<string>())).Throw(new System.ComponentModel.Win32Exception(2));
+
+        WithViewModel(vm =>
+        {
+            Should.NotThrow(() => vm.RestartCommand.Execute(null));
+            Should.NotThrow(() => vm.OpenLogFolderCommand.Execute(null));
+        });
+
+        restarts.ShouldBe(0);
+        _lifecycle.IsQuitting.ShouldBeFalse();
     }
 }

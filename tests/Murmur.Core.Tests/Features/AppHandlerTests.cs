@@ -33,6 +33,27 @@ public sealed class AppHandlerTests
         opener.DidNotReceiveWithAnyArgs().Open(default!);
     }
 
+    /// <summary>The page shows "Could not open the link" only when the call fails, so a failure must reach it.</summary>
+    [Fact]
+    public async Task OpenLink_OpenerThrows_Throws()
+    {
+        var opener = Substitute.For<ILinkOpener>();
+        opener.When(o => o.Open(Arg.Any<string>())).Throw(new InvalidOperationException("no browser"));
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => new OpenLinkHandler(opener).Handle(new OpenLinkRequest(LinkTarget.CudaDownload), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Restart_NewInstanceCannotStart_Throws()
+    {
+        var lifecycle = Substitute.For<IAppLifecycle>();
+        lifecycle.When(l => l.RequestRestart()).Throw(new InvalidOperationException("cannot start"));
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => new RestartAppHandler(lifecycle).Handle(new RestartAppRequest(), CancellationToken.None));
+    }
+
     [Fact]
     public async Task Restart_RequestsARestart()
     {

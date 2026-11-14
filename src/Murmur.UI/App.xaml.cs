@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
@@ -190,8 +189,9 @@ public partial class App : Application
         // dictation is as quick as the ones after it.
         KeepMicrophoneReady(_container.Resolve<MicrophoneReadiness>(), _container.Resolve<ISettingsService>());
 
-        // "Restart Murmur" and "Quit Murmur" are asked for by IPC handlers, on a pool thread.
-        _lifecycle.RestartRequested += () => Dispatcher.BeginInvoke(Restart);
+        // "Restart Murmur" and "Quit Murmur" are asked for by IPC handlers, on a pool thread. A restart has already
+        // started the new Murmur, which waits for this one to let go of the single-instance mutex (RestartWait).
+        _lifecycle.RestartRequested += () => Dispatcher.BeginInvoke(Quit);
         _lifecycle.QuitRequested += () => Dispatcher.BeginInvoke(Quit);
 
         // 10. Speech engine: after the first-run decision, downloads the model if needed, loads it and warms it up in
@@ -270,31 +270,6 @@ public partial class App : Application
     internal static bool IsSignInStart(LaunchArguments launch, IPackageIdentity identity) =>
         !launch.Restarted
         && (launch.Minimized || (identity.IsPackaged && PackagedStartupRegistration.IsStartupActivation()));
-
-    /// <summary>
-    /// Starts a new Murmur on Settings and quits this one. The new instance waits for this one to let go of the
-    /// single-instance mutex (<see cref="RestartWait"/>). If the new one cannot be started, this one keeps running.
-    /// </summary>
-    private void Restart()
-    {
-        if (IsQuitting)
-            return;
-
-        Log.Information("Restarting Murmur");
-        try
-        {
-            // Whether a child started this way keeps the MSIX package identity is checked in Task 11 of the first-run
-            // setup plan (packaged install); until then, no fallback.
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, LaunchArguments.RestartArguments) { UseShellExecute = false })?.Dispose();
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Could not start a new Murmur; staying open");
-            return;
-        }
-
-        Quit();
-    }
 
     /// <summary>Shows what <see cref="TrayNotifier"/> finds worth a notification. Runs on the UI thread.</summary>
     private void NotifyTray(TrayNotifier notifier, ISettingsService settings, InputStatus input, EngineStatus status)

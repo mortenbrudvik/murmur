@@ -122,11 +122,33 @@ public partial class MainViewModel : ObservableObject
         return false;
     }
 
+    /// <summary>The failure panel's Restart. A new Murmur that cannot be started leaves this one open, as it was.</summary>
     [RelayCommand]
-    private void Restart() => _lifecycle.RequestRestart();
+    private void Restart()
+    {
+        try
+        {
+            _lifecycle.RequestRestart();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Could not start a new Murmur from the failure panel; staying open");
+        }
+    }
 
+    /// <summary>The failure panel's Open log folder. A command must not throw: a folder that will not open is logged.</summary>
     [RelayCommand]
-    private void OpenLogFolder() => _links.Open(LogsDirectory);
+    private void OpenLogFolder()
+    {
+        try
+        {
+            _links.Open(LogsDirectory);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning(ex, "Could not open the log folder {Path}", LogsDirectory);
+        }
+    }
 
     [RelayCommand]
     private void Quit() => _lifecycle.RequestQuit();
