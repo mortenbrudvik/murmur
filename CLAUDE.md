@@ -62,7 +62,7 @@ Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Mur
 
 - File-scoped namespaces
 - Private fields: `_camelCase`, public members: PascalCase
-- Test naming: `MethodName_Scenario_ExpectedResult`
+- Test naming: `MethodName_Scenario_ExpectedResult`. Classes that test behaviour across many calls rather than one method (the dictation controller, the state machine, the hotkey matcher and capture) use `Scenario_ExpectedResult`, e.g. `HoldAndRelease_WithSpeech_PastesAndSavesHistory`
 - No logic in View code-behind - all in ViewModels
 - Constructor injection only - no service locator
 - `ConfigureAwait(false)` in Core/library code
