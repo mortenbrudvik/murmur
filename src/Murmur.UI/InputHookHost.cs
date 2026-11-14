@@ -123,7 +123,8 @@ public partial class InputHookHost(
     /// menu, which would take focus away from the app being dictated into.
     /// </summary>
     internal static bool NeedsMenuMask(HotkeyDefinition hotkey) =>
-        hotkey.IsModifierOnly && hotkey.VirtualKey is 0xA4 or 0xA5 or 0x5B or 0x5C;
+        hotkey.IsModifierOnly
+        && hotkey.VirtualKey is VirtualKeys.LeftAlt or VirtualKeys.RightAlt or VirtualKeys.LeftWin or VirtualKeys.RightWin;
 
     private bool Route(MatchResult result)
     {

@@ -326,7 +326,10 @@ public sealed partial class TrayIconHost : IDisposable
 
         var status = _engine.Status;
         if (status.State == EngineState.Ready && (rereadHotkey || DateTime.UtcNow - _hotkeyReadAt >= HotkeyRefreshInterval))
-            _hotkeyName = ReadHotkeyName();
+        {
+            _hotkeyReadAt = DateTime.UtcNow;
+            _hotkeyName = _settings.ReadHotkeyName(fallback: _hotkeyName); // unreadable settings keep the last name
+        }
 
         var ready = ShowsReadyIcon(status);
         if (_showingReadyIcon != ready)
@@ -342,20 +345,6 @@ public sealed partial class TrayIconHost : IDisposable
         {
             _icon.ToolTipText = toolTip;
             _logger.Debug("Tray tooltip: {ToolTip}", toolTip);
-        }
-    }
-
-    private string ReadHotkeyName()
-    {
-        _hotkeyReadAt = DateTime.UtcNow;
-        try
-        {
-            return _settings.Load().Hotkey.DisplayName;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.Warning(ex, "Could not read the hotkey for the tray tooltip");
-            return _hotkeyName;
         }
     }
 

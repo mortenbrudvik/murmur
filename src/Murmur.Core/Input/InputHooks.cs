@@ -243,7 +243,7 @@ public sealed class InputHooks : IDisposable
     /// never forwarded to the handler: otherwise Right Alt could not be captured as a hotkey, and a Left Ctrl hotkey
     /// would fire on every AltGr character. The event itself still goes down the hook chain.
     /// </summary>
-    internal static bool IsAltGrFakeCtrl(uint vkCode, uint scanCode) => vkCode == 0xA2 && scanCode == 0x21D;
+    internal static bool IsAltGrFakeCtrl(uint vkCode, uint scanCode) => vkCode == VirtualKeys.LeftCtrl && scanCode == 0x21D;
 
     private static bool IsButtonDownOrWheel(int message) => message is
         NativeMethods.WM_LBUTTONDOWN or NativeMethods.WM_RBUTTONDOWN or NativeMethods.WM_MBUTTONDOWN

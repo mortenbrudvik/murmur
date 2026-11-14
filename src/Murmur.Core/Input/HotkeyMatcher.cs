@@ -41,8 +41,6 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey, IKeyStateProbe keys)
 {
     private readonly IKeyStateProbe _keys = keys;
 
-    private const int VkEscape = 0x1B;
-
     private readonly Lock _gate = new();
     private readonly ModifierKeyTracker _modifiers = new();
     private HotkeyDefinition _hotkey = hotkey;
@@ -161,7 +159,7 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey, IKeyStateProbe keys)
     {
         var vk = input.VirtualKey;
 
-        if (vk == VkEscape && TryMatchEscape(input.IsDown, out var escape))
+        if (vk == VirtualKeys.Escape && TryMatchEscape(input.IsDown, out var escape))
             return escape;
 
         if (vk == _hotkey.VirtualKey)
@@ -260,24 +258,18 @@ public sealed class HotkeyMatcher(HotkeyDefinition hotkey, IKeyStateProbe keys)
 /// <summary>Which modifier keys are down, tracked per physical key (left and right separately) from key events.</summary>
 internal sealed class ModifierKeyTracker
 {
-    // Side-specific keys as reported by the low-level hook, plus the generic Shift/Ctrl/Alt codes in case they appear.
-    private static readonly int[] Keys = [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C, 0x10, 0x11, 0x12];
-
     private uint _down;
 
     public bool AnyDown => _down != 0;
 
     public static bool IsModifier(int vk) => Slot(vk) >= 0;
 
-    /// <summary>True for the left/right-specific modifier codes (the ones a modifier-only hotkey can use).</summary>
-    public static bool IsSideSpecific(int vk) => vk is >= 0xA0 and <= 0xA5 or 0x5B or 0x5C;
-
     public static HotkeyModifiers FlagOf(int vk) => vk switch
     {
-        0xA0 or 0xA1 or 0x10 => HotkeyModifiers.Shift,
-        0xA2 or 0xA3 or 0x11 => HotkeyModifiers.Ctrl,
-        0xA4 or 0xA5 or 0x12 => HotkeyModifiers.Alt,
-        0x5B or 0x5C => HotkeyModifiers.Win,
+        VirtualKeys.LeftShift or VirtualKeys.RightShift or VirtualKeys.Shift => HotkeyModifiers.Shift,
+        VirtualKeys.LeftCtrl or VirtualKeys.RightCtrl or VirtualKeys.Ctrl => HotkeyModifiers.Ctrl,
+        VirtualKeys.LeftAlt or VirtualKeys.RightAlt or VirtualKeys.Alt => HotkeyModifiers.Alt,
+        VirtualKeys.LeftWin or VirtualKeys.RightWin => HotkeyModifiers.Win,
         _ => HotkeyModifiers.None,
     };
 
@@ -311,7 +303,7 @@ internal sealed class ModifierKeyTracker
         if (_down == 0)
             return;
 
-        foreach (var vk in Keys)
+        foreach (var vk in VirtualKeys.Modifiers)
         {
             if (vk != exceptVk && IsDown(vk) && !keys.IsKeyDown(vk))
                 Set(vk, down: false);
@@ -322,7 +314,7 @@ internal sealed class ModifierKeyTracker
     public HotkeyModifiers Current(int exceptVk = 0)
     {
         var mods = HotkeyModifiers.None;
-        foreach (var vk in Keys)
+        foreach (var vk in VirtualKeys.Modifiers)
         {
             if (vk != exceptVk && IsDown(vk))
                 mods |= FlagOf(vk);
@@ -331,5 +323,6 @@ internal sealed class ModifierKeyTracker
         return mods;
     }
 
-    private static int Slot(int vk) => Array.IndexOf(Keys, vk);
+    /// <summary>The key's bit: its position in <see cref="VirtualKeys.Modifiers"/>, or -1 for a key that is no modifier.</summary>
+    private static int Slot(int vk) => VirtualKeys.Modifiers.IndexOf(vk);
 }

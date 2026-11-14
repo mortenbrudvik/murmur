@@ -277,8 +277,9 @@ public partial class App : Application
         if (IsQuitting)
             return;
 
-        // Only a ready notice names the hotkey, so the file is not read for every download progress update.
-        var hotkeyName = status.State == EngineState.Ready ? ReadHotkeyName(settings) : HotkeyDefinition.Default.DisplayName;
+        // Only a ready notice names the hotkey, so the settings are not read for every download progress update.
+        var defaultName = HotkeyDefinition.Default.DisplayName;
+        var hotkeyName = status.State == EngineState.Ready ? settings.ReadHotkeyName(fallback: defaultName) : defaultName;
         var notice = notifier.OnStatus(status, _mainWindow?.IsActive == true, hotkeyName, input.HookInstalled);
         if (notice is not null)
             _tray?.ShowNotification(notice.Title, notice.Message);
@@ -297,19 +298,6 @@ public partial class App : Application
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Log.Warning(ex, "Could not read the settings to keep the microphone ready");
-        }
-    }
-
-    private static string ReadHotkeyName(ISettingsService settings)
-    {
-        try
-        {
-            return settings.Load().Hotkey.DisplayName;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Warning(ex, "Could not read the hotkey for the tray notification");
-            return HotkeyDefinition.Default.DisplayName;
         }
     }
 

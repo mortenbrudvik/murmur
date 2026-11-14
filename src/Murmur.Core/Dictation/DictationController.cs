@@ -44,13 +44,6 @@ public sealed class DictationController : IDisposable
         TranscriptionFailedNotice, "Murmur couldn't keep your text",
         "It couldn't be pasted, saved to History or copied. Murmur's log has the details.");
 
-    // Generic virtual-key codes, which cover both sides of the keyboard; the Win keys have none.
-    private const int VkShift = 0x10;
-    private const int VkCtrl = 0x11;
-    private const int VkAlt = 0x12;
-    private const int VkLeftWin = 0x5B;
-    private const int VkRightWin = 0x5C;
-
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
@@ -508,12 +501,16 @@ public sealed class DictationController : IDisposable
         return hotkey.Modifiers == HotkeyModifiers.None || IsAnyModifierDown(hotkey.Modifiers);
     }
 
-    /// <summary>Whether any of <paramref name="modifiers"/> is down, on either side of the keyboard.</summary>
+    /// <summary>
+    /// Whether any of <paramref name="modifiers"/> is down, on either side of the keyboard: the generic codes cover both
+    /// sides; the Win keys have none.
+    /// </summary>
     private bool IsAnyModifierDown(HotkeyModifiers modifiers) =>
-        (modifiers.HasFlag(HotkeyModifiers.Ctrl) && _keys.IsKeyDown(VkCtrl))
-        || (modifiers.HasFlag(HotkeyModifiers.Alt) && _keys.IsKeyDown(VkAlt))
-        || (modifiers.HasFlag(HotkeyModifiers.Shift) && _keys.IsKeyDown(VkShift))
-        || (modifiers.HasFlag(HotkeyModifiers.Win) && (_keys.IsKeyDown(VkLeftWin) || _keys.IsKeyDown(VkRightWin)));
+        (modifiers.HasFlag(HotkeyModifiers.Ctrl) && _keys.IsKeyDown(VirtualKeys.Ctrl))
+        || (modifiers.HasFlag(HotkeyModifiers.Alt) && _keys.IsKeyDown(VirtualKeys.Alt))
+        || (modifiers.HasFlag(HotkeyModifiers.Shift) && _keys.IsKeyDown(VirtualKeys.Shift))
+        || (modifiers.HasFlag(HotkeyModifiers.Win)
+            && (_keys.IsKeyDown(VirtualKeys.LeftWin) || _keys.IsKeyDown(VirtualKeys.RightWin)));
 
     private void OnCaptureFailed(Exception error)
     {

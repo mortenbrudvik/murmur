@@ -17,8 +17,6 @@ namespace Murmur.Core.Input;
 /// <param name="layout">Names a symbol key after the character the current layout puts on it.</param>
 public sealed class HotkeyCaptureSession(IKeyboardLayout layout)
 {
-    private const int VkEscape = 0x1B;
-
     private readonly ModifierKeyTracker _modifiers = new();
 
     // The modifier that went down while no other modifier was held; 0 once any other key joins in.
@@ -36,7 +34,7 @@ public sealed class HotkeyCaptureSession(IKeyboardLayout layout)
 
         var vk = input.VirtualKey;
 
-        if (vk == VkEscape)
+        if (vk == VirtualKeys.Escape)
         {
             if (input.IsDown)
                 Complete(null);
@@ -68,7 +66,7 @@ public sealed class HotkeyCaptureSession(IKeyboardLayout layout)
             if (_modifiers.IsDown(vk))
                 return; // auto-repeat
 
-            _soloModifier = !_modifiers.AnyDown && ModifierKeyTracker.IsSideSpecific(vk) ? vk : 0;
+            _soloModifier = !_modifiers.AnyDown && VirtualKeys.IsSideSpecificModifier(vk) ? vk : 0;
             _modifiers.Set(vk, true);
             return;
         }

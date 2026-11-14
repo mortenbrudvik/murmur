@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Murmur.Core.Input;
 
 namespace Murmur.Core.Models;
 
@@ -14,13 +15,12 @@ public enum HotkeyModifiers
 
 public sealed record HotkeyDefinition(int VirtualKey, HotkeyModifiers Modifiers, string DisplayName)
 {
-    public static HotkeyDefinition Default { get; } = new(0xA3, HotkeyModifiers.None, "Right Ctrl");
+    public static HotkeyDefinition Default { get; } = new(VirtualKeys.RightCtrl, HotkeyModifiers.None, "Right Ctrl");
 
     /// <summary>A lone Ctrl/Shift/Alt (left or right) or Win key, with no other modifier.</summary>
     [JsonIgnore]
     public bool IsModifierOnly =>
-        Modifiers == HotkeyModifiers.None
-        && (VirtualKey is >= 0xA0 and <= 0xA5 or 0x5B or 0x5C);
+        Modifiers == HotkeyModifiers.None && VirtualKeys.IsSideSpecificModifier(VirtualKey);
 
     /// <summary>
     /// A Windows shell shortcut that Murmur must never take over: Alt+Tab, Win+Tab (with any extra modifiers)
