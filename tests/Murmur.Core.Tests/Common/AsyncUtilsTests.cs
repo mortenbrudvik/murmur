@@ -45,6 +45,26 @@ public class AsyncUtilsTests
     }
 
     [Fact]
+    public async Task LogFault_ValueTaskFaults_LogsTheExceptionOnce()
+    {
+        var fault = new InvalidOperationException("test fault");
+
+        await ValueTask.FromException(fault).LogFault(_logger);
+
+        var logged = _sink.Events.ShouldHaveSingleItem();
+        logged.Level.ShouldBe(LogEventLevel.Error);
+        logged.Exception.ShouldBeOfType<AggregateException>().InnerException.ShouldBeSameAs(fault);
+    }
+
+    [Fact]
+    public async Task LogFault_ValueTaskSucceeds_LogsNothing()
+    {
+        await ValueTask.CompletedTask.LogFault(_logger);
+
+        _sink.Events.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task LogFault_TaskStillRunning_LogsOnlyOnceItFaults()
     {
         var running = new TaskCompletionSource();
