@@ -1,4 +1,6 @@
 .superpowers/
+# Claude Code worktrees (one checkout per feature branch)
+.claude/worktrees/
 
 # Build output
 [Bb]in/
