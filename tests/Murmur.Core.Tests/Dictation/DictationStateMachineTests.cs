@@ -111,7 +111,7 @@ public sealed class DictationStateMachineTests
 
         // The hands-free timers run from the press.
         sm.OnTick(Ms(7999), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.None);
-        sm.OnTick(Ms(8000), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.Cancel);
+        sm.OnTick(Ms(8000), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.CancelNothingHeard);
     }
 
     [Fact]
@@ -302,12 +302,12 @@ public sealed class DictationStateMachineTests
     }
 
     [Fact]
-    public void HandsFree_NoSpeechFor8s_Cancels()
+    public void HandsFree_NoSpeechFor8s_CancelsSayingNothingWasHeard()
     {
         var sm = Tap();
 
         sm.OnTick(Ms(7900), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.None);
-        sm.OnTick(Ms(8000), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.Cancel);
+        sm.OnTick(Ms(8000), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.CancelNothingHeard);
         sm.State.ShouldBe(DictationState.Idle);
     }
 
@@ -351,7 +351,7 @@ public sealed class DictationStateMachineTests
         // Press at t0, tap released at 150 ms: the 8 s guard fires 8 s after the press, not after the release.
         var sm = Tap();
 
-        sm.OnTick(Ms(8000), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.Cancel);
+        sm.OnTick(Ms(8000), hotkeyPhysicallyDown: false, engineReady: true).ShouldBe(DictationAction.CancelNothingHeard);
     }
 
     [Fact]

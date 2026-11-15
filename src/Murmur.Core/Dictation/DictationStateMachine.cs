@@ -27,12 +27,20 @@ public enum DictationAction
     StopAndSaveOnly,
     Cancel,
 
+    /// <summary>
+    /// A hands-free session heard no speech for <see cref="DictationTimings.StrayTapTimeout"/>: drop it like
+    /// <see cref="Cancel"/>, but say that nothing was heard (a muted or wrong microphone, or a tap by accident).
+    /// </summary>
+    CancelNothingHeard,
+
     /// <summary>The press is a dictation but the engine cannot transcribe: say why. Nothing starts.</summary>
     NotifyNotReady,
 }
 
 /// <param name="TapThreshold">A press released sooner than this is a tap (starts hands-free); otherwise it was a hold.</param>
-/// <param name="StrayTapTimeout">A hands-free session in which no speech was heard is cancelled after this long.</param>
+/// <param name="StrayTapTimeout">
+/// A hands-free session in which no speech was heard is cancelled after this long, saying that nothing was heard.
+/// </param>
 /// <param name="HandsFreeLimit">A hands-free session is stopped (audio saved, not pasted) after this long.</param>
 /// <param name="HoldLimit">
 /// A hotkey that stays held (the release was never seen, or it really is) is stopped (audio saved, not pasted) after
@@ -213,7 +221,7 @@ public sealed class DictationStateMachine(DictationTimings timings)
                 var elapsed = now - PressedAt;
 
                 if (!SpeechSeen && elapsed >= timings.StrayTapTimeout)
-                    return Enter(DictationState.Idle, DictationAction.Cancel);
+                    return Enter(DictationState.Idle, DictationAction.CancelNothingHeard);
 
                 if (elapsed >= timings.HandsFreeLimit)
                     return Enter(DictationState.Transcribing, DictationAction.StopAndSaveOnly);

@@ -324,8 +324,10 @@ public sealed class DictationControllerTests : IDisposable
     }
 
     [Fact]
-    public void HandsFreeNoSpeech_AutoCancelsAfter8s()
+    public void HandsFreeNoSpeech_AutoCancelsAfter8s_SayingNothingWasHeard()
     {
+        using var log = new LogCapture();
+        _controller = Create(context: null); // takes its logger from Log.Logger
         _chunksOnStart = [];
         Tap();
 
@@ -333,10 +335,42 @@ public sealed class DictationControllerTests : IDisposable
 
         _recorder.Received(1).Cancel();
         _recorder.DidNotReceive().Stop();
-        _pill.Received(1).Hide();
+        _pill.Received(1).ShowNotice("Didn't hear anything", NoticeKind.Problem);
+        _pill.DidNotReceive().Hide();
+        _cues.Received(1).PlayProblem();
+        _notifier.DidNotReceiveWithAnyArgs().Notify(default!, default!); // nothing was lost
+        log.Outcomes.ShouldBe(["silence"]);
         _machine.State.ShouldBe(DictationState.Idle);
         _matcher.DictationActive.ShouldBeFalse();
         AssertTimerStopped();
+    }
+
+    [Fact]
+    public void HandsFreeNoSpeech_SoundCuesOff_SaysNothingWasHeardWithoutTheCue()
+    {
+        _settings.Load().Returns(MurmurSettings.Default with { SoundCues = false });
+        _chunksOnStart = [];
+        Tap();
+
+        _time.Advance(TimeSpan.FromSeconds(8));
+
+        _pill.Received(1).ShowNotice("Didn't hear anything", NoticeKind.Problem);
+        _cues.DidNotReceive().PlayProblem();
+    }
+
+    [Fact]
+    public void HandsFree_EscBeforeTheTimeout_EndsSilently()
+    {
+        _chunksOnStart = [];
+        Tap();
+        _time.Advance(TimeSpan.FromSeconds(3));
+
+        Signal(HotkeySignal.Escape);
+        _time.Advance(TimeSpan.FromSeconds(8));
+
+        _pill.Received(1).Hide();
+        _pill.DidNotReceiveWithAnyArgs().ShowNotice(default!, default);
+        _cues.DidNotReceive().PlayProblem();
     }
 
     [Fact]
