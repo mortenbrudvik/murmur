@@ -4,6 +4,7 @@ using Mediator;
 using Microsoft.Extensions.DependencyInjection;
 using Murmur.Core.Services;
 using Murmur.Interop;
+using Murmur.UI.Messaging;
 
 namespace Murmur.UI;
 
@@ -20,6 +21,10 @@ public class AutofacBootstrapper
             options.ServiceLifetime = ServiceLifetime.Transient;
             // Every assembly that holds requests, notifications or handlers. Must be compile-time constants.
             options.Assemblies = [typeof(AppModule), typeof(ApiBridge), typeof(MurmurPaths)];
+            // In order, and a handler that throws faults the published task instead of throwing into the caller.
+            options.NotificationPublisherType = typeof(AwaitingNotificationPublisher);
+            // The same for requests: a handler that throws at once faults the task Send returns.
+            options.PipelineBehaviors = [typeof(AwaitingRequestBehavior<,>)];
         });
 
         var builder = new ContainerBuilder();

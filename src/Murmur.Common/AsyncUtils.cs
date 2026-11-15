@@ -13,7 +13,7 @@ public static class AsyncUtils
     public static void FireAndForget(this ValueTask t) => _ = t.LogFault(logger: null);
 
     /// <summary>
-    /// The continuation behind <see cref="FireAndForget"/>: logs <paramref name="t"/>'s fault, if any, to
+    /// The continuation behind <see cref="FireAndForget(Task)"/>: logs <paramref name="t"/>'s fault, if any, to
     /// <paramref name="logger"/> (null: the global logger at that moment). It always completes, whether <paramref name="t"/>
     /// succeeded, faulted or was cancelled, so a test can wait for it instead of sleeping.
     /// </summary>

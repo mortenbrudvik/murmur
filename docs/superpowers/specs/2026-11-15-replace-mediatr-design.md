@@ -53,7 +53,8 @@ call answers the same JSON, every push event arrives, nothing new is logged.
 - `IRequest` (no response) means `IRequestHandler<TRequest>` returns `ValueTask<Unit>`. `Unit` is a struct with no
   instance properties, so it serialises as `{}`, as MediatR's did.
 - `INotificationHandler<T>.Handle` returns `ValueTask`. The default `ForeachAwaitPublisher` runs handlers one after
-  another and lets an exception propagate, as MediatR's default did.
+  another, but it and the generated `Send`/`Publish` are not `async`: a handler that throws before its first await
+  throws out of `Send`/`Publish`, where MediatR faulted the returned task. (Found in the final review; see 4.4.)
 - `IBaseRequest` exists under the same name.
 - Generator diagnostics that are warnings (errors here, `TreatWarningsAsErrors`): multiple handlers for a message, an
   invalid handler type, a message without a handler. None applies today: every message has exactly one handler.
@@ -80,6 +81,8 @@ services.AddMediator(options =>
 {
     options.ServiceLifetime = ServiceLifetime.Transient;
     options.Assemblies = [typeof(AppModule), typeof(ApiBridge), typeof(MurmurPaths)];
+    options.NotificationPublisherType = typeof(AwaitingNotificationPublisher);
+    options.PipelineBehaviors = [typeof(AwaitingRequestBehavior<,>)];
 });
 
 var builder = new ContainerBuilder();
@@ -93,7 +96,9 @@ return builder.Build();
 - **Transient**, not Mediator's singleton default: today's handlers are per-dependency, and keeping that lifetime keeps
   behaviour without auditing what each handler's dependencies are registered as. It is not a hot path (IPC calls are
   user-paced; the busiest notification is the microphone level during the setup test).
-- **Default publisher** (`ForeachAwaitPublisher`): same order and exception behaviour as today.
+- **`Murmur.UI/Messaging`** keeps MediatR's failure shape: `AwaitingNotificationPublisher` awaits each handler in
+  order and `AwaitingRequestBehavior<,>` awaits each request's handler, both in `async` methods, so a handler that
+  throws faults the returned task instead of throwing into the caller (4.4).
 - The generated mediator lives in `Murmur.UI` (namespace `Mediator`). `Murmur.Core` and `Murmur.Interop` see only the
   `IMediator` interface from `Mediator.Abstractions`.
 
@@ -112,9 +117,11 @@ return builder.Build();
 
 ### 4.4 Error handling
 
-Unchanged by construction: a handler's exception propagates through `Send` to `ApiBridge`'s `catch`, which logs and
-answers `{ success: false, error }`; a failing notification handler faults the `ValueTask`, which `FireAndForget` logs
-or the awaiting caller sees. Mediator's `MissingMessageHandlerException` cannot happen for IPC: `ApiRegistry` only maps
+Unchanged, given the two `Murmur.UI/Messaging` types: a handler's exception faults the task `Send` returns, which
+`ApiBridge`'s `catch` logs and answers as `{ success: false, error }`; a failing notification handler faults the
+`ValueTask` `Publish` returns, which `FireAndForget` logs or the awaiting caller sees, and never throws into the
+caller (at `App`'s engine `StatusChanged` that would skip the later subscribers). Without them Mediator lets a
+synchronous throw escape both; `MediatorWiringTests` pins the faulted-task shape for both. Mediator's `MissingMessageHandlerException` cannot happen for IPC: `ApiRegistry` only maps
 request types that have handlers, and the generator would have failed the build otherwise.
 
 ### 4.5 Testing

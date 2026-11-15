@@ -24,6 +24,8 @@ public class ApiBridge(IMediator mediator, ApiRegistry apiRegistry)
             if (request == null)
                 return JsonUtils.Serialize(new { success = false, error = $"Invalid params for {serviceName}.{methodName}" });
 
+            // Task.Run keeps handlers off the UI thread: WebView2 calls in on it, and the generated Send(object) awaits
+            // without ConfigureAwait(false), so handlers would otherwise resume on the dispatcher.
             // AsTask: Task.Run has no ValueTask overload, so without it the await would yield the ValueTask itself and
             // the web app would get that, not the response.
             var result = await Task.Run(() => mediator.Send(request).AsTask()).ConfigureAwait(false);
