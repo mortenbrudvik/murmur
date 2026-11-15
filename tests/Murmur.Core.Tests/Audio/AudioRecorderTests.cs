@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Murmur.Core.Audio;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Shouldly;
 
@@ -26,7 +27,7 @@ public sealed class AudioRecorderTests
 
         public int DisposeCount { get; private set; }
 
-        public event EventHandler<WaveInEventArgs>? DataAvailable;
+        public event CaptureDataAvailableHandler? DataAvailable;
 
         public event EventHandler<StoppedEventArgs>? RecordingStopped;
 
@@ -46,7 +47,7 @@ public sealed class AudioRecorderTests
             EmitRaw(bytes);
         }
 
-        public void EmitRaw(byte[] bytes) => DataAvailable?.Invoke(this, new WaveInEventArgs(bytes, bytes.Length));
+        public void EmitRaw(byte[] bytes) => DataAvailable?.Invoke(bytes, AudioClientBufferFlags.None, 0, 0);
 
         public void Fail(Exception exception) => RecordingStopped?.Invoke(this, new StoppedEventArgs(exception));
 

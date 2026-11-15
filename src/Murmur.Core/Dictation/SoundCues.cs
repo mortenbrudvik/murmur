@@ -60,7 +60,7 @@ public sealed class SoundCues : ISoundCues, IDisposable
             }
         }
 
-        // Disposing the writer finalises the header and closes the stream; ToArray still works on a closed stream.
+        // Disposing the writer finalises the header (it leaves the stream open).
         return stream.ToArray();
     }
 

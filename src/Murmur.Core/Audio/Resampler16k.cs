@@ -22,13 +22,14 @@ public sealed class Resampler16k(int sourceRate)
             return mono.ToArray();
 
         // Input driven: ResamplePrepare takes (and returns) the number of input samples we are about to give it.
-        var inputCount = _resampler.ResamplePrepare(mono.Length, 1, out var inBuffer, out var inOffset);
-        mono.CopyTo(inBuffer.AsSpan(inOffset));
+        // inBuffer is a window into the resampler's own buffer, valid until ResampleOut.
+        var inputCount = _resampler.ResamplePrepare(mono.Length, 1, out var inBuffer);
+        mono.CopyTo(inBuffer);
 
         // The output room must be sized for the rate change: upsampling (an 8 kHz Bluetooth headset) yields more
         // samples than it is given, and ResampleOut stops at the capacity it is told about.
         var output = new float[MaxOutputFor(inputCount)];
-        var produced = _resampler.ResampleOut(output, 0, inputCount, output.Length, 1);
+        var produced = _resampler.ResampleOut(output, inputCount, output.Length, 1);
         return produced == output.Length ? output : output[..produced];
     }
 

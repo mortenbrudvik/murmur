@@ -80,11 +80,15 @@ public sealed class SoundCuesTests
         return crossings;
     }
 
+    /// <summary>All samples of a mono file, where one sample is one frame.</summary>
     private static float[] ReadSamples(WaveFileReader reader)
     {
+        var provider = reader.ToSampleProvider();
         var samples = new List<float>();
-        while (reader.ReadNextSampleFrame() is { } frame)
-            samples.Add(frame[0]);
+        var buffer = new float[1024];
+        int read;
+        while ((read = provider.Read(buffer)) > 0)
+            samples.AddRange(buffer.AsSpan(0, read));
         return [.. samples];
     }
 

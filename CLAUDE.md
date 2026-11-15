@@ -75,6 +75,8 @@ Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Mur
 ## Testing
 
 - xUnit v3 + NSubstitute + Shouldly (+ `Microsoft.Extensions.TimeProvider.Testing` in `Murmur.Core.Tests`)
+- The test projects reference `xunit.v3.mtp-off`, not `xunit.v3`: from 4.0 plain `xunit.v3` runs on Microsoft.Testing.Platform v2, which the .NET 10 SDK refuses under `dotnet test`'s VSTest mode, and `--filter` and coverlet.collector are VSTest features
+- Held packages: MediatR stays on 12 (13 and later are RPL-1.5 or commercial, and the latest `MediatR.Extensions.Autofac.DependencyInjection` fails at startup with MediatR 14.3 and later). The `System.*` and `Microsoft.Extensions.*` packages float on the .NET major the app targets (`10.*`)
 - Run: `dotnet test Murmur.sln`
 - Frontend: Vitest - run `npm run test:run` in `src/WebApp/`
 

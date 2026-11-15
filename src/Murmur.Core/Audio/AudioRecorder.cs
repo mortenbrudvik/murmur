@@ -280,7 +280,7 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
             if (record)
                 session.Recording = new Recording(session.Format.SampleRate);
 
-            device.DataAvailable += (_, e) => OnDataAvailable(session, e);
+            device.DataAvailable += (buffer, _, _, _) => OnDataAvailable(session, buffer);
             device.RecordingStopped += (_, e) => OnRecordingStopped(session, e);
 
             // Attached before StartRecording so the very first buffer is not dropped. Nothing that can
@@ -367,8 +367,8 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
         }
     }
 
-    /// <summary>Runs on the capture thread.</summary>
-    private void OnDataAvailable(Session session, WaveInEventArgs e)
+    /// <summary>Runs on the capture thread. <paramref name="buffer"/> is only valid during this call.</summary>
+    private void OnDataAvailable(Session session, ReadOnlySpan<byte> buffer)
     {
         lock (_gate)
         {
@@ -383,7 +383,7 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
             float[] chunk;
             try
             {
-                var interleaved = SampleConverter.ToFloat(e.Buffer.AsSpan(0, e.BytesRecorded), session.Format);
+                var interleaved = SampleConverter.ToFloat(buffer, session.Format);
                 var mono = SampleConverter.ToMono(interleaved, session.Format.Channels);
                 chunk = recording.Resampler.Process(mono);
             }

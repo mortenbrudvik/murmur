@@ -20,7 +20,11 @@ internal interface ICaptureDevice : IDisposable
 
     WaveFormat WaveFormat { get; }
 
-    event EventHandler<WaveInEventArgs>? DataAvailable;
+    /// <summary>
+    /// Raised on the capture thread once per WASAPI packet. The span is only valid during the call, so handlers copy
+    /// what they keep. Packets WASAPI flags as silent arrive as zeros.
+    /// </summary>
+    event CaptureDataAvailableHandler? DataAvailable;
 
     event EventHandler<StoppedEventArgs>? RecordingStopped;
 
@@ -30,19 +34,18 @@ internal interface ICaptureDevice : IDisposable
 /// <summary>A WASAPI shared-mode capture endpoint.</summary>
 internal sealed class WasapiCaptureDevice : ICaptureDevice
 {
-    // Event-driven capture wakes up every device period (about 10 ms) instead of polling at half the buffer
-    // length, so the first chunk arrives sooner and Stop loses at most a few milliseconds of trailing audio.
-    private const bool UseEventSync = true;
+    // Event-driven capture (WithEventSync) wakes up every device period (about 10 ms) instead of polling at half the
+    // buffer length, so the first chunk arrives sooner and Stop loses at most a few milliseconds of trailing audio.
     private const int BufferMilliseconds = 100;
 
     private readonly ILogger _logger = Log.ForContext<WasapiCaptureDevice>();
     private readonly MMDevice _device;
-    private readonly WasapiCapture _capture;
+    private readonly WasapiRecorder _recorder;
 
-    private WasapiCaptureDevice(MMDevice device, WasapiCapture capture, string id, string name)
+    private WasapiCaptureDevice(MMDevice device, WasapiRecorder recorder, string id, string name)
     {
         _device = device;
-        _capture = capture;
+        _recorder = recorder;
         Id = id;
         Name = name;
     }
@@ -51,36 +54,41 @@ internal sealed class WasapiCaptureDevice : ICaptureDevice
 
     public string Name { get; }
 
-    public WaveFormat WaveFormat => _capture.WaveFormat;
+    public WaveFormat WaveFormat => _recorder.WaveFormat;
 
-    public event EventHandler<WaveInEventArgs>? DataAvailable
+    public event CaptureDataAvailableHandler? DataAvailable
     {
-        add => _capture.DataAvailable += value;
-        remove => _capture.DataAvailable -= value;
+        add => _recorder.DataAvailable += value;
+        remove => _recorder.DataAvailable -= value;
     }
 
     public event EventHandler<StoppedEventArgs>? RecordingStopped
     {
-        add => _capture.RecordingStopped += value;
-        remove => _capture.RecordingStopped -= value;
+        add => _recorder.RecordingStopped += value;
+        remove => _recorder.RecordingStopped -= value;
     }
 
     /// <summary>Opens the default capture device (<c>Role.Console</c>) or the one with the given id.</summary>
     public static ICaptureDevice Open(string? deviceId)
     {
         var device = OpenEndpoint(deviceId);
-        WasapiCapture? capture = null;
+        WasapiRecorder? recorder = null;
         try
         {
             // Read now, so nothing touches the device's property store once recording has begun.
             var id = device.ID;
             var name = device.FriendlyName;
-            capture = new WasapiCapture(device, UseEventSync, BufferMilliseconds);
-            return new WasapiCaptureDevice(device, capture, id, name);
+            recorder = new WasapiRecorderBuilder()
+                .WithDevice(device)
+                .WithSharedMode()
+                .WithEventSync()
+                .WithBufferLength(BufferMilliseconds)
+                .Build();
+            return new WasapiCaptureDevice(device, recorder, id, name);
         }
         catch
         {
-            capture?.Dispose();
+            recorder?.Dispose();
             device.Dispose();
             throw;
         }
@@ -108,14 +116,14 @@ internal sealed class WasapiCaptureDevice : ICaptureDevice
         }
     }
 
-    public void StartRecording() => _capture.StartRecording();
+    public void StartRecording() => _recorder.StartRecording();
 
     public void Dispose()
     {
         // Each step is attempted regardless of the previous one so the device is always released.
         try
         {
-            _capture.StopRecording();
+            _recorder.StopRecording();
         }
         catch (Exception ex)
         {
@@ -124,7 +132,8 @@ internal sealed class WasapiCaptureDevice : ICaptureDevice
 
         try
         {
-            _capture.Dispose();
+            // Waits for the capture thread to finish; the recorder does not dispose the MMDevice, so that follows.
+            _recorder.Dispose();
         }
         catch (Exception ex)
         {
