@@ -1,6 +1,9 @@
 <Project>
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <!-- The oldest Windows Murmur supports: Windows 11 24H2. It equals the MSIX manifest's MinVersion. Stated rather than
+         left to default from the TargetFramework, so raising the SDK above does not silently raise the minimum OS. -->
+    <SupportedOSPlatformVersion>10.0.26100.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>14</LangVersion>

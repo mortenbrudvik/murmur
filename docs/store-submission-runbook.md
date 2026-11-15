@@ -144,8 +144,8 @@ prompt to.
   - **English only.**
   - **A microphone is required.** Windows asks for permission the first time.
   - **Everything runs locally**: speech recognition, history, settings.
-  - Requires the Microsoft Edge WebView2 Runtime for the main window. It is part of Windows 11 and
-    current Windows 10; Murmur says so if it is missing.
+  - Requires the Microsoft Edge WebView2 Runtime for the main window. It is part of Windows 11;
+    Murmur says so if it is missing.
 - **Screenshots:** the ones captured above.
 - **Privacy policy URL:** `https://brudvik.com/murmur/privacy`
 

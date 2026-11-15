@@ -26,10 +26,10 @@
   </Properties>
 
   <Dependencies>
-    <!-- Nothing Murmur calls is newer than 19041: StartupTask dates from 14393 and
-         AppInstance.GetActivatedEventArgs from 17134. MinVersion is a commitment to the Store, not a hint, and
-         Windows 10 has never actually been tested. -->
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <!-- Windows 11 only: 24H2 (26100) is the oldest Windows 11 release still serviced and the oldest Murmur is tested
+         on. MinVersion is a commitment to the Store, not a hint; keep it equal to SupportedOSPlatformVersion in
+         Directory.Build.props, so the analyzer flags any API newer than what the package promises. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.26100.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
 
   <Resources>

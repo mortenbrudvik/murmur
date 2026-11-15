@@ -28,9 +28,9 @@ You can try it in your browser, with your own voice, at <https://brudvik.com/mur
 
 ## Requirements
 
-- Windows 10 version 2004 (build 19041) or later, x64
+- Windows 11 version 24H2 (build 26100) or later, x64
 - A microphone
-- The Microsoft Edge WebView2 Runtime (part of Windows 11 and current Windows 10)
+- The Microsoft Edge WebView2 Runtime (part of Windows 11)
 - Disk space for the speech model: about 1.6 GB, or 488 MB on PCs without a capable graphics card.
   Murmur downloads it from [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) on first start.
 - For the fastest transcription: an NVIDIA RTX 30-series or newer GPU with the
