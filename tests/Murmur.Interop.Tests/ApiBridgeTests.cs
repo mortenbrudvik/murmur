@@ -37,6 +37,71 @@ public class ApiBridgeTests
     }
 
     [Fact]
+    public async Task InvokeMethod_RegisteredRequest_ReturnsTheHandlersResultAsData()
+    {
+        var mediator = Substitute.For<IMediator>();
+        mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<object?>("result"));
+        var bridge = BridgeFor(mediator);
+
+        var result = await bridge.InvokeMethod("test", "get", "{}");
+
+        ShouldBeSuccess(result).GetString().ShouldBe("result");
+    }
+
+    // A handler that waits (CaptureHotkey waits up to 10 s): the bridge must answer with what it finally returns.
+    [Fact]
+    public async Task InvokeMethod_HandlerCompletesLater_ReturnsItsResultAsData()
+    {
+        var mediator = Substitute.For<IMediator>();
+        mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
+            .Returns(_ => LaterAsync());
+        var bridge = BridgeFor(mediator);
+
+        var result = await bridge.InvokeMethod("test", "get", "{}");
+
+        ShouldBeSuccess(result).GetString().ShouldBe("later");
+
+        static async Task<object?> LaterAsync()
+        {
+            await Task.Delay(20);
+            return "later";
+        }
+    }
+
+    // OpenLink, QuitApp, RestartApp, UiReady and StopMicTest answer nothing; the web app only reads success.
+    [Fact]
+    public async Task InvokeMethod_VoidRequest_ReturnsAnEmptyObjectAsData()
+    {
+        var mediator = Substitute.For<IMediator>();
+        mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<object?>(Unit.Value));
+        var registry = new ApiRegistry();
+        registry.Register<FakeVoidRequest>("test", "do");
+        var bridge = new ApiBridge(mediator, registry);
+
+        var result = await bridge.InvokeMethod("test", "do", "{}");
+
+        var data = ShouldBeSuccess(result);
+        data.ValueKind.ShouldBe(JsonValueKind.Object);
+        data.EnumerateObject().ShouldBeEmpty();
+    }
+
+    // A handler that throws before its first await throws out of Send itself instead of returning a faulted task.
+    [Fact]
+    public async Task InvokeMethod_SendThrowsSynchronously_ReturnsErrorWithExceptionMessage()
+    {
+        var mediator = Substitute.For<IMediator>();
+        mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
+            .Returns<Task<object?>>(_ => throw new InvalidOperationException("thrown at once"));
+        var bridge = BridgeFor(mediator);
+
+        var result = await bridge.InvokeMethod("test", "get", "{}");
+
+        ShouldBeError(result).ShouldBe("thrown at once");
+    }
+
+    [Fact]
     public async Task InvokeMethod_HandlerThrows_ReturnsErrorWithExceptionMessage()
     {
         var mediator = Substitute.For<IMediator>();
@@ -104,5 +169,16 @@ public class ApiBridgeTests
         return root.GetProperty("error").GetString();
     }
 
+    /// <summary>Asserts the bridge's success shape, <c>{"success":true,"data":...}</c>, and returns <c>data</c>.</summary>
+    private static JsonElement ShouldBeSuccess(string response)
+    {
+        using var json = JsonDocument.Parse(response);
+        var root = json.RootElement;
+        root.GetProperty("success").GetBoolean().ShouldBeTrue();
+        return root.GetProperty("data").Clone();
+    }
+
     private class FakeRequest : IRequest<string> { }
+
+    private class FakeVoidRequest : IRequest { }
 }
