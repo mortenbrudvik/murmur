@@ -1,6 +1,6 @@
 using Serilog;
 
-namespace Murmur.UI;
+namespace Murmur.Core.Input;
 
 /// <summary>
 /// Starts Murmur's keyboard hook and, if Windows refuses it, tries once more after <see cref="RetryDelay"/> with a

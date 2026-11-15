@@ -1,11 +1,10 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using Murmur.Core.Input;
 using Murmur.Core.Insertion;
 using Murmur.Core.Models;
 using Serilog;
 
-namespace Murmur.UI;
+namespace Murmur.Core.Input;
 
 /// <summary>
 /// Runs Murmur's low-level keyboard and mouse hooks on a dedicated thread ("Murmur.InputHooks") with its own Win32

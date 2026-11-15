@@ -5,7 +5,7 @@ using Murmur.Core.Models;
 using NSubstitute;
 using Shouldly;
 
-namespace Murmur.UI.Tests;
+namespace Murmur.Core.Tests.Input;
 
 public sealed class InputHookStarterTests
 {
