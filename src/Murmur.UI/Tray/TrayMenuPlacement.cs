@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using Murmur.UI.Native;
 
 namespace Murmur.UI.Tray;
 
@@ -32,7 +33,7 @@ internal static class TrayMenuPlacement
         painted.Offset(LayoutOffset(menu, root));
         var visible = Rect.Transform(painted, target.TransformToDevice);
         var origin = WindowOrigin(anchor, visible, monitor);
-        return TrayMenuNative.MoveTo(source.Handle, (int)Math.Round(origin.X), (int)Math.Round(origin.Y));
+        return User32.MoveTo(source.Handle, (int)Math.Round(origin.X), (int)Math.Round(origin.Y));
     }
 
     /// <summary>

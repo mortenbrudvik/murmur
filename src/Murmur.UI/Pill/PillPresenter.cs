@@ -4,6 +4,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Murmur.Core.Dictation;
+using Murmur.UI.Native;
 using Serilog;
 
 namespace Murmur.UI.Pill;
@@ -172,7 +173,7 @@ public sealed class PillPresenter : IPillPresenter
         var scale = _monitorDpi / 96.0;
         var x = (int)Math.Round((topLeft.X - PillWindow.ShadowMargin.Left) * scale);
         var y = (int)Math.Round((topLeft.Y - PillWindow.ShadowMargin.Top) * scale);
-        if (!PillNative.MoveTo(new WindowInteropHelper(_window).EnsureHandle(), x, y))
+        if (!User32.MoveTo(new WindowInteropHelper(_window).EnsureHandle(), x, y))
         {
             _logger.Warning("Could not move the pill to ({X}, {Y})", x, y);
         }

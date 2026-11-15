@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Murmur.UI;
 
-/// <summary>The Win32 calls behind the splash's hand-over: hiding a shown window from view, and asking who has the foreground.</summary>
+/// <summary>The Win32 call behind the splash's hand-over: hiding a shown window from view.</summary>
 internal static partial class WindowNative
 {
     /// <summary>
@@ -18,23 +18,6 @@ internal static partial class WindowNative
         return DwmSetWindowAttribute(window, DWMWA_CLOAK, ref value, sizeof(int)) == 0;
     }
 
-    /// <summary>The process that owns the foreground window; 0 when no window has the foreground.</summary>
-    internal static uint ForegroundProcessId()
-    {
-        var window = GetForegroundWindow();
-        if (window == 0)
-            return 0;
-
-        _ = GetWindowThreadProcessId(window, out var processId);
-        return processId;
-    }
-
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmSetWindowAttribute(nint hwnd, uint attribute, ref int value, int size);
-
-    [LibraryImport("user32.dll")]
-    private static partial nint GetForegroundWindow();
-
-    [LibraryImport("user32.dll")]
-    private static partial uint GetWindowThreadProcessId(nint hwnd, out uint processId);
 }

@@ -12,6 +12,17 @@ public sealed class Win32ForegroundInfo : IForegroundInfo
 
     private static readonly ILogger Logger = Log.ForContext<Win32ForegroundInfo>();
 
+    /// <summary>The process that owns the foreground window; 0 when no window has the foreground.</summary>
+    public static uint ForegroundProcessId()
+    {
+        var window = NativeMethods.GetForegroundWindow();
+        if (window == 0)
+            return 0;
+
+        NativeMethods.GetWindowThreadProcessId(window, out var processId);
+        return processId;
+    }
+
     public ForegroundTarget Capture()
     {
         var window = NativeMethods.GetForegroundWindow();

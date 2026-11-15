@@ -1,6 +1,5 @@
 using System.IO;
 using System.IO.Packaging;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -10,6 +9,7 @@ using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.UI.Native;
 using Serilog;
 using DrawingIcon = System.Drawing.Icon;
 
@@ -28,7 +28,7 @@ namespace Murmur.UI.Tray;
 /// meanwhile waits for the icon, however it arrives: by a retry, or by H.NotifyIcon adding it by itself.
 /// </para>
 /// </summary>
-public sealed partial class TrayIconHost : IDisposable
+public sealed class TrayIconHost : IDisposable
 {
     /// <summary>The notification area's tooltip holds 128 characters, including the terminating null.</summary>
     internal const int MaxToolTipLength = 127;
@@ -444,15 +444,10 @@ public sealed partial class TrayIconHost : IDisposable
         var resource = Application.GetResourceStream(uri)
             ?? throw new InvalidOperationException($"Missing tray icon resource {uri}.");
         using var stream = resource.Stream;
-        var size = GetSystemMetrics(SM_CXSMICON);
+        var size = User32.GetSystemMetrics(User32.SM_CXSMICON);
         return new DrawingIcon(stream, size, size);
     }
 
-    private const int SM_CXSMICON = 49;
-
     /// <summary>A notification that waits for the icon.</summary>
     private readonly record struct Notice(string Title, string Message, bool Persistent);
-
-    [LibraryImport("user32.dll")]
-    private static partial int GetSystemMetrics(int nIndex);
 }

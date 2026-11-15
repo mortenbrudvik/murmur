@@ -316,7 +316,7 @@ public partial class App : Application
             mainWindowIsShown: () => !IsQuitting && _mainWindow is { IsVisible: true },
             revealMainWindow: activate => _mainWindow?.Reveal(activate),
             closeSplash: () => CloseSplashWindow(splash),
-            foregroundProcessId: WindowNative.ForegroundProcessId,
+            foregroundProcessId: Win32ForegroundInfo.ForegroundProcessId,
             ownProcessId: (uint)Environment.ProcessId);
 
         splash.SkipRequested += session.Skip;
