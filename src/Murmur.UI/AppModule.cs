@@ -54,6 +54,7 @@ public class AppModule : Module
         builder.RegisterType<PillWindow>().SingleInstance();
         builder.RegisterType<PillPresenter>().As<IPillPresenter>().SingleInstance();
         builder.RegisterType<TrayIconHost>().SingleInstance();
+        builder.RegisterType<TrayUserNotifier>().As<IUserNotifier>().SingleInstance();
     }
 
     private static void RegisterCore(ContainerBuilder builder)
@@ -66,7 +67,10 @@ public class AppModule : Module
         builder.RegisterType<VocabularyService>().As<IVocabularyService>().SingleInstance();
         builder.RegisterType<HistoryStore>().As<IHistoryStore>().SingleInstance();
         builder.RegisterType<AudioArchive>().As<IAudioArchive>().SingleInstance();
+        // The dictation recorder. Owned by the container, which disposes it on exit and so releases a microphone that
+        // "keep the microphone ready" was holding open.
         builder.RegisterType<AudioRecorder>().As<IAudioRecorder>().SingleInstance();
+        builder.RegisterType<MicrophoneReadiness>().SingleInstance();
         // The setup page's microphone test has a recorder of its own, so it never collides with a dictation. Owned by
         // the container, which disposes it on exit and so stops a test that is still running.
         builder.Register(c => new MicrophoneLevelMonitor(() => new AudioRecorder(), c.Resolve<IMediator>(), c.Resolve<TimeProvider>()))
@@ -121,12 +125,13 @@ public class AppModule : Module
 
     private static void RegisterDictation(ContainerBuilder builder)
     {
-        builder.Register(c => new HotkeyMatcher(c.Resolve<ISettingsService>().Load().Hotkey)).SingleInstance();
+        builder.Register(c => new HotkeyMatcher(c.Resolve<ISettingsService>().Load().Hotkey, c.Resolve<IKeyStateProbe>())).SingleInstance();
         builder.RegisterType<HotkeyCaptureCoordinator>().SingleInstance();
         // Written by App once the keyboard hook has started (or failed to); read by the tray and the web app.
         builder.RegisterType<InputStatus>().SingleInstance();
         builder.Register(_ => new DictationStateMachine(DictationTimings.Default)).SingleInstance();
         builder.RegisterType<SoundCues>().As<ISoundCues>().SingleInstance();
+        builder.RegisterType<DictationDelivery>().SingleInstance();
 
         // Resolve on the UI thread: it captures that thread's SynchronizationContext.
         builder.RegisterType<DictationController>().SingleInstance();

@@ -5,6 +5,7 @@ using Murmur.Core.Features.Settings;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
+using Murmur.Core.Tests.Input;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Shouldly;
@@ -38,10 +39,10 @@ public sealed class SettingsHandlerTests
 
     private static UpdateSettingsRequest Update(
         HotkeyDefinition? hotkey = null, string? microphoneId = null, bool soundCues = true,
-        bool startWithWindows = false, bool keepAudio = false) =>
-        new(hotkey ?? CtrlShiftSpace, microphoneId, soundCues, startWithWindows, keepAudio);
+        bool startWithWindows = false, bool keepAudio = false, bool keepMicrophoneReady = false) =>
+        new(hotkey ?? CtrlShiftSpace, microphoneId, soundCues, startWithWindows, keepAudio, keepMicrophoneReady);
 
-    private UpdateSettingsHandler UpdateHandler() => new(_settings, _mediator);
+    private UpdateSettingsHandler UpdateHandler() => new(_settings, _mediator, FakeKeyboardLayout.Unmapped);
 
     [Fact]
     public async Task GetSettings_ReturnsTheStoredSettings()
@@ -66,6 +67,15 @@ public sealed class SettingsHandlerTests
     }
 
     [Fact]
+    public async Task UpdateSettings_KeepMicrophoneReady_IsSaved()
+    {
+        var result = await UpdateHandler().Handle(Update(keepMicrophoneReady: true), CancellationToken.None);
+
+        result.KeepMicrophoneReady.ShouldBeTrue();
+        _saved!.KeepMicrophoneReady.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task UpdateSettings_InvalidHotkey_KeepsPrevious()
     {
         // A plain letter with no modifier would swallow typing.
@@ -77,6 +87,39 @@ public sealed class SettingsHandlerTests
         var saved = _saved.ShouldNotBeNull();
         saved.Hotkey.ShouldBe(Previous);
         saved.SoundCues.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(255)]
+    [InlineData(100_000)]
+    public async Task UpdateSettings_VirtualKeyOutOfRange_KeepsPrevious(int virtualKey)
+    {
+        var result = await UpdateHandler().Handle(
+            Update(hotkey: new HotkeyDefinition(virtualKey, HotkeyModifiers.Ctrl, "Ctrl+?")), CancellationToken.None);
+
+        result.Hotkey.ShouldBe(Previous);
+    }
+
+    /// <summary>The name is only for show, but it is stored and shown in Settings, so the page does not get to pick it.</summary>
+    [Fact]
+    public async Task UpdateSettings_HotkeyDisplayName_IsMadeFromTheKeyAndModifiers()
+    {
+        var sent = new HotkeyDefinition(0x20, HotkeyModifiers.Ctrl | HotkeyModifiers.Shift, new string('x', 10_000));
+
+        var result = await UpdateHandler().Handle(Update(hotkey: sent), CancellationToken.None);
+
+        result.Hotkey.ShouldBe(CtrlShiftSpace);
+        _saved!.Hotkey.DisplayName.ShouldBe("Ctrl+Shift+Space");
+    }
+
+    [Fact]
+    public async Task UpdateSettings_ModifierOnlyHotkey_IsNamedAsTheCaptureNamesIt()
+    {
+        var result = await UpdateHandler().Handle(
+            Update(hotkey: new HotkeyDefinition(RightCtrl, HotkeyModifiers.None, "")), CancellationToken.None);
+
+        result.Hotkey.DisplayName.ShouldBe("Right Ctrl");
     }
 
     [Fact]
@@ -139,10 +182,37 @@ public sealed class SettingsHandlerTests
     }
 
     [Fact]
+    public async Task SettingsUpdatedHandler_KeepMicrophoneReadyOn_KeepsTheChosenMicrophoneOpen()
+    {
+        var readiness = new MicrophoneReadiness(_recorder);
+        var handler = new SettingsUpdatedHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), _startup, readiness);
+        var settings = new MurmurSettings(CtrlShiftSpace, "mic-2", KeepMicrophoneReady: true);
+
+        await handler.Handle(new SettingsUpdatedNotification(settings), CancellationToken.None);
+        await readiness.Pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        _recorder.Received(1).KeepOpen = true;
+        _recorder.Received(1).Prepare("mic-2");
+    }
+
+    [Fact]
+    public async Task SettingsUpdatedHandler_KeepMicrophoneReadyOff_StopsKeepingTheMicrophoneOpen()
+    {
+        var readiness = new MicrophoneReadiness(_recorder);
+        var handler = new SettingsUpdatedHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), _startup, readiness);
+
+        await handler.Handle(new SettingsUpdatedNotification(new MurmurSettings(CtrlShiftSpace)), CancellationToken.None);
+        await readiness.Pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        _recorder.Received(1).KeepOpen = false;
+        _recorder.DidNotReceiveWithAnyArgs().Prepare(default);
+    }
+
+    [Fact]
     public async Task SettingsUpdatedHandler_AppliesHotkeyAndStartup()
     {
-        var matcher = new HotkeyMatcher(Previous);
-        var handler = new SettingsUpdatedHandler(matcher, _startup);
+        var matcher = new HotkeyMatcher(Previous, AllKeysDown.Instance);
+        var handler = new SettingsUpdatedHandler(matcher, _startup, new MicrophoneReadiness(_recorder));
         var settings = new MurmurSettings(CtrlShiftSpace, StartWithWindows: false);
 
         await handler.Handle(new SettingsUpdatedNotification(settings), CancellationToken.None);
@@ -154,9 +224,9 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task SettingsUpdatedHandler_StartupRegistrationFails_StillAppliesHotkeyAndDoesNotThrow()
     {
-        var matcher = new HotkeyMatcher(Previous);
+        var matcher = new HotkeyMatcher(Previous, AllKeysDown.Instance);
         _startup.When(s => s.Apply(Arg.Any<bool>())).Throw(new UnauthorizedAccessException("blocked by policy"));
-        var handler = new SettingsUpdatedHandler(matcher, _startup);
+        var handler = new SettingsUpdatedHandler(matcher, _startup, new MicrophoneReadiness(_recorder));
 
         await handler.Handle(new SettingsUpdatedNotification(new MurmurSettings(CtrlShiftSpace, StartWithWindows: true)), CancellationToken.None);
 
@@ -168,7 +238,7 @@ public sealed class SettingsHandlerTests
     public async Task CaptureHotkey_ReturnsCapturedDefinition()
     {
         var coordinator = new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>());
-        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous), coordinator);
+        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), coordinator);
 
         // Handle runs synchronously up to its first real wait, so the capture is already active here.
         var pending = handler.Handle(new CaptureHotkeyRequest(), CancellationToken.None);
@@ -184,7 +254,7 @@ public sealed class SettingsHandlerTests
     public async Task CaptureHotkey_ForgetsAHotkeyPressStillHeld_BeforeCapturing()
     {
         // The user clicked a button, so a held hotkey is stale: a lost key-up would otherwise make the next press look like auto-repeat.
-        var matcher = new HotkeyMatcher(HotkeyDefinition.Default);
+        var matcher = new HotkeyMatcher(HotkeyDefinition.Default, AllKeysDown.Instance);
         matcher.OnKey(new KeyInput(RightCtrl, IsDown: true, IsInjected: false));
         matcher.IsHotkeyHeld.ShouldBeTrue();
         var handler = new CaptureHotkeyHandler(matcher, new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
@@ -199,7 +269,7 @@ public sealed class SettingsHandlerTests
     [Fact]
     public async Task CaptureHotkey_NothingPressedWithinTenSeconds_ReturnsNull()
     {
-        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous), new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
+        var handler = new CaptureHotkeyHandler(new HotkeyMatcher(Previous, AllKeysDown.Instance), new HotkeyCaptureCoordinator(_time, Substitute.For<IKeyboardLayout>()));
 
         var pending = handler.Handle(new CaptureHotkeyRequest(), CancellationToken.None);
         _time.Advance(TimeSpan.FromSeconds(9));

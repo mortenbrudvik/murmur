@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./SettingsPage.css";
+import { quitMurmur } from "./appActions";
 import CudaTip from "./CudaTip";
 import EngineStatusLine from "./EngineStatusLine";
 import MicrophoneSelect from "./MicrophoneSelect";
@@ -11,7 +12,7 @@ import type { EngineStatus, MurmurSettings } from "../../types/domain";
 /** Which group of settings the last change came from, so a failed save is reported next to it. */
 type Group = "hotkey" | "microphone" | "options";
 
-type ToggleField = "soundCues" | "startWithWindows" | "keepAudio";
+type ToggleField = "soundCues" | "startWithWindows" | "keepAudio" | "keepMicrophoneReady";
 
 const TOGGLES: { field: ToggleField; label: string; hint: string }[] = [
   { field: "soundCues", label: "Sound cues", hint: "Play a short sound when recording starts and stops." },
@@ -20,6 +21,14 @@ const TOGGLES: { field: ToggleField; label: string; hint: string }[] = [
     field: "keepAudio",
     label: "Keep audio recordings",
     hint: "Save each dictation's audio with its history entry. When off, audio is discarded after transcription.",
+  },
+  {
+    field: "keepMicrophoneReady",
+    label: "Keep the microphone ready",
+    hint:
+      "Dictation starts at once instead of waiting for the microphone to start. Windows shows the microphone as in use " +
+      "while Murmur runs, and a Bluetooth headset may stay in call mode, which lowers its sound quality. Nothing is " +
+      "recorded until you dictate.",
   },
 ];
 
@@ -146,6 +155,29 @@ export default function SettingsPage({ engineStatus }: Props) {
           </>
         )}
         <SpeechModelSection status={engineStatus} />
+      </section>
+
+      {/* The tray menu has Quit as well, but it is hard to reach without a mouse. */}
+      <section className="settings-card" aria-labelledby="settings-quit-title">
+        <div className="settings-row">
+          <div className="settings-label">
+            <h2 id="settings-quit-title">Quit Murmur</h2>
+            <p className="settings-hint" id="settings-quit-hint">
+              Stops dictation and removes Murmur from the tray until you start it again. Closing this window only hides
+              it.
+            </p>
+          </div>
+          <div className="settings-control">
+            <button
+              type="button"
+              className="settings-button"
+              aria-describedby="settings-quit-hint"
+              onClick={() => void quitMurmur().catch(() => undefined)}
+            >
+              Quit
+            </button>
+          </div>
+        </div>
       </section>
     </section>
   );

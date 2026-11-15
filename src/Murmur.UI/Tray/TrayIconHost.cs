@@ -16,8 +16,9 @@ using DrawingIcon = System.Drawing.Icon;
 namespace Murmur.UI.Tray;
 
 /// <summary>
-/// Murmur's icon in the notification area: its home while the main window is hidden. Left click or "Open Murmur"
-/// raises <see cref="OpenRequested"/>, "Quit" raises <see cref="QuitRequested"/>. The icon and tooltip follow the
+/// Murmur's icon in the notification area: its home while the main window is hidden. Left click, Enter or Space on
+/// the focused icon (Win+B, then the arrow keys) or "Open Murmur" raises <see cref="OpenRequested"/>, "Quit" raises
+/// <see cref="QuitRequested"/>. The menu opens on a right click and from the keyboard (Shift+F10 or the menu key). The icon and tooltip follow the
 /// speech engine: a gradient dot when it is ready, a grey dot while it downloads, loads or has failed.
 /// <para>
 /// Adding the icon fails while Explorer's taskbar is not ready yet, which is likely right after sign-in, exactly when
@@ -117,6 +118,11 @@ public sealed partial class TrayIconHost : IDisposable
             ContextMenu = new ContextMenu { Items = { open, about, new Separator(), quit } },
         };
         _icon.TrayLeftMouseUp += (_, _) => OpenRequested?.Invoke();
+        // H.NotifyIcon only handles the mouse by itself; without these a keyboard-only user could neither open Murmur
+        // from the icon nor reach Quit.
+        _icon.TrayKeyboardSelect += (_, _) => OpenRequested?.Invoke();
+        _icon.TrayKeyboardKeySelect += (_, _) => OpenRequested?.Invoke();
+        _icon.TrayKeyboardContextMenu += (_, _) => ShowMenuFromKeyboard();
         _icon.TrayBalloonTipClicked += (_, _) => OpenRequested?.Invoke();
         _icon.TrayMouseMove += (_, _) => Update(rereadHotkey: false);
 
@@ -191,6 +197,22 @@ public sealed partial class TrayIconHost : IDisposable
     }
 
     private static bool IsCreated(TaskbarIcon icon) => icon.IsCreated;
+
+    /// <summary>Opens the menu at the notification area, where the keyboard focus is, rather than at the mouse.</summary>
+    private void ShowMenuFromKeyboard()
+    {
+        if (_icon is null)
+            return;
+
+        try
+        {
+            _icon.ShowContextMenu(TrayInfo.GetTrayLocation(0));
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning(ex, "Could not open the tray menu from the keyboard");
+        }
+    }
 
     private static void ShowBalloon(TaskbarIcon icon, string title, string message) =>
         icon.ShowNotification(title, message, NotificationIcon.Info);
@@ -312,7 +334,10 @@ public sealed partial class TrayIconHost : IDisposable
 
         var status = _engine.Status;
         if (status.State == EngineState.Ready && (rereadHotkey || DateTime.UtcNow - _hotkeyReadAt >= HotkeyRefreshInterval))
-            _hotkeyName = ReadHotkeyName();
+        {
+            _hotkeyReadAt = DateTime.UtcNow;
+            _hotkeyName = _settings.ReadHotkeyName(fallback: _hotkeyName); // unreadable settings keep the last name
+        }
 
         var ready = ShowsReadyIcon(status);
         if (_showingReadyIcon != ready)
@@ -328,20 +353,6 @@ public sealed partial class TrayIconHost : IDisposable
         {
             _icon.ToolTipText = toolTip;
             _logger.Debug("Tray tooltip: {ToolTip}", toolTip);
-        }
-    }
-
-    private string ReadHotkeyName()
-    {
-        _hotkeyReadAt = DateTime.UtcNow;
-        try
-        {
-            return _settings.Load().Hotkey.DisplayName;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.Warning(ex, "Could not read the hotkey for the tray tooltip");
-            return _hotkeyName;
         }
     }
 

@@ -18,6 +18,9 @@ public interface IHistoryStore
     /// </summary>
     HistoryPageResult Query(string? search, int limit, Guid? before);
 
+    /// <summary>The entry with <paramref name="id"/>, or null when the store does not hold it.</summary>
+    HistoryEntry? Find(Guid id);
+
     /// <returns><c>true</c> if an entry with that id existed and was removed.</returns>
     bool Delete(Guid id);
 

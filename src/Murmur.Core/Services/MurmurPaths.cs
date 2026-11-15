@@ -17,6 +17,9 @@ public sealed class MurmurPaths(string root)
     public string AudioDirectory { get; } = Path.Combine(root, "audio");
     public string LogsDirectory { get; } = Path.Combine(root, "Logs");
 
+    /// <summary>The WebView2 user data folder: the web UI's cache, cookies and local storage.</summary>
+    public string WebView2Directory { get; } = Path.Combine(root, "WebView2");
+
     /// <summary>Debug builds only: while this file exists, GPU detection reports no GPU at all.</summary>
     public string SimulateNoGpuFile { get; } = Path.Combine(root, "simulate-no-gpu");
 

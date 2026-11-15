@@ -10,14 +10,18 @@ namespace Murmur.Core.Speech;
 /// <param name="ProcessPath">This process's PATH, as it was when the process started.</param>
 /// <param name="MachinePath">The machine Path from the registry: what a process started from now on would get.</param>
 /// <param name="UserPath">The user Path from the registry, likewise.</param>
-/// <param name="CudaPath">The CUDA_PATH of the process, or of the machine when the process has none.</param>
+/// <param name="MachineCudaPath">
+/// The machine CUDA_PATH from the registry, which the toolkit's installer sets and only an administrator can change.
+/// </param>
+/// <param name="ProcessCudaPath">This process's CUDA_PATH, which the user's own environment can set.</param>
 /// <param name="ProgramFiles">The 64-bit Program Files folder, where the CUDA toolkit installs itself.</param>
 /// <param name="ListDirectories">The directories directly inside a folder; may throw when the folder is unreadable.</param>
 internal sealed record CudaSearchSources(
     string? ProcessPath,
     string? MachinePath,
     string? UserPath,
-    string? CudaPath,
+    string? MachineCudaPath,
+    string? ProcessCudaPath,
     string? ProgramFiles,
     Func<string, IEnumerable<string>> ListDirectories);
 
@@ -27,6 +31,12 @@ internal sealed record CudaSearchSources(
 /// is found at the next start: a running process never sees the PATH change, and neither does the Microsoft Store
 /// build, whose DLL search ignores PATH altogether (see <see cref="CudaRuntimeLoader"/>).
 /// </summary>
+/// <remarks>
+/// The DLLs are loaded by full path with no signature check, so the places only an administrator can write come
+/// first: the toolkit as the machine's CUDA_PATH and Program Files have it. The PATH entries and the process's
+/// CUDA_PATH, which the user's own environment controls, come after, so a DLL planted in a user-writable folder cannot
+/// take the place of an installed toolkit.
+/// </remarks>
 internal static partial class CudaRuntimeSearch
 {
     private const string MachineEnvironmentKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
@@ -36,20 +46,21 @@ internal static partial class CudaRuntimeSearch
     private static readonly ILogger Logger = Log.ForContext(typeof(CudaRuntimeSearch));
 
     /// <summary>
-    /// The candidate directories in search order: the process PATH, the machine Path, the user Path, CUDA_PATH's
-    /// <c>bin\x64</c> then <c>bin</c>, then each <c>v13.*</c> toolkit folder under Program Files, newest first, each as
-    /// <c>bin\x64</c> then <c>bin</c>. Entries that are not fully qualified are dropped, and so are repeats (ignoring
-    /// case and a trailing separator), keeping the first.
+    /// The candidate directories in search order: the machine CUDA_PATH's <c>bin\x64</c> then <c>bin</c>, each
+    /// <c>v13.*</c> toolkit folder under Program Files, newest first, each as <c>bin\x64</c> then <c>bin</c>, the
+    /// process CUDA_PATH likewise, then the process PATH, the machine Path and the user Path. Entries that are not
+    /// fully qualified are dropped, and so are repeats (ignoring case and a trailing separator), keeping the first.
     /// </summary>
     internal static IReadOnlyList<string> Directories(CudaSearchSources sources)
     {
         var directories = new List<string>();
+        directories.AddRange(BinDirectories(Clean(sources.MachineCudaPath)));
+        foreach (var toolkit in ToolkitDirectories(sources))
+            directories.AddRange(BinDirectories(toolkit));
+        directories.AddRange(BinDirectories(Clean(sources.ProcessCudaPath)));
         directories.AddRange(SplitPath(sources.ProcessPath));
         directories.AddRange(SplitPath(sources.MachinePath));
         directories.AddRange(SplitPath(sources.UserPath));
-        directories.AddRange(BinDirectories(Clean(sources.CudaPath)));
-        foreach (var toolkit in ToolkitDirectories(sources))
-            directories.AddRange(BinDirectories(toolkit));
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return directories
@@ -60,14 +71,12 @@ internal static partial class CudaRuntimeSearch
     /// <summary>The search sources of this PC. Never throws: a source that cannot be read is null.</summary>
     internal static CudaSearchSources FromSystem()
     {
-        var processCudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
         return new CudaSearchSources(
             Environment.GetEnvironmentVariable("PATH"),
             ReadRegistryValue(Registry.LocalMachine, MachineEnvironmentKey, "Path"),
             ReadRegistryValue(Registry.CurrentUser, UserEnvironmentKey, "Path"),
-            string.IsNullOrWhiteSpace(processCudaPath)
-                ? ReadRegistryValue(Registry.LocalMachine, MachineEnvironmentKey, "CUDA_PATH")
-                : processCudaPath,
+            ReadRegistryValue(Registry.LocalMachine, MachineEnvironmentKey, "CUDA_PATH"),
+            Environment.GetEnvironmentVariable("CUDA_PATH"),
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
             // Most PCs have no toolkit, and a missing folder is not worth an exception on every start.
             folder => Directory.Exists(folder) ? Directory.EnumerateDirectories(folder, ToolkitMajorFolder + "*") : []);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiClient } from "../../interop/WebViewApiClient";
 
 type CopyState = "idle" | "copied" | "failed";
 
@@ -10,16 +11,21 @@ const LABELS: Record<CopyState, string> = {
   failed: "Copy failed",
 };
 
-export default function CopyButton({ text }: { text: string }) {
+/**
+ * Copies a history entry's text. Through Murmur rather than navigator.clipboard, so the copy stays out of Win+V
+ * clipboard history and the cloud clipboard, like every other clipboard write Murmur makes.
+ */
+export default function CopyButton({ entryId }: { entryId: string }) {
   const [state, setState] = useState<CopyState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
   async function copy() {
-    let next: CopyState = "copied";
+    let next: CopyState;
     try {
-      await navigator.clipboard.writeText(text);
+      // False when the entry is gone or the clipboard could not be written.
+      next = (await apiClient.call<boolean>("history", "copy", { id: entryId })) ? "copied" : "failed";
     } catch {
       next = "failed";
     }

@@ -4,6 +4,7 @@
         xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:pill="clr-namespace:Murmur.UI.Pill"
+        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
         mc:Ignorable="po"
         Title="Murmur recording indicator"
         WindowStyle="None"
@@ -17,23 +18,37 @@
         SizeToContent="WidthAndHeight"
         FontFamily="Segoe UI">
 
+  <!-- The colours (PillBackgroundBrush and the rest) are app resources, in Themes/PillColors.xaml. -->
   <Window.Resources>
-    <SolidColorBrush x:Key="PillBackgroundBrush" Color="#E0161820" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillBorderBrush" Color="#1FFFFFFF" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillRecordingBrush" Color="#FF5A5F" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillRecordingHaloBrush" Color="#2EFF5A5F" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillAccentBrush" Color="#8FB3FF" po:Freeze="True" />
-    <SolidColorBrush x:Key="PillTextBrush" Color="#DFE3EE" po:Freeze="True" />
-
     <pill:BarHeightConverter x:Key="BarHeightConverter" />
     <SineEase x:Key="PulseEasing" EasingMode="EaseInOut" po:Freeze="True" />
 
-    <!-- The three faces of the pill are all collapsed until the view model's Mode selects one. -->
+    <!-- The faces of the pill are all collapsed until the view model's Mode selects one. -->
     <Style x:Key="ModeSection" TargetType="FrameworkElement">
       <Setter Property="Visibility" Value="Collapsed" />
     </Style>
 
-    <!-- Three dots that pulse in turn (1 s cycle, 0.15 s apart) for as long as they are visible. -->
+    <!-- A part of the recording face that only shows once the microphone is live. -->
+    <Style x:Key="ListeningOnly" TargetType="FrameworkElement" BasedOn="{StaticResource ModeSection}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Mode}" Value="Listening">
+          <Setter Property="Visibility" Value="Visible" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <!-- A part of the recording face that only shows while the microphone is being started. -->
+    <Style x:Key="StartingOnly" TargetType="FrameworkElement" BasedOn="{StaticResource ModeSection}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Mode}" Value="Starting">
+          <Setter Property="Visibility" Value="Visible" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <!-- Three dots that pulse in turn (1 s cycle, 0.15 s apart) for as long as they are visible. The control's Tag says
+         whether Windows' animation effects are on (Settings > Accessibility > Visual effects); with them off the dots
+         stand still, half lit. -->
     <ControlTemplate x:Key="PulsingDotsTemplate" TargetType="Control">
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <Ellipse x:Name="Dot1" Width="4" Height="4" Opacity="0.25" Fill="{DynamicResource PillAccentBrush}" />
@@ -41,8 +56,24 @@
         <Ellipse x:Name="Dot3" Width="4" Height="4" Opacity="0.25" Margin="3,0,0,0" Fill="{DynamicResource PillAccentBrush}" />
       </StackPanel>
       <ControlTemplate.Triggers>
-        <Trigger Property="IsVisible" Value="True">
-          <Trigger.EnterActions>
+        <Trigger Property="Tag">
+          <Trigger.Value>
+            <sys:Boolean>False</sys:Boolean>
+          </Trigger.Value>
+          <Setter TargetName="Dot1" Property="Opacity" Value="0.6" />
+          <Setter TargetName="Dot2" Property="Opacity" Value="0.6" />
+          <Setter TargetName="Dot3" Property="Opacity" Value="0.6" />
+        </Trigger>
+        <MultiTrigger>
+          <MultiTrigger.Conditions>
+            <Condition Property="IsVisible" Value="True" />
+            <Condition Property="Tag">
+              <Condition.Value>
+                <sys:Boolean>True</sys:Boolean>
+              </Condition.Value>
+            </Condition>
+          </MultiTrigger.Conditions>
+          <MultiTrigger.EnterActions>
             <BeginStoryboard Name="Pulse">
               <Storyboard>
                 <DoubleAnimation Storyboard.TargetName="Dot1" Storyboard.TargetProperty="Opacity"
@@ -56,11 +87,11 @@
                                  EasingFunction="{StaticResource PulseEasing}" />
               </Storyboard>
             </BeginStoryboard>
-          </Trigger.EnterActions>
-          <Trigger.ExitActions>
+          </MultiTrigger.EnterActions>
+          <MultiTrigger.ExitActions>
             <RemoveStoryboard BeginStoryboardName="Pulse" />
-          </Trigger.ExitActions>
-        </Trigger>
+          </MultiTrigger.ExitActions>
+        </MultiTrigger>
       </ControlTemplate.Triggers>
     </ControlTemplate>
   </Window.Resources>
@@ -78,17 +109,22 @@
           Background="{DynamicResource PillBackgroundBrush}"
           IsHitTestVisible="False">
     <Border.Effect>
-      <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.45" Color="Black" />
+      <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.45" Color="{DynamicResource PillShadowColor}" />
     </Border.Effect>
 
     <!-- MinHeight keeps the capsule the same height in every mode, so it only changes width. -->
     <Grid MinHeight="{x:Static pill:BarHeightConverter.MaxHeight}">
 
-      <!-- Listening: red dot and the level bars -->
+      <!-- The recording face, the same size in both of its modes so the pill does not move between them.
+           Starting: a hollow dot and dimmed, flat bars, because nothing is recorded until the microphone delivers.
+           Listening: the red dot and the level bars. -->
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <StackPanel.Style>
           <Style TargetType="StackPanel" BasedOn="{StaticResource ModeSection}">
             <Style.Triggers>
+              <DataTrigger Binding="{Binding Mode}" Value="Starting">
+                <Setter Property="Visibility" Value="Visible" />
+              </DataTrigger>
               <DataTrigger Binding="{Binding Mode}" Value="Listening">
                 <Setter Property="Visibility" Value="Visible" />
               </DataTrigger>
@@ -97,8 +133,15 @@
         </StackPanel.Style>
 
         <Grid Width="7" Height="7" Margin="0,0,8,0" VerticalAlignment="Center">
-          <Ellipse Margin="-3" Fill="{DynamicResource PillRecordingHaloBrush}" />
-          <Ellipse Fill="{DynamicResource PillRecordingBrush}" />
+          <Ellipse x:Name="StartingDot"
+                   StrokeThickness="1.5"
+                   Opacity="0.55"
+                   Stroke="{DynamicResource PillTextBrush}"
+                   Style="{StaticResource StartingOnly}" />
+          <Grid x:Name="RecordingDot" Style="{StaticResource ListeningOnly}">
+            <Ellipse Margin="-3" Fill="{DynamicResource PillRecordingHaloBrush}" />
+            <Ellipse Fill="{DynamicResource PillRecordingBrush}" />
+          </Grid>
         </Grid>
 
         <!-- 2 px between bars: 1 px either side of each, pulled back in at the ends. -->
@@ -107,6 +150,15 @@
                       Margin="-1,0"
                       Focusable="False"
                       IsTabStop="False">
+          <ItemsControl.Style>
+            <Style TargetType="ItemsControl">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding Mode}" Value="Starting">
+                  <Setter Property="Opacity" Value="0.35" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </ItemsControl.Style>
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <StackPanel Orientation="Horizontal" />
@@ -127,7 +179,11 @@
       </StackPanel>
 
       <!-- Transcribing: three pulsing dots -->
-      <Control Template="{StaticResource PulsingDotsTemplate}" Focusable="False" IsTabStop="False">
+      <Control x:Name="TranscribingDots"
+               Template="{StaticResource PulsingDotsTemplate}"
+               Tag="{DynamicResource {x:Static SystemParameters.ClientAreaAnimationKey}}"
+               Focusable="False"
+               IsTabStop="False">
         <Control.Style>
           <Style TargetType="Control" BasedOn="{StaticResource ModeSection}">
             <Style.Triggers>
@@ -139,8 +195,10 @@
         </Control.Style>
       </Control>
 
-      <!-- Notice: a short message -->
-      <TextBlock Text="{Binding NoticeText}"
+      <!-- Notice: a short message. A live region, and PillWindow.Announce raises a notification for screen readers. -->
+      <TextBlock x:Name="NoticeTextBlock"
+                 Text="{Binding NoticeText}"
+                 AutomationProperties.LiveSetting="Assertive"
                  FontSize="12"
                  VerticalAlignment="Center"
                  TextWrapping="NoWrap"

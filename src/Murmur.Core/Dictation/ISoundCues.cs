@@ -8,4 +8,10 @@ public interface ISoundCues
 
     /// <summary>Recording has stopped.</summary>
     void PlayStop();
+
+    /// <summary>
+    /// The dictation went wrong or needs the user: nothing was heard, the text was not pasted, or nothing could be
+    /// recorded. The pill shows why; this makes it noticeable without looking.
+    /// </summary>
+    void PlayProblem();
 }

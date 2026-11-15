@@ -22,7 +22,8 @@
   padding: 0;
   margin: 0;
   font-size: 11px;
-  color: var(--dim);
+  /* Not --dim: at 11 px on --card that is 4.1:1, below the 4.5:1 AA minimum; --muted is 6.0:1. */
+  color: var(--muted);
   list-style: none;
 }
 

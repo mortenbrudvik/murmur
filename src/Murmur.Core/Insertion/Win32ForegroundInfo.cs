@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Murmur.Core.Interop;
+using Serilog;
 
 namespace Murmur.Core.Insertion;
 
@@ -8,6 +9,8 @@ namespace Murmur.Core.Insertion;
 public sealed class Win32ForegroundInfo : IForegroundInfo
 {
     internal const string UnknownApp = "Unknown app";
+
+    private static readonly ILogger Logger = Log.ForContext<Win32ForegroundInfo>();
 
     public ForegroundTarget Capture()
     {
@@ -70,6 +73,7 @@ public sealed class Win32ForegroundInfo : IForegroundInfo
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Fall back to the file name.
+            Logger.Debug(ex, "Could not read the file description of {Path}; using its file name", path);
         }
 
         return Path.GetFileNameWithoutExtension(path);

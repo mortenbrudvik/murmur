@@ -13,6 +13,14 @@ namespace Murmur.Core.Speech;
 /// otherwise the CPU. Warms each model up with a second of zeros, so the one-off cost of the first run is paid while
 /// loading rather than on the first dictation.
 /// </summary>
+/// <remarks>
+/// Zeros are enough to run the decoder as well as the encoder: Whisper answers "Thank you." for them. On Vulkan the
+/// one-off cost is the driver compiling shaders, which it caches on disk per executable, so it comes back after an
+/// install or a driver update. Measured 2026-11-15 with large-v3-turbo on an RTX 3090 and a cold shader cache: without
+/// a warm-up the first 5 s dictation took 18.5 s; with this one the warm-up took 13-20 s and the first dictation
+/// 0.55-0.8 s against 0.3-0.5 s for the second. A spoken clip as the warm-up saved at most a few hundred milliseconds
+/// more, and a synthetic vowel none. With a warm cache, and on CUDA, the first dictation is as fast as the second.
+/// </remarks>
 public sealed class WhisperModelLoader : IWhisperModelLoader
 {
     private const int SampleRate = 16000;

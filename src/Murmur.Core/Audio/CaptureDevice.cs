@@ -12,6 +12,9 @@ namespace Murmur.Core.Audio;
 /// </summary>
 internal interface ICaptureDevice : IDisposable
 {
+    /// <summary>The endpoint's id, read when the device is opened. Tells whether an open device is the one asked for.</summary>
+    string Id { get; }
+
     /// <summary>Friendly name, read when the device is opened (never touches the device afterwards).</summary>
     string Name { get; }
 
@@ -36,12 +39,15 @@ internal sealed class WasapiCaptureDevice : ICaptureDevice
     private readonly MMDevice _device;
     private readonly WasapiCapture _capture;
 
-    private WasapiCaptureDevice(MMDevice device, WasapiCapture capture, string name)
+    private WasapiCaptureDevice(MMDevice device, WasapiCapture capture, string id, string name)
     {
         _device = device;
         _capture = capture;
+        Id = id;
         Name = name;
     }
+
+    public string Id { get; }
 
     public string Name { get; }
 
@@ -67,15 +73,38 @@ internal sealed class WasapiCaptureDevice : ICaptureDevice
         try
         {
             // Read now, so nothing touches the device's property store once recording has begun.
+            var id = device.ID;
             var name = device.FriendlyName;
             capture = new WasapiCapture(device, UseEventSync, BufferMilliseconds);
-            return new WasapiCaptureDevice(device, capture, name);
+            return new WasapiCaptureDevice(device, capture, id, name);
         }
         catch
         {
             capture?.Dispose();
             device.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// The id of the Windows default capture device (<c>Role.Console</c>), or null when there is none or it cannot be
+    /// read. Never throws: it only decides whether an open microphone can be used again.
+    /// </summary>
+    public static string? DefaultId()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            if (!enumerator.HasDefaultAudioEndpoint(DataFlow.Capture, Role.Console))
+                return null;
+
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+            return device.ID;
+        }
+        catch (Exception ex)
+        {
+            Log.ForContext<WasapiCaptureDevice>().Debug(ex, "Could not read the default microphone's id");
+            return null;
         }
     }
 

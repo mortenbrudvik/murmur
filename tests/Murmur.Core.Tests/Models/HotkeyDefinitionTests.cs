@@ -32,6 +32,11 @@ public class HotkeyDefinitionTests
     [InlineData(0x73, HotkeyModifiers.Ctrl, true)]                           // Ctrl+F4
     [InlineData(0x73, HotkeyModifiers.None, true)]                           // F4 alone
     [InlineData(0x20, HotkeyModifiers.Alt, true)]                            // Alt+Space
+    [InlineData(0xFE, HotkeyModifiers.Ctrl, true)]                           // the highest virtual-key code
+    [InlineData(0, HotkeyModifiers.Ctrl, false)]                             // no key
+    [InlineData(0xFF, HotkeyModifiers.Ctrl, false)]                          // past the virtual-key codes
+    [InlineData(-1, HotkeyModifiers.Ctrl, false)]
+    [InlineData(100_000, HotkeyModifiers.Ctrl, false)]
     public void IsValid(int vk, HotkeyModifiers mods, bool expected) =>
         new HotkeyDefinition(vk, mods, "x").IsValid.ShouldBe(expected);
 }

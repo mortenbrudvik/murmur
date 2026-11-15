@@ -1,10 +1,10 @@
-using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using Autofac;
 using MediatR;
 using Murmur.Common;
+using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
 using Murmur.Core.Features.App;
 using Murmur.Core.Features.Engine;
@@ -23,6 +23,7 @@ using Murmur.Core.Speech;
 using Murmur.Interop;
 using Murmur.UI.Pill;
 using Murmur.UI.Splash;
+using Murmur.UI.Themes;
 using Murmur.UI.Tray;
 using Serilog;
 using Wpf.Ui.Appearance;
@@ -50,8 +51,15 @@ public partial class App : Application
     private SplashViewModel? _splashModel;
     private SplashSession? _splashSession;
 
-    /// <summary>Set once Murmur is really exiting; until then closing the main window only hides it.</summary>
-    public static bool IsQuitting { get; private set; }
+    // Knows whether Murmur is really exiting; until then closing the main window only hides it. Null before the
+    // container exists, when there is no window to close yet.
+    private AppLifecycle? _lifecycle;
+
+    private bool IsQuitting => _lifecycle?.IsQuitting == true;
+
+    // A property, not a field: App exists before ConfigureLogging runs, and a context logger taken then would wrap the
+    // silent default logger for good.
+    private static ILogger Logger => Log.ForContext<App>();
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -82,7 +90,7 @@ public partial class App : Application
     {
         // 1. Logging
         ConfigureLogging();
-        Log.Information("Murmur starting");
+        Logger.Information("Murmur starting");
         var launch = LaunchArguments.Parse(args);
 
         // 2. WebView2
@@ -99,19 +107,19 @@ public partial class App : Application
 
         DispatcherUnhandledException += (_, args) =>
         {
-            Log.Error(args.Exception, "UI thread exception");
+            Logger.Error(args.Exception, "UI thread exception");
             args.Handled = args.Exception is not (OutOfMemoryException or StackOverflowException);
         };
 
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
             var ex = args.ExceptionObject as Exception;
-            Log.Fatal(ex, "Unhandled exception");
+            Logger.Fatal(ex, "Unhandled exception");
         };
 
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
-            Log.Error(args.Exception, "Unobserved task exception");
+            Logger.Error(args.Exception, "Unobserved task exception");
             args.SetObserved();
         };
 
@@ -121,7 +129,7 @@ public partial class App : Application
         if (!_guard.TryAcquire(launch.Restarted ? RestartWait : TimeSpan.Zero))
         {
             if (launch.Restarted)
-                Log.Warning("The Murmur that started this one did not exit within {Wait}", RestartWait);
+                Logger.Warning("The Murmur that started this one did not exit within {Wait}", RestartWait);
 
             _guard.SignalExisting();
             Shutdown();
@@ -162,18 +170,20 @@ public partial class App : Application
     {
         // 5. Container and API
         _container = AutofacBootstrapper.Bootstrap();
+        _lifecycle = _container.Resolve<AppLifecycle>();
 
         // Set once, here, before the main window exists and so before any IPC can read or take it.
         _container.Resolve<LaunchOptions>().OpenPage = launch.Page;
 
         // Decides how Murmur starts with Windows (see AppModule.RegisterStartup) and how it tells a sign-in start.
         var identity = _container.Resolve<IPackageIdentity>();
-        Log.Information("Running {Channel}", identity.IsPackaged ? "from its MSIX package" : "unpackaged");
+        Logger.Information("Running {Channel}", identity.IsPackaged ? "from its MSIX package" : "unpackaged");
 
         var registry = _container.Resolve<ApiRegistry>();
         registry.Register<GetHistoryRequest>("history", "get");
         registry.Register<DeleteHistoryEntryRequest>("history", "delete");
         registry.Register<ClearHistoryRequest>("history", "clear");
+        registry.Register<CopyHistoryEntryRequest>("history", "copy");
         registry.Register<GetVocabularyRequest>("vocabulary", "get");
         registry.Register<UpdateVocabularyRequest>("vocabulary", "update");
         registry.Register<GetSettingsRequest>("settings", "get");
@@ -189,6 +199,7 @@ public partial class App : Application
         registry.Register<SetModelChoiceRequest>("models", "setChoice");
         registry.Register<OpenLinkRequest>("app", "openLink");
         registry.Register<RestartAppRequest>("app", "restart");
+        registry.Register<QuitAppRequest>("app", "quit");
         registry.Register<GetInputStatusRequest>("app", "getInputStatus");
         registry.Register<GetAboutRequest>("app", "getAbout");
         registry.Register<UiReadyRequest>("app", "ready");
@@ -209,7 +220,9 @@ public partial class App : Application
         // click on it activates a window nobody can see: take that as "show me the window now".
         _mainWindow.Activated += (_, _) => SkipSplash();
 
-        // 7. The pill's window handle exists from the start, so its first Show is quick.
+        // 7. The pill's window handle exists from the start, so its first Show is quick. Its colours follow a Windows
+        // contrast theme.
+        PillContrast.Follow(Resources);
         var pill = _container.Resolve<PillWindow>();
         new WindowInteropHelper(pill).EnsureHandle();
 
@@ -233,8 +246,14 @@ public partial class App : Application
         var controller = _container.Resolve<DictationController>();
         StartInputHooksAsync(_container, controller).FireAndForget();
 
-        // "Restart Murmur" is asked for by an IPC handler, on a pool thread.
-        _container.Resolve<AppLifecycle>().RestartRequested += () => Dispatcher.BeginInvoke(Restart);
+        // With "keep the microphone ready" on, the microphone opens now, in the background, so that the first
+        // dictation is as quick as the ones after it.
+        KeepMicrophoneReady(_container.Resolve<MicrophoneReadiness>(), _container.Resolve<ISettingsService>());
+
+        // "Restart Murmur" and "Quit Murmur" are asked for by IPC handlers, on a pool thread. A restart has already
+        // started the new Murmur, which waits for this one to let go of the single-instance mutex (RestartWait).
+        _lifecycle.RestartRequested += () => Dispatcher.BeginInvoke(Quit);
+        _lifecycle.QuitRequested += () => Dispatcher.BeginInvoke(Quit);
 
         // 10. Speech engine: after the first-run decision, downloads the model if needed, loads it and warms it up in
         // the background. Its status changes reach the main window as a notification; subscribed first, so even the
@@ -301,7 +320,7 @@ public partial class App : Application
         // Raised on whichever thread closed the gate: a timer's, the IPC call's that reported the UI ready, or this one.
         gate.Closed += reason => Dispatcher.BeginInvoke(() =>
         {
-            Log.Information("The splash closes: {Reason}", reason);
+            Logger.Information("The splash closes: {Reason}", reason);
             session.HandOver();
         });
         splash.Show();
@@ -349,7 +368,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Could not pre-load the history; it will be read when first needed");
+            Logger.Warning(ex, "Could not pre-load the history; it will be read when first needed");
         }
     }
 
@@ -371,7 +390,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "The first-run decision failed; starting the speech engine anyway");
+            Logger.Error(ex, "The first-run decision failed; starting the speech engine anyway");
         }
 
         await engine.InitializeAsync(_appCts.Token);
@@ -393,61 +412,40 @@ public partial class App : Application
     internal static bool ShouldShowSplash(LaunchArguments launch, IPackageIdentity identity) =>
         !IsSignInStart(launch, identity);
 
-    /// <summary>
-    /// Starts a new Murmur on Settings and quits this one. The new instance waits for this one to let go of the
-    /// single-instance mutex (<see cref="RestartWait"/>). If the new one cannot be started, this one keeps running.
-    /// </summary>
-    private void Restart()
-    {
-        if (IsQuitting)
-            return;
-
-        Log.Information("Restarting Murmur");
-        try
-        {
-            // Whether a child started this way keeps the MSIX package identity is checked in Task 11 of the first-run
-            // setup plan (packaged install); until then, no fallback.
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, LaunchArguments.RestartArguments) { UseShellExecute = false })?.Dispose();
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Could not start a new Murmur; staying open");
-            return;
-        }
-
-        Quit();
-    }
-
     /// <summary>Shows what <see cref="TrayNotifier"/> finds worth a notification. Runs on the UI thread.</summary>
     private void NotifyTray(TrayNotifier notifier, ISettingsService settings, InputStatus input, EngineStatus status)
     {
         if (IsQuitting)
             return;
 
-        // Only a ready notice names the hotkey, so the file is not read for every download progress update.
-        var hotkeyName = status.State == EngineState.Ready ? ReadHotkeyName(settings) : HotkeyDefinition.Default.DisplayName;
+        // Only a ready notice names the hotkey, so the settings are not read for every download progress update.
+        var defaultName = HotkeyDefinition.Default.DisplayName;
+        var hotkeyName = status.State == EngineState.Ready ? settings.ReadHotkeyName(fallback: defaultName) : defaultName;
         var notice = notifier.OnStatus(status, _mainWindow?.IsActive == true, hotkeyName, input.HookInstalled);
         if (notice is not null)
             _tray?.ShowNotification(notice.Title, notice.Message);
     }
 
-    private static string ReadHotkeyName(ISettingsService settings)
+    /// <summary>
+    /// Applies the saved "keep the microphone ready" setting. Settings that cannot be read leave it off, which is its
+    /// default; that must not keep Murmur from starting.
+    /// </summary>
+    private static void KeepMicrophoneReady(MicrophoneReadiness microphone, ISettingsService settings)
     {
         try
         {
-            return settings.Load().Hotkey.DisplayName;
+            microphone.Apply(settings.Load());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "Could not read the hotkey for the tray notification");
-            return HotkeyDefinition.Default.DisplayName;
+            Logger.Warning(ex, "Could not read the settings to keep the microphone ready");
         }
     }
 
     /// <summary>Leaves nothing behind (no global hooks, no tray icon, no claim on the single instance), says why, and exits.</summary>
     private void FailStartup(Exception ex)
     {
-        Log.Fatal(ex, "Murmur could not start");
+        Logger.Fatal(ex, "Murmur could not start");
         StopInputAndTray();
         _guard?.Dispose();
 
@@ -463,7 +461,7 @@ public partial class App : Application
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
         // Sign-out or shutdown: WPF shuts the app down next, so the main window must really close.
-        IsQuitting = true;
+        _lifecycle?.MarkQuitting();
         base.OnSessionEnding(e);
     }
 
@@ -475,7 +473,7 @@ public partial class App : Application
         _container?.Dispose();
         _guard?.Dispose();
 
-        Log.Information("Murmur stopped");
+        Logger.Information("Murmur stopped");
         Log.CloseAndFlush();
         base.OnExit(e);
     }
@@ -503,9 +501,9 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Starts the keyboard hook, which <see cref="InputHookStarter"/> tries twice: the first attempt runs here, the wait
-    /// and the second attempt do not hold up the UI thread. What the hook needs is resolved before the first attempt,
-    /// so a service that cannot be built still fails the start-up instead of passing for a refused hook.
+    /// Starts the keyboard hook, which <see cref="InputHookStarter"/> tries twice without holding up the UI thread. What
+    /// the hook needs is resolved here, before the first attempt, so a service that cannot be built still fails the
+    /// start-up instead of passing for a refused hook.
     /// </summary>
     private Task StartInputHooksAsync(IContainer container, DictationController controller)
     {
@@ -564,7 +562,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Could not update the start-with-Windows entry");
+            Logger.Warning(ex, "Could not update the start-with-Windows entry");
         }
     }
 
@@ -589,7 +587,7 @@ public partial class App : Application
         if (IsQuitting)
             return;
 
-        Log.Information("Quit requested");
+        Logger.Information("Quit requested");
         StopInputAndTray();
 
         // The speech engine is deliberately not disposed: freeing the native model while a transcription may still be
@@ -600,10 +598,11 @@ public partial class App : Application
     /// <summary>Stops taking hotkeys, removes the tray icon and cancels background work (the model download).</summary>
     private void StopInputAndTray()
     {
-        IsQuitting = true;
+        _lifecycle?.MarkQuitting();
 
         // A splash still up goes at once, without its hand-over.
         _splashSession?.Abandon();
+
 
         _inputHooks?.Dispose();
         _tray?.Dispose();
@@ -617,8 +616,11 @@ public partial class App : Application
             var version = Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString();
             return !string.IsNullOrEmpty(version);
         }
-        catch
+        catch (Exception ex)
         {
+            // Usually WebView2RuntimeNotFoundException, but any failure is reported to the user as a missing runtime,
+            // so the log must say which it was.
+            Logger.Warning(ex, "Could not find the WebView2 runtime");
             return false;
         }
     }

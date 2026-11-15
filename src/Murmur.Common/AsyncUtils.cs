@@ -4,11 +4,23 @@ namespace Murmur.Common;
 
 public static class AsyncUtils
 {
-    public static void FireAndForget(this Task t)
-    {
-        t.ContinueWith(tsk =>
-        {
-            Log.Error(tsk.Exception, "FireAndForget task faulted");
-        }, TaskContinuationOptions.OnlyOnFaulted);
-    }
+    /// <summary>Lets <paramref name="t"/> run on unwatched; if it faults, the fault is logged instead of going unobserved.</summary>
+    public static void FireAndForget(this Task t) => _ = t.LogFault(logger: null);
+
+    /// <summary>
+    /// The continuation behind <see cref="FireAndForget"/>: logs <paramref name="t"/>'s fault, if any, to
+    /// <paramref name="logger"/> (null: the global logger at that moment). It always completes, whether <paramref name="t"/>
+    /// succeeded, faulted or was cancelled, so a test can wait for it instead of sleeping.
+    /// </summary>
+    internal static Task LogFault(this Task t, ILogger? logger) =>
+        t.ContinueWith(
+            static (task, state) =>
+            {
+                if (task.IsFaulted)
+                    ((ILogger?)state ?? Log.Logger).Error(task.Exception, "FireAndForget task faulted");
+            },
+            logger,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 }

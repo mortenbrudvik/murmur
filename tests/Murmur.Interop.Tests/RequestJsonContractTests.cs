@@ -35,6 +35,20 @@ public class RequestJsonContractTests
         request.SoundCues.ShouldBeTrue();
         request.StartWithWindows.ShouldBeFalse();
         request.KeepAudio.ShouldBeFalse();
+        request.KeepMicrophoneReady.ShouldBeFalse(); // left out of the JSON: off
+    }
+
+    [Fact]
+    public void UpdateSettingsRequest_KeepMicrophoneReady_IsReadFromTheJson()
+    {
+        const string json = """
+            {"hotkey":{"virtualKey":32,"modifiers":"ctrl","displayName":"Ctrl+Space"},"microphoneId":null,"soundCues":true,"startWithWindows":false,"keepAudio":false,"keepMicrophoneReady":true}
+            """;
+
+        var request = (UpdateSettingsRequest?)JsonUtils.Deserialize(json, typeof(UpdateSettingsRequest));
+
+        request.ShouldNotBeNull();
+        request.KeepMicrophoneReady.ShouldBeTrue();
     }
 
     [Fact]
@@ -97,6 +111,16 @@ public class RequestJsonContractTests
 
         json.ShouldContain("\"entries\":[{\"id\":\"11111111-2222-3333-4444-555555555555\"");
         json.ShouldContain("\"hasMore\":true");
+    }
+
+    [Fact]
+    public void CopyHistoryEntryRequest_ReadsTheIdFromAString()
+    {
+        var id = Guid.NewGuid();
+
+        var request = (CopyHistoryEntryRequest?)JsonUtils.Deserialize($$"""{"id":"{{id}}"}""", typeof(CopyHistoryEntryRequest));
+
+        request.ShouldBe(new CopyHistoryEntryRequest(id));
     }
 
     [Fact]
@@ -206,12 +230,30 @@ public class RequestJsonContractTests
         request.ShouldBe(new OpenLinkRequest(expected));
     }
 
+    /// <summary>
+    /// A number, or a name the enum does not have, is refused: the bridge then answers with an error instead of handing
+    /// a handler a value no member has.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(OpenLinkRequest), """{"target":7}""")]
+    [InlineData(typeof(OpenLinkRequest), """{"target":"0"}""")]
+    [InlineData(typeof(OpenLinkRequest), """{"target":"changelog"}""")]
+    [InlineData(typeof(SetModelChoiceRequest), """{"model":1}""")]
+    [InlineData(typeof(UpdateSetupStateRequest), """{"step":42}""")]
+    [InlineData(typeof(UpdateSettingsRequest), """{"hotkey":{"virtualKey":32,"modifiers":3,"displayName":"x"},"soundCues":true,"startWithWindows":false,"keepAudio":false}""")]
+    [InlineData(typeof(UpdateSettingsRequest), """{"hotkey":{"virtualKey":32,"modifiers":"ctrl, hyper","displayName":"x"},"soundCues":true,"startWithWindows":false,"keepAudio":false}""")]
+    public void Requests_EnumAsNumberOrUnknownName_AreRefused(Type requestType, string json)
+    {
+        Should.Throw<System.Text.Json.JsonException>(() => JsonUtils.Deserialize(json, requestType));
+    }
+
     [Fact]
     public void ParameterlessSetupRequests_DeserializeFromAnEmptyObject()
     {
         JsonUtils.Deserialize("{}", typeof(GetSetupStateRequest)).ShouldBe(new GetSetupStateRequest());
         JsonUtils.Deserialize("{}", typeof(GetModelChoiceRequest)).ShouldBe(new GetModelChoiceRequest());
         JsonUtils.Deserialize("{}", typeof(RestartAppRequest)).ShouldBe(new RestartAppRequest());
+        JsonUtils.Deserialize("{}", typeof(QuitAppRequest)).ShouldBe(new QuitAppRequest());
         JsonUtils.Deserialize("{}", typeof(GetInputStatusRequest)).ShouldBe(new GetInputStatusRequest());
     }
 

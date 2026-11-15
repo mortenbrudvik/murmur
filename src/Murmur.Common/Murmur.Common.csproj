@@ -4,4 +4,8 @@
     <PackageReference Include="Serilog" Version="4.*" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Murmur.Core.Tests" />
+  </ItemGroup>
+
 </Project>

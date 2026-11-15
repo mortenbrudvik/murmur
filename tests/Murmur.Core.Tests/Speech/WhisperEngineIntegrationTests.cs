@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Speech.AudioFormat;
 using System.Speech.Synthesis;
+using Murmur.Core.Audio;
 using Murmur.Core.Hardware;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
@@ -12,69 +13,115 @@ using Shouldly;
 namespace Murmur.Core.Tests.Speech;
 
 /// <summary>
-/// Loads the real model on the real GPU, built from the same parts as the app: the app's own settings and models
-/// folder (<see cref="MurmurPaths.Default"/>), GPU detection, the CUDA runtime search and Whisper.net. The model is the
-/// one the settings choose, which a PC that already has the large model keeps; like the app, it saves that choice when
-/// the settings have none yet. A PC with no model downloads it once (about 1.6 GB for the large one), so later runs and
-/// the app itself reuse it. Like the app, starting the engine deletes every other catalog model's files in that real
-/// models folder once the chosen one is Ready, so a PC that keeps both models loses the one the settings do not choose.
+/// Loads the real model on the real GPU, built from the same parts as the app: settings, GPU detection, the CUDA
+/// runtime search and Whisper.net. Everything the engine persists goes to a temporary data root, so the app's own
+/// settings and models folder (<see cref="MurmurPaths.Default"/>) are never written to. The fresh settings resolve to
+/// the model the GPU suits; that model is copied from the app's models folder when it is there, and otherwise
+/// downloaded into the temporary root (about 1.6 GB for the large model, 488 MB for the small one). The temporary
+/// root is deleted afterwards.
+/// <para>
+/// The engine starts on the first <see cref="StartAsync"/>, not in an <see cref="IAsyncLifetime.InitializeAsync"/>:
+/// xUnit creates and initializes a class fixture even when every test in the class is explicit and left out, so an
+/// eager start would copy or download the model in every plain test run.
+/// </para>
 /// </summary>
-public sealed class WhisperEngineFixture : IAsyncLifetime
+public sealed class WhisperEngineFixture : IAsyncDisposable
 {
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-integration-" + Guid.NewGuid().ToString("N"));
     private readonly HttpClient _http = new();
+    private readonly Lazy<Task> _start;
+
+    public WhisperEngineFixture() => _start = new(StartEngineAsync);
 
     public WhisperEngine Engine { get; private set; } = null!;
+    public SpeechModelInfo ResolvedModel { get; private set; } = null!;
     public TimeSpan InitializeElapsed { get; private set; }
 
-    public async ValueTask InitializeAsync()
+    /// <summary>Starts the engine once, on the first call; later calls wait for that same start.</summary>
+    public Task StartAsync() => _start.Value;
+
+    private async Task StartEngineAsync()
     {
-        var paths = MurmurPaths.Default;
+        var paths = new MurmurPaths(_root);
         var settings = new SettingsService(paths, new Win32KeyboardLayout());
         var models = new ModelManager(paths, _http, TimeProvider.System, new DiskSpace());
         var gpu = new GpuInfo(paths);
-        Engine = new WhisperEngine(models, new ModelSelection(settings, gpu, models), gpu, new CudaRuntimeLocator(paths),
-            new WhisperModelLoader(), settings, TimeProvider.System);
+        var selection = new ModelSelection(settings, gpu, models);
+
+        // Saves the choice in the temporary settings, so the engine's own start resolves the same model.
+        ResolvedModel = SpeechModelCatalog.Get(selection.ResolveActive());
+        CopyFromAppModels(ResolvedModel, models);
+
+        Engine = new WhisperEngine(models, selection, gpu, new CudaRuntimeLocator(paths), new WhisperModelLoader(), settings,
+            TimeProvider.System);
         var stopwatch = Stopwatch.StartNew();
         await Engine.InitializeAsync(CancellationToken.None);
         InitializeElapsed = stopwatch.Elapsed;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        Engine.Dispose();
+        if (_start.IsValueCreated)
+        {
+            // A start that failed has already failed the tests that awaited it; here it only has to be over.
+            await _start.Value.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+
+        Engine?.Dispose();
         _http.Dispose();
-        return ValueTask.CompletedTask;
+        if (Directory.Exists(_root))
+            Directory.Delete(_root, recursive: true);
+    }
+
+    /// <summary>Reads (never writes) the app's models folder, to spare a download when the model is already there.</summary>
+    private static void CopyFromAppModels(SpeechModelInfo model, ModelManager models)
+    {
+        var source = new FileInfo(Path.Combine(MurmurPaths.Default.ModelsDirectory, model.FileName));
+        if (!source.Exists || source.Length != model.SizeBytes)
+            return;
+
+        var target = models.PathFor(model);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        source.CopyTo(target);
     }
 }
 
+/// <summary>
+/// Explicit, so a plain <c>dotnet test</c> leaves them out: they need the real GPU, a copy or download of a
+/// 0.5-1.6 GB model and a minute or more. Run them by hand with
+/// <c>dotnet test tests/Murmur.Core.Tests -p:SkipFrontendBuild=true --filter "FullyQualifiedName~WhisperEngineIntegrationTests" -- xUnit.Explicit=on</c>.
+/// </summary>
 public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, ITestOutputHelper output)
     : IClassFixture<WhisperEngineFixture>
 {
     private const string Sentence = "The quick brown fox jumps over the lazy dog.";
 
-    private WhisperEngine Ready()
+    private async Task<WhisperEngine> ReadyAsync()
     {
+        await fixture.StartAsync();
         var status = fixture.Engine.Status;
         status.State.ShouldBe(EngineState.Ready, $"engine failed to start: {status.Error}");
         return fixture.Engine;
     }
 
-    [Fact]
-    public void Initialize_ReachesReady()
+    [Fact(Explicit = true)]
+    public async Task Initialize_ReachesReady()
     {
+        await fixture.StartAsync();
         var status = fixture.Engine.Status;
 
         output.WriteLine($"Status: {status.State}, model: {status.ModelName}, runtime: {status.Runtime ?? "(unknown)"}, "
-            + $"initialize (download if missing + load + warm-up) took {fixture.InitializeElapsed.TotalMilliseconds:F0} ms. Error: {status.Error ?? "(none)"}");
+            + $"resolved model: {fixture.ResolvedModel.DisplayName}, "
+            + $"initialize (verify or download + load + warm-up) took {fixture.InitializeElapsed.TotalMilliseconds:F0} ms. Error: {status.Error ?? "(none)"}");
         status.State.ShouldBe(EngineState.Ready, status.Error);
-        status.ModelName.ShouldBe("Whisper large-v3-turbo");
+        status.ModelName.ShouldBe(fixture.ResolvedModel.DisplayName);
         status.Runtime.ShouldNotBeNullOrEmpty();
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public async Task Transcribe_SynthesizedSentence_ContainsWords()
     {
-        var engine = Ready();
+        var engine = await ReadyAsync();
         var samples = Synthesize(Sentence);
 
         var result = await engine.TranscribeAsync(samples, "", TestContext.Current.CancellationToken);
@@ -83,10 +130,10 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
         result.Text.ToLowerInvariant().ShouldContain("quick brown fox");
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public async Task Transcribe_WithVocabularyPrompt_StillTranscribes()
     {
-        var engine = Ready();
+        var engine = await ReadyAsync();
         var samples = Synthesize(Sentence);
 
         var result = await engine.TranscribeAsync(samples, "Vocabulary: Murmur, Whisper.", TestContext.Current.CancellationToken);
@@ -95,24 +142,33 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
         result.Text.ToLowerInvariant().ShouldContain("quick brown fox");
     }
 
-    [Fact]
-    public async Task Transcribe_Silence_IsEmptyOrNoSpeech()
+    // A quiet room through a real microphone: noise at about -70 dBFS, above the engine's digital-silence cut-off, so
+    // the model really runs (zeros never reach it; see the next test). The dictation controller's speech detector
+    // drops audio this quiet before it gets here; this checks what the model makes of it should any get through.
+    [Fact(Explicit = true)]
+    public async Task Transcribe_MicrophoneNoiseFloor_IsEmptyOrNoSpeech()
     {
-        var engine = Ready();
+        var engine = await ReadyAsync();
+        var random = new Random(42);
+        var noise = new float[3 * 16000];
+        for (var i = 0; i < noise.Length; i++)
+            noise[i] = (float)((random.NextDouble() * 2 - 1) * 0.00055); // uniform: RMS = 0.00055 / sqrt(3), about -70 dBFS
+        SpeechDetector.RmsDbfs(noise).ShouldBeInRange(-75f, -65f);
 
-        var result = await engine.TranscribeAsync(new float[3 * 16000], "", TestContext.Current.CancellationToken);
+        var result = await engine.TranscribeAsync(noise, "", TestContext.Current.CancellationToken);
 
-        output.WriteLine($"Silence transcript: \"{result.Text}\" (no-speech {result.MaxNoSpeechProbability:F3})");
+        output.WriteLine($"Noise-floor transcript: \"{result.Text}\" (no-speech {result.MaxNoSpeechProbability:F3})");
+        result.MaxNoSpeechProbability.ShouldNotBe(1f, "the digital-silence shortcut answered, so the model never ran");
         (new TranscriptCleaner().Process(result.Text) == "" || result.MaxNoSpeechProbability >= 0.6f).ShouldBeTrue(
             $"\"{result.Text}\" with no-speech {result.MaxNoSpeechProbability:F3}");
     }
 
     // Whisper answers "Thank you." for zeros and Whisper.net always reports a no-speech probability of 0, so
     // the engine itself has to recognise a dead input.
-    [Fact]
+    [Fact(Explicit = true)]
     public async Task Transcribe_DigitalSilence_ReturnsNoSpeechWithoutRunningTheModel()
     {
-        var engine = Ready();
+        var engine = await ReadyAsync();
         var stopwatch = Stopwatch.StartNew();
 
         var result = await engine.TranscribeAsync(new float[3 * 16000], "", TestContext.Current.CancellationToken);
@@ -122,25 +178,27 @@ public sealed class WhisperEngineIntegrationTests(WhisperEngineFixture fixture, 
         result.MaxNoSpeechProbability.ShouldBe(1f);
     }
 
-    [Fact]
-    public async Task Transcribe_FiveSecondSentence_UnderOneSecond_OnCuda()
+    // The speed goal (a 5 s dictation in under 1 s on CUDA) is reported, not asserted: wall-clock time depends on the
+    // GPU, the model the PC resolves to and whatever else the machine is doing, so a limit here would only be flaky.
+    [Fact(Explicit = true)]
+    public async Task Transcribe_FiveSecondSentence_ContainsWordsAndReportsTime()
     {
-        var engine = Ready();
+        var engine = await ReadyAsync();
         var samples = SynthesizeFiveSeconds();
 
         var stopwatch = Stopwatch.StartNew();
         var result = await engine.TranscribeAsync(samples, "", TestContext.Current.CancellationToken);
         var elapsed = stopwatch.Elapsed;
 
-        output.WriteLine($"{samples.Length / 16000.0:F1} s of audio transcribed in {elapsed.TotalMilliseconds:F0} ms on {engine.Status.Runtime}: \"{result.Text}\"");
-        Assert.SkipUnless(engine.Status.Runtime == "Cuda", "not on CUDA");
-        elapsed.TotalMilliseconds.ShouldBeLessThan(1000);
+        output.WriteLine($"{samples.Length / 16000.0:F1} s of audio transcribed in {elapsed.TotalMilliseconds:F0} ms "
+            + $"(goal on CUDA: under 1000 ms) with {engine.Status.ModelName} on {engine.Status.Runtime}: \"{result.Text}\"");
+        result.Text.ToLowerInvariant().ShouldContain("quick brown fox");
     }
 
-    [Fact]
-    public void Initialize_OnCuda_ReportsCudaInUse()
+    [Fact(Explicit = true)]
+    public async Task Initialize_OnCuda_ReportsCudaInUse()
     {
-        var status = Ready().Status;
+        var status = (await ReadyAsync()).Status;
 
         output.WriteLine($"Runtime: {status.Runtime ?? "(unknown)"}, GPU advice: {status.Gpu}");
         Assert.SkipUnless(status.Runtime?.StartsWith("Cuda", StringComparison.Ordinal) == true, "not on CUDA");

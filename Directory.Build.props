@@ -9,5 +9,7 @@
          carries it for the About dialog and the splash (AppInfo). No commit suffix, so what is shown is what is in the file. -->
     <Version>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.json')), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- The .editorconfig naming and namespace rules are checked by the build, not only shown in the editor. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 </Project>

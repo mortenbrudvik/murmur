@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Murmur.Core.Input;
 
 namespace Murmur.Core.Models;
 
@@ -14,13 +15,12 @@ public enum HotkeyModifiers
 
 public sealed record HotkeyDefinition(int VirtualKey, HotkeyModifiers Modifiers, string DisplayName)
 {
-    public static HotkeyDefinition Default { get; } = new(0xA3, HotkeyModifiers.None, "Right Ctrl");
+    public static HotkeyDefinition Default { get; } = new(VirtualKeys.RightCtrl, HotkeyModifiers.None, "Right Ctrl");
 
     /// <summary>A lone Ctrl/Shift/Alt (left or right) or Win key, with no other modifier.</summary>
     [JsonIgnore]
     public bool IsModifierOnly =>
-        Modifiers == HotkeyModifiers.None
-        && (VirtualKey is >= 0xA0 and <= 0xA5 or 0x5B or 0x5C);
+        Modifiers == HotkeyModifiers.None && VirtualKeys.IsSideSpecificModifier(VirtualKey);
 
     /// <summary>
     /// A Windows shell shortcut that Murmur must never take over: Alt+Tab, Win+Tab (with any extra modifiers)
@@ -31,10 +31,14 @@ public sealed record HotkeyDefinition(int VirtualKey, HotkeyModifiers Modifiers,
         (VirtualKey == 0x09 && (Modifiers & (HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0)
         || (VirtualKey == 0x73 && Modifiers.HasFlag(HotkeyModifiers.Alt));
 
-    /// <summary>Modifier-only, an F1-F24 key, or any key combined with at least one modifier — never a reserved shortcut.</summary>
+    /// <summary>
+    /// Modifier-only, an F1-F24 key, or any key combined with at least one modifier — never a reserved shortcut, and
+    /// always a virtual-key code Windows can report (1 through 254).
+    /// </summary>
     [JsonIgnore]
     public bool IsValid =>
-        !IsReservedShortcut
+        VirtualKey is >= 1 and <= 254
+        && !IsReservedShortcut
         && (IsModifierOnly
             || VirtualKey is >= 0x70 and <= 0x87
             || Modifiers != HotkeyModifiers.None);
@@ -105,6 +109,10 @@ public enum MicTestState
 /// <param name="SetupStep">The setup step the user stopped at; null until the first-run decision is made.</param>
 /// <param name="SetupCompleted">Setup was finished or skipped, so it is not shown again.</param>
 /// <param name="CudaTipDismissed">The user closed the tip about installing CUDA for a faster GPU.</param>
+/// <param name="KeepMicrophoneReady">
+/// Keep the microphone open while Murmur runs, so a dictation starts without the microphone's start-up delay. Off by
+/// default: Windows then shows the microphone as in use all the time, which the user has to have asked for.
+/// </param>
 public sealed record MurmurSettings(
     HotkeyDefinition Hotkey,
     string? MicrophoneId = null,
@@ -114,7 +122,8 @@ public sealed record MurmurSettings(
     SpeechModelId? SpeechModel = null,
     SetupStep? SetupStep = null,
     bool SetupCompleted = false,
-    bool CudaTipDismissed = false)
+    bool CudaTipDismissed = false,
+    bool KeepMicrophoneReady = false)
 {
     public static MurmurSettings Default { get; } = new(HotkeyDefinition.Default);
 }

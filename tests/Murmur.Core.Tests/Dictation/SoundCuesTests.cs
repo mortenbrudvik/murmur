@@ -52,6 +52,34 @@ public sealed class SoundCuesTests
         Math.Abs(samples[^1]).ShouldBeLessThan(0.001f);
     }
 
+    [Fact]
+    public void CreateWav_TwoFrequencies_PlaysTwoBlipsInTurn()
+    {
+        using var reader = new WaveFileReader(new MemoryStream(SoundCues.CreateWav(523, 392)));
+        var samples = ReadSamples(reader);
+        var blip = reader.WaveFormat.SampleRate * 60 / 1000;
+
+        samples.Length.ShouldBe(2 * blip);
+        Math.Abs(Crossings(samples, 0, blip) - 2 * 523 * 0.060).ShouldBeLessThanOrEqualTo(2);
+        Math.Abs(Crossings(samples, blip, 2 * blip) - 2 * 392 * 0.060).ShouldBeLessThanOrEqualTo(2);
+
+        // Each blip fades in and out on its own, so the join does not click.
+        Math.Abs(samples[blip - 1]).ShouldBeLessThan(0.001f);
+        Math.Abs(samples[blip]).ShouldBeLessThan(0.001f);
+    }
+
+    private static int Crossings(float[] samples, int from, int to)
+    {
+        var crossings = 0;
+        for (var i = from + 1; i < to; i++)
+        {
+            if (Math.Sign(samples[i - 1]) != Math.Sign(samples[i]) && samples[i] != 0)
+                crossings++;
+        }
+
+        return crossings;
+    }
+
     private static float[] ReadSamples(WaveFileReader reader)
     {
         var samples = new List<float>();

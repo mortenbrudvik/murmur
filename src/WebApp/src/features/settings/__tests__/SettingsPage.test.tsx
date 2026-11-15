@@ -27,6 +27,7 @@ const stored: MurmurSettings = {
   soundCues: true,
   startWithWindows: false,
   keepAudio: true,
+  keepMicrophoneReady: false,
 };
 
 const usb: MicrophoneInfo = { id: "usb", name: "USB Mic", isDefault: true };
@@ -284,18 +285,29 @@ describe("SettingsPage", () => {
   });
 
   describe("toggles", () => {
-    it("shows the three switches in their saved state", async () => {
+    it("shows the four switches in their saved state", async () => {
       await renderLoaded();
 
       expect(toggle("Sound cues").checked).toBe(true);
       expect(toggle("Start with Windows").checked).toBe(false);
       expect(toggle("Keep audio recordings").checked).toBe(true);
+      expect(toggle("Keep the microphone ready").checked).toBe(false);
+    });
+
+    it("says what keeping the microphone ready costs", async () => {
+      await renderLoaded();
+
+      const hint = toggle("Keep the microphone ready").getAttribute("aria-describedby");
+      const text = document.getElementById(hint!)?.textContent ?? "";
+      expect(text).toMatch(/shows the microphone as in use/);
+      expect(text).toMatch(/Bluetooth/);
     });
 
     it.each([
       ["Sound cues", { soundCues: false }],
       ["Start with Windows", { startWithWindows: true }],
       ["Keep audio recordings", { keepAudio: false }],
+      ["Keep the microphone ready", { keepMicrophoneReady: true }],
     ])("%s saves the whole document with only that field changed", async (name, change) => {
       await renderLoaded();
 
@@ -572,6 +584,24 @@ describe("SettingsPage", () => {
       await waitFor(() => expect(callsTo("models.getChoice").length).toBeGreaterThan(readsBefore));
       await waitFor(() => expect(radio(BEST_RECOMMENDED).checked).toBe(true));
     });
+  });
+
+  it("quits Murmur from the Quit button", async () => {
+    await renderLoaded();
+
+    fireEvent.click(screen.getByRole("button", { name: "Quit" }));
+
+    await waitFor(() => expect(callsTo("app.quit")).toHaveLength(1));
+    expect(callsTo("app.quit")[0][2]).toEqual({});
+  });
+
+  it("offers Quit even when the settings cannot be loaded", async () => {
+    vi.mocked(apiClient.call).mockRejectedValue(new Error("bridge down"));
+
+    render(<SettingsPage engineStatus={ready} />);
+    await screen.findByRole("alert");
+
+    expect(screen.getByRole("button", { name: "Quit" })).toBeTruthy();
   });
 
   it("shows an error when the settings cannot be loaded", async () => {

@@ -3,7 +3,7 @@ using Serilog;
 
 namespace Murmur.Core.Speech;
 
-/// <summary>Searches the process PATH, the registry's Path values, CUDA_PATH and the toolkit's install folder.</summary>
+/// <summary>Searches the toolkit's install folder, CUDA_PATH, the process PATH and the registry's Path values.</summary>
 /// <param name="paths">Debug builds look for <see cref="MurmurPaths.SimulateNoCudaRuntimeFile"/> in it.</param>
 public sealed class CudaRuntimeLocator(MurmurPaths paths) : ICudaRuntimeLocator
 {

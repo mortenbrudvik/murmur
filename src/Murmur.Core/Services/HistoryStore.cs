@@ -75,6 +75,12 @@ public sealed class HistoryStore(MurmurPaths paths, TimeProvider time) : IHistor
         }
     }
 
+    public HistoryEntry? Find(Guid id)
+    {
+        lock (_lock)
+            return EnsureLoaded().Find(e => e.Id == id);
+    }
+
     public bool Delete(Guid id)
     {
         lock (_lock)

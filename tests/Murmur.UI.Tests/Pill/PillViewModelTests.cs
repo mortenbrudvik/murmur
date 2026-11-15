@@ -154,6 +154,29 @@ public class PillViewModelTests
     }
 
     [Fact]
+    public void Mode_EnteringStarting_ResetsTheBars()
+    {
+        var vm = new PillViewModel { Mode = PillMode.Listening };
+        vm.PushLevel(-20f);
+        vm.Mode = PillMode.Transcribing;
+
+        vm.Mode = PillMode.Starting;
+
+        vm.Bars.ShouldAllBe(bar => bar == 0.2);
+    }
+
+    [Fact]
+    public void Mode_FromStartingToListening_KeepsTheBars()
+    {
+        var vm = new PillViewModel { Mode = PillMode.Starting };
+        vm.PushLevel(-20f);
+
+        vm.Mode = PillMode.Listening;
+
+        vm.Bars[^1].ShouldBe(1.0, 0.001);
+    }
+
+    [Fact]
     public void Mode_SwitchingAwayFromListening_KeepsTheBars()
     {
         var vm = new PillViewModel { Mode = PillMode.Listening };

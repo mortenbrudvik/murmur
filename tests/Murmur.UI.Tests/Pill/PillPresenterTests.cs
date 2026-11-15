@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using Murmur.Core.Dictation;
 using Murmur.UI.Pill;
 using Shouldly;
@@ -36,15 +38,26 @@ public class PillPresenterTests
         public IPillPresenter Pill => Presenter;
     }
 
-    private static void WithPill(Action<Rig> body) =>
+    /// <summary>Short notice times for tests that wait for a notice to go, so they do not wait out the real ones.</summary>
+    private static readonly TimeSpan TestInfo = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan TestProblem = TimeSpan.FromMilliseconds(900);
+
+    private static void WithPill(Action<Rig> body) => WithPill(realTimes: true, workArea: null, body);
+
+    private static void WithPill(bool realTimes, Func<(Rect WorkAreaDip, double Dpi)>? workArea, Action<Rig> body) =>
         StaHost.Run(() =>
         {
             var vm = new PillViewModel();
             var window = new PillWindow(vm);
             new WindowInteropHelper(window).EnsureHandle();
+            var presenter = realTimes && workArea is null
+                ? new PillPresenter(window, vm)
+                : new PillPresenter(
+                    window, vm, realTimes ? PillPresenter.DefaultInfoDuration : TestInfo,
+                    realTimes ? PillPresenter.DefaultProblemDuration : TestProblem, workArea);
             try
             {
-                body(new Rig(vm, window, new PillPresenter(window, vm)));
+                body(new Rig(vm, window, presenter));
             }
             finally
             {
@@ -171,7 +184,7 @@ public class PillPresenterTests
             var transcribingWidth = rig.Window.ActualWidth;
             CenterX().ShouldBe(centerX, 0.5);
 
-            rig.Pill.ShowNotice("Copied — press Ctrl+V");
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
             StaHost.Pump(Short);
             var noticeWidth = rig.Window.ActualWidth;
             CenterX().ShouldBe(centerX, 0.5);
@@ -182,54 +195,191 @@ public class PillPresenterTests
         });
     }
 
-    [Fact]
-    public void ShowNotice_ShowsTheTextThenHidesAfterAboutOneAndAHalfSeconds()
+    [Theory]
+    [InlineData(NoticeKind.Info, 1.5)]
+    [InlineData(NoticeKind.Problem, 4.5)]
+    public void ShowNotice_ShowsTheTextForTheTimeOfItsKind(NoticeKind kind, double seconds)
     {
         WithPill(rig =>
         {
-            rig.Pill.ShowNotice("Saved to history");
+            rig.Pill.ShowNotice("Saved to history", kind);
             StaHost.Pump(Short);
 
             rig.Vm.Mode.ShouldBe(PillMode.Notice);
             rig.Vm.NoticeText.ShouldBe("Saved to history");
             rig.Window.IsVisible.ShouldBeTrue();
+            rig.Presenter.NoticeDuration.ShouldBe(TimeSpan.FromSeconds(seconds));
+        });
+    }
 
-            var clock = Stopwatch.StartNew();
-            StaHost.PumpUntil(() => !rig.Window.IsVisible, TimeSpan.FromSeconds(4)).ShouldBeTrue();
+    [Fact]
+    public void ShowNotice_TimeUp_HidesThePill()
+    {
+        WithPill(realTimes: false, workArea: null, rig =>
+        {
+            rig.Pill.ShowNotice("Saved to history", NoticeKind.Info);
+            StaHost.Pump(Short);
+            rig.Window.IsVisible.ShouldBeTrue();
 
-            clock.Elapsed.ShouldBeInRange(TimeSpan.FromMilliseconds(1200), TimeSpan.FromMilliseconds(2400));
+            StaHost.PumpUntil(() => !rig.Window.IsVisible, TimeSpan.FromSeconds(5)).ShouldBeTrue();
             rig.Vm.Mode.ShouldBe(PillMode.Hidden);
+            rig.Presenter.NoticeDuration.ShouldBeNull();
+        });
+    }
+
+    [Fact]
+    public void ShowNotice_InfoAfterAProblem_UsesTheShorterTime()
+    {
+        WithPill(rig =>
+        {
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
+            rig.Pill.ShowNotice("Loading model…", NoticeKind.Info);
+            StaHost.Pump(Short);
+
+            rig.Presenter.NoticeDuration.ShouldBe(PillPresenter.DefaultInfoDuration);
         });
     }
 
     [Fact]
     public void ShowNotice_CalledAgain_RestartsTheHideTimer()
     {
-        WithPill(rig =>
+        WithPill(realTimes: false, workArea: null, rig =>
         {
-            rig.Pill.ShowNotice("Loading model…");
-            StaHost.Pump(TimeSpan.FromSeconds(1));
+            // The problem notice stays 900 ms. Shown again after 600 ms, it must still be there 600 ms later, 1.2 s
+            // after the first call, when the first call's timer would have hidden it. 300 ms either side of each limit.
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
+            StaHost.Pump(TimeSpan.FromMilliseconds(600));
 
-            rig.Pill.ShowNotice("Loading model…");
-            var secondShown = Stopwatch.StartNew();
-            StaHost.Pump(TimeSpan.FromSeconds(1)); // 2 s after the first call; its timer would have hidden the pill at 1.5 s
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
+            StaHost.Pump(TimeSpan.FromMilliseconds(600));
 
             rig.Window.IsVisible.ShouldBeTrue();
-
-            StaHost.PumpUntil(() => !rig.Window.IsVisible, TimeSpan.FromSeconds(3)).ShouldBeTrue();
-            secondShown.Elapsed.ShouldBeGreaterThan(TimeSpan.FromMilliseconds(1300));
+            StaHost.PumpUntil(() => !rig.Window.IsVisible, TimeSpan.FromSeconds(5)).ShouldBeTrue();
         });
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ShowTranscribing_DotsPulseOnlyWithWindowsAnimationEffectsOn(bool animationEffects)
+    {
+        WithPill(rig =>
+        {
+            // The real value comes from Windows (SystemParameters.ClientAreaAnimation); set here so both cases run.
+            var dots = rig.Window.TranscribingDots;
+            dots.Tag = animationEffects;
+
+            rig.Pill.ShowTranscribing();
+            StaHost.Pump(Short);
+
+            var dot = (UIElement)dots.Template.FindName("Dot1", dots);
+            dot.HasAnimatedProperties.ShouldBe(animationEffects);
+            if (!animationEffects)
+                dot.Opacity.ShouldBe(0.6);
+        });
+    }
+
+    [Fact]
+    public void ShowStarting_AfterANotice_MovesToTheForegroundMonitor()
+    {
+        var workArea = new Rect(0, 0, 800, 600);
+        var dpi = 96.0;
+        WithPill(realTimes: true, workArea: () => (workArea, dpi), rig =>
+        {
+            double CenterX() => rig.Window.Left + rig.Window.ActualWidth / 2;
+
+            // The pill's own DPI, so that the placement in pixels needs no rescaling by Windows.
+            dpi = VisualTreeHelper.GetDpi(rig.Window).PixelsPerInchX;
+
+            rig.Pill.ShowNotice("Copied — press Ctrl+V", NoticeKind.Problem);
+            StaHost.Pump(Short);
+            CenterX().ShouldBe(400, 1);
+
+            // The next press is in a window on another part of the desktop, while the notice still shows.
+            workArea = new Rect(400, 0, 800, 600);
+            rig.Pill.ShowStarting();
+            StaHost.Pump(Short);
+            CenterX().ShouldBe(800, 1);
+
+            // Within the dictation the pill stays put, wherever the foreground window goes.
+            workArea = new Rect(0, 0, 800, 600);
+            rig.Pill.ShowListening();
+            rig.Pill.ShowTranscribing();
+            StaHost.Pump(Short);
+            CenterX().ShouldBe(800, 1);
+        });
+    }
+
+    [Fact]
+    public void ShowStarting_FromAnotherThread_ShowsThePillWithoutTakingFocus()
+    {
+        WithPill(rig =>
+        {
+            var foreground = GetForegroundWindow();
+
+            OnAnotherThread(rig.Pill.ShowStarting);
+            StaHost.PumpUntil(() => rig.Window.IsVisible, TimeSpan.FromSeconds(2)).ShouldBeTrue();
+            StaHost.Pump(Short);
+
+            rig.Vm.Mode.ShouldBe(PillMode.Starting);
+            rig.Window.IsActive.ShouldBeFalse();
+            GetForegroundWindow().ShouldBe(foreground);
+        });
+    }
+
+    // Red means recording: while the microphone starts, the pill shows a hollow dot in its place.
+    [Fact]
+    public void ShowStarting_ThenListening_ShowsTheRecordingDotOnlyOnceListening()
+    {
+        WithPill(rig =>
+        {
+            var recordingDot = (FrameworkElement)rig.Window.FindName("RecordingDot");
+            var startingDot = (FrameworkElement)rig.Window.FindName("StartingDot");
+
+            rig.Pill.ShowStarting();
+            StaHost.Pump(Short);
+            recordingDot.IsVisible.ShouldBeFalse();
+            startingDot.IsVisible.ShouldBeTrue();
+
+            rig.Pill.ShowListening();
+            StaHost.Pump(Short);
+            recordingDot.IsVisible.ShouldBeTrue();
+            startingDot.IsVisible.ShouldBeFalse();
+        });
+    }
+
+    [Fact]
+    public void ShowStarting_ThenListening_KeepsThePillTheSameSizeAndPlace()
+    {
+        WithPill(rig =>
+        {
+            rig.Pill.ShowStarting();
+            StaHost.Pump(Short);
+            var (left, width) = (rig.Window.Left, rig.Window.ActualWidth);
+
+            rig.Pill.ShowListening();
+            StaHost.Pump(Short);
+
+            rig.Window.ActualWidth.ShouldBe(width, 0.01);
+            rig.Window.Left.ShouldBe(left, 0.5); // within a pixel: Left reads back rounded to device pixels after a move
+            width.ShouldBeGreaterThan(PillWindow.ShadowMargin.Left + PillWindow.ShadowMargin.Right + 40); // the dot and bars, not an empty capsule
+        });
+    }
+
+    [Theory]
+    [InlineData(PillMode.Starting)]
     [InlineData(PillMode.Listening)]
     [InlineData(PillMode.Transcribing)]
     public void Show_AfterNotice_CancelsTheHideTimer(PillMode next)
     {
         WithPill(rig =>
         {
-            rig.Pill.ShowNotice("Loading model…");
-            if (next == PillMode.Listening)
+            rig.Pill.ShowNotice("Loading model…", NoticeKind.Info);
+            if (next == PillMode.Starting)
+            {
+                rig.Pill.ShowStarting();
+            }
+            else if (next == PillMode.Listening)
             {
                 rig.Pill.ShowListening();
             }
@@ -238,10 +388,11 @@ public class PillPresenterTests
                 rig.Pill.ShowTranscribing();
             }
 
-            StaHost.Pump(TimeSpan.FromMilliseconds(1700));
+            StaHost.Pump(Short);
 
             rig.Vm.Mode.ShouldBe(next);
             rig.Window.IsVisible.ShouldBeTrue();
+            rig.Presenter.NoticeDuration.ShouldBeNull(); // no timer left to hide the dictation's pill
         });
     }
 }

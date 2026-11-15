@@ -29,6 +29,7 @@ const stored: MurmurSettings = {
   soundCues: true,
   startWithWindows: false,
   keepAudio: false,
+  keepMicrophoneReady: false,
 };
 const usb: MicrophoneInfo = { id: "usb", name: "USB Mic", isDefault: true };
 const headset: MicrophoneInfo = { id: "headset", name: "Headset", isDefault: false };

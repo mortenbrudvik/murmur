@@ -17,6 +17,7 @@ const settings: MurmurSettings = {
   soundCues: true,
   startWithWindows: false,
   keepAudio: false,
+  keepMicrophoneReady: false,
 };
 const vocabulary: Vocabulary = { hintWords: [], replacements: [] };
 const download: DownloadProgress = {

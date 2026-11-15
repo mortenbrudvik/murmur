@@ -11,9 +11,11 @@ public class ApiBridge(IMediator mediator, ApiRegistry apiRegistry)
 {
     public async Task<string> InvokeMethod(string serviceName, string methodName, string jsonParams)
     {
-        IpcLogger.LogRequest(serviceName, methodName, jsonParams);
         try
         {
+            // Inside the try: a caller that is not the web app's client can pass a null string, and the request log
+            // must not turn that into an exception the caller sees instead of an error response.
+            IpcLogger.LogRequest(serviceName, methodName, jsonParams);
             var requestType = apiRegistry.GetRequestType(serviceName, methodName);
             if (requestType == null)
                 return JsonUtils.Serialize(new { success = false, error = $"Unknown API: {serviceName}.{methodName}" });

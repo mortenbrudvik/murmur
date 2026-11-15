@@ -17,6 +17,7 @@ const settings: MurmurSettings = {
   soundCues: true,
   startWithWindows: false,
   keepAudio: false,
+  keepMicrophoneReady: false,
 };
 
 /** An entry from today, at the given local time. */
@@ -34,10 +35,6 @@ function mockApi(entries: HistoryEntry[], overrides: Record<string, () => unknow
     if (key === "settings.get") return settings;
     return true;
   });
-}
-
-function setClipboard(writeText: (text: string) => Promise<void>) {
-  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 }
 
 /** Pushes an entry the way the host does after a dictation. */
@@ -94,16 +91,18 @@ describe("HistoryPage", () => {
     expect(await screen.findByText("Nothing yet. Hold Right Ctrl and start talking.")).toBeTruthy();
   });
 
-  it("copies the text and shows Copied for 1.5 seconds", async () => {
+  it("copies the entry through Murmur and shows Copied for 1.5 seconds", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const writeText = vi.fn().mockResolvedValue(undefined);
-    setClipboard(writeText);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     mockApi([todayEntry("a", 10, 0, { text: "copy me" })]);
 
     render(<HistoryPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
 
-    expect(writeText).toHaveBeenCalledWith("copy me");
+    // Not navigator.clipboard: that copy would land in Win+V clipboard history.
+    expect(apiClient.call).toHaveBeenCalledWith("history", "copy", { id: "a" });
+    expect(writeText).not.toHaveBeenCalled();
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
@@ -113,7 +112,6 @@ describe("HistoryPage", () => {
 
   it("keeps a card's Copied state when a new entry is pushed into the same day", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    setClipboard(vi.fn().mockResolvedValue(undefined));
     mockApi([todayEntry("a", 10, 0, { text: "copy me" })]);
 
     render(<HistoryPage />);
@@ -127,10 +125,12 @@ describe("HistoryPage", () => {
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
   });
 
-  it("shows Copy failed for 1.5 seconds when the clipboard rejects", async () => {
+  it.each([
+    ["Murmur could not write the clipboard", () => false],
+    ["the call fails", () => Promise.reject(new Error("bridge gone"))],
+  ])("shows Copy failed for 1.5 seconds when %s", async (_case, copy) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    setClipboard(vi.fn().mockRejectedValue(new Error("denied")));
-    mockApi([todayEntry("a", 10, 0)]);
+    mockApi([todayEntry("a", 10, 0)], { "history.copy": copy });
 
     render(<HistoryPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Copy" }));

@@ -14,6 +14,8 @@ export interface MurmurSettings {
   soundCues: boolean;
   startWithWindows: boolean;
   keepAudio: boolean;
+  /** Keep the microphone open while Murmur runs, so a dictation starts at once. Off unless the user turns it on. */
+  keepMicrophoneReady: boolean;
 }
 
 export interface ReplacementRule {

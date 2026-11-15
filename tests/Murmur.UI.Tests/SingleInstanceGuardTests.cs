@@ -20,35 +20,30 @@ public sealed class SingleInstanceGuardTests
     }
 
     [Fact]
-    public async Task TryAcquire_WhileAnotherInstanceRuns_False()
+    public void TryAcquire_WhileAnotherInstanceRuns_False()
     {
         using var first = NewGuard();
         first.TryAcquire();
 
-        // Another thread: a mutex can be re-acquired by the thread that already owns it.
-        var second = await Task.Run(() =>
+        OnANewThread(() =>
         {
             using var guard = NewGuard();
             return guard.TryAcquire();
-        });
-
-        second.ShouldBeFalse();
+        }).ShouldBeFalse();
     }
 
     [Fact]
-    public async Task TryAcquire_AfterFirstInstanceExits_True()
+    public void TryAcquire_AfterFirstInstanceExits_True()
     {
         var first = NewGuard();
         first.TryAcquire();
         first.Dispose();
 
-        var second = await Task.Run(() =>
+        OnANewThread(() =>
         {
             using var guard = NewGuard();
             return guard.TryAcquire();
-        });
-
-        second.ShouldBeTrue();
+        }).ShouldBeTrue();
     }
 
     [Fact]
@@ -114,6 +109,33 @@ public sealed class SingleInstanceGuardTests
     }
 
     private SingleInstanceGuard NewGuard() => new(_mutexName, _eventName);
+
+    /// <summary>
+    /// Runs <paramref name="body"/> as the second instance would, on a thread of its own. Never a pool thread: a mutex
+    /// belongs to the thread that took it, and a pool thread can be the very one that took it for the first instance,
+    /// which would acquire it again.
+    /// </summary>
+    private static T OnANewThread<T>(Func<T> body)
+    {
+        T result = default!;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                result = body();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.Start();
+        thread.Join();
+        if (failure is not null)
+            throw new AggregateException(failure);
+        return result;
+    }
 
     /// <summary>
     /// Another instance: acquires the mutex on a thread of its own (a mutex belongs to the thread that took it) and

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Murmur.Core.Input;
 using Murmur.Core.Interop;
 
 namespace Murmur.Core.Insertion;
@@ -10,7 +11,7 @@ namespace Murmur.Core.Insertion;
 /// </summary>
 public sealed class Win32KeyboardSender : IKeyboardSender
 {
-    private const ushort VK_CONTROL = 0x11;
+    private const ushort VK_CONTROL = VirtualKeys.Ctrl;
     private const ushort VK_V = 0x56;
 
     /// <summary>Unassigned virtual-key code, so pressing it does nothing in any app.</summary>

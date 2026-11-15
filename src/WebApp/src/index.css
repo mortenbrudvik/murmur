@@ -10,6 +10,7 @@
   --sidebar-bg: #181a21;
   --card: #22262f;
   --input-bg: #15171d;
+  /* --text and --accent are also the recording pill's, in src/Murmur.UI/Themes/PillColors.xaml: keep them in step. */
   --text: #dfe3ee;
   --text-strong: #e9ecf5;
   --muted: #9aa3b8;
