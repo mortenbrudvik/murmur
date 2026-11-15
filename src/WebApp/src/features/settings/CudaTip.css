@@ -48,39 +48,19 @@
   gap: 8px;
 }
 
+/* The tip's buttons: a .btn-primary, a .btn-ghost and the plain Not now. */
 .cuda-tip-button {
   padding: 6px 12px;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  border-radius: 6px;
-}
-
-.cuda-tip-primary {
-  font-weight: 600;
-  color: var(--bg);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-}
-
-.cuda-tip-primary:hover {
-  filter: brightness(1.08);
-}
-
-.cuda-tip-ghost {
-  color: var(--accent);
-  background: none;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-.cuda-tip-ghost:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .cuda-tip-dismiss {
+  font: inherit;
+  font-size: 12px;
   color: var(--muted);
+  cursor: pointer;
   background: none;
   border: 1px solid transparent;
+  border-radius: 6px;
 }
 
 .cuda-tip-dismiss:hover {

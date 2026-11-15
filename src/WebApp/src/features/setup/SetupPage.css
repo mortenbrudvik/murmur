@@ -3,7 +3,6 @@
   height: 100%;
   padding: 22px 26px 24px;
   overflow-y: auto;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
 }
 
 .setup-inner {
@@ -34,24 +33,21 @@
 }
 
 .setup-chip-on {
-  color: #c6d6ff;
-  background: rgba(143, 179, 255, 0.16);
+  color: var(--accent-soft-text);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .setup-chip-done {
   color: var(--ok);
 }
 
+/* A .page-title. */
 .setup-title {
   margin-top: 2px;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-strong);
 }
 
 /* A step's heading takes the focus when the step opens, which is not a control: the ring only shows the place. */
 .setup-title:focus-visible {
-  outline: 2px solid var(--accent);
   outline-offset: 4px;
   border-radius: 4px;
 }
@@ -109,21 +105,11 @@
   flex: none;
   width: 100%;
   height: 8px;
-  background: #2c313c;
+  background: var(--track);
 }
 
 .setup-bar .download-bar-fill {
-  background: linear-gradient(90deg, var(--accent), #b59bff);
-}
-
-.setup-select {
-  width: 280px;
-  max-width: 100%;
-}
-
-.setup-select option {
-  color: var(--text);
-  background: var(--input-bg);
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 
 .setup-mic-status {
@@ -157,16 +143,6 @@
   transition: height 0.06s linear;
 }
 
-.setup-key {
-  padding: 1px 6px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--text-strong);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-}
-
 .setup-practice {
   width: 100%;
   min-height: 54px;
@@ -185,36 +161,12 @@
   padding-top: 6px;
 }
 
+/* The setup's buttons are a .btn-ghost or a .btn-primary, a little wider; the ghost ones in the softer blue. */
 .setup-button {
   padding: 6px 14px;
-  font: inherit;
-  font-size: 12px;
+}
+
+.setup-button.btn-ghost {
   font-weight: 500;
-  color: #c6d6ff;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid rgba(143, 179, 255, 0.45);
-  border-radius: 6px;
-}
-
-.setup-button:hover {
-  background: rgba(143, 179, 255, 0.12);
-}
-
-.setup-button-primary {
-  font-weight: 600;
-  color: var(--bg);
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.setup-button-primary:hover {
-  background: var(--accent);
-  filter: brightness(1.08);
-}
-
-.setup button:focus-visible,
-.setup .text-input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  color: var(--accent-soft-text);
 }

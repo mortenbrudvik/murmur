@@ -68,7 +68,7 @@ export default function SettingsPage({ engineStatus }: Props) {
 
   return (
     <section className="page settings">
-      <h1>Settings</h1>
+      <h1 className="page-title">Settings</h1>
 
       {error && !settings && (
         <p className="page-error" role="alert">
@@ -86,11 +86,11 @@ export default function SettingsPage({ engineStatus }: Props) {
                 <p className="settings-hint">Hold it to talk, release to paste.</p>
               </div>
               <div className="settings-control">
-                <kbd className="settings-keycap">{settings.hotkey.displayName}</kbd>
+                <kbd className="keycap">{settings.hotkey.displayName}</kbd>
                 {/* aria-disabled, not disabled, while waiting for the key: a disabled button would drop the focus to the page. */}
                 <button
                   type="button"
-                  className="settings-button"
+                  className="btn-ghost"
                   aria-disabled={capturing}
                   onClick={() => {
                     if (!capturing) void changeHotkey();
@@ -111,7 +111,7 @@ export default function SettingsPage({ engineStatus }: Props) {
               <div className="settings-control">
                 <MicrophoneSelect
                   id="settings-microphone"
-                  className="text-input settings-select"
+                  className="text-input select"
                   value={savedMicrophone}
                   microphones={microphones}
                   microphonesLoaded={microphonesLoaded}
@@ -178,7 +178,7 @@ export default function SettingsPage({ engineStatus }: Props) {
           <div className="settings-control">
             <button
               type="button"
-              className="settings-button"
+              className="btn-ghost"
               aria-describedby="settings-quit-hint"
               onClick={() => void quitMurmur().catch(() => undefined)}
             >

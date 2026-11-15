@@ -23,7 +23,7 @@ export default function StepFooter({ note, action, primary = false, onAction, er
       )}
       <footer className="setup-footer">
         <span className="setup-muted setup-small">{note}</span>
-        <button type="button" className={primary ? "setup-button setup-button-primary" : "setup-button"} onClick={onAction}>
+        <button type="button" className={primary ? "btn-primary setup-button" : "btn-ghost setup-button"} onClick={onAction}>
           {action}
         </button>
       </footer>

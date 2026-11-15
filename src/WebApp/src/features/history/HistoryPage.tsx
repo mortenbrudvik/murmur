@@ -59,12 +59,12 @@ export default function HistoryPage() {
   return (
     <section className="history">
       <header className="history-header">
-        <h1>History</h1>
+        <h1 className="page-title">History</h1>
         <div className="history-tools">
           <input
             ref={searchBox}
             type="search"
-            className="history-search"
+            className="text-input history-search"
             placeholder="Search…"
             aria-label="Search history"
             value={search}
@@ -90,7 +90,7 @@ export default function HistoryPage() {
       </header>
 
       {error && (
-        <p className="history-error" role="alert">
+        <p className="page-error history-error" role="alert">
           {error}
         </p>
       )}
@@ -99,7 +99,7 @@ export default function HistoryPage() {
         {/* Keyed by the day, not its newest entry: a pushed entry must not remount the group and reset its cards. */}
         {groups.map((group) => (
           <section className="history-group" key={group.label}>
-            <h2 className="history-day">{group.label}</h2>
+            <h2 className="section-title history-day">{group.label}</h2>
             <ul className="history-list">
               {group.entries.map((entry) => (
                 <HistoryEntryCard key={entry.id} entry={entry} onDelete={(id) => void remove(id)} />

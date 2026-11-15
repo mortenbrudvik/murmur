@@ -27,7 +27,7 @@ export default function VocabularyPage() {
 
   return (
     <section className="page vocab">
-      <h1>Vocabulary</h1>
+      <h1 className="page-title">Vocabulary</h1>
       <p className="page-help">
         Hint words help Murmur spell names and jargon. Rules replace what it hears with what you want written.
       </p>

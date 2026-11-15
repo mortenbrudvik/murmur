@@ -53,11 +53,11 @@ export default function CudaTip({ advice, variant, onDismiss }: Props) {
         {!installCuda && <p className="cuda-tip-text">Update your NVIDIA driver to use CUDA.</p>}
 
         <div className="cuda-tip-actions">
-          <button type="button" className="cuda-tip-button cuda-tip-primary" onClick={() => void openTarget(installCuda ? "cudaDownload" : "nvidiaDriver")}>
+          <button type="button" className="btn-primary cuda-tip-button" onClick={() => void openTarget(installCuda ? "cudaDownload" : "nvidiaDriver")}>
             {installCuda ? "Get CUDA 13 ↗" : "Update NVIDIA driver ↗"}
           </button>
           {(settings || linkOpened) && (
-            <button type="button" className="cuda-tip-button cuda-tip-ghost" onClick={() => void restart()}>
+            <button type="button" className="btn-ghost cuda-tip-button" onClick={() => void restart()}>
               Restart Murmur
             </button>
           )}

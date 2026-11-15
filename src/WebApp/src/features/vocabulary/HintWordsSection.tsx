@@ -53,7 +53,7 @@ export default function HintWordsSection({ hintWords, apply, error }: Props) {
 
   return (
     <section className="page-section" aria-labelledby="vocab-words-title">
-      <h2 id="vocab-words-title">Hint words</h2>
+      <h2 className="section-title" id="vocab-words-title">Hint words</h2>
       <div className="vocab-words">
         {hintWords.length > 0 ? (
           <ul className="vocab-chips" aria-label="Hint words" ref={chips}>

@@ -64,49 +64,6 @@
   min-width: 0;
 }
 
-.settings-keycap {
-  padding: 3px 11px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-strong);
-  background: #2d323e;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-bottom-width: 3px;
-  border-radius: 6px;
-}
-
-.settings-button {
-  padding: 5px 12px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--accent);
-  cursor: pointer;
-  background: none;
-  border: 1px solid rgba(143, 179, 255, 0.45);
-  border-radius: 5px;
-}
-
-.settings-button:hover:not(:disabled, [aria-disabled="true"]) {
-  background: rgba(143, 179, 255, 0.12);
-}
-
-.settings-button:disabled,
-.settings-button[aria-disabled="true"] {
-  color: var(--muted);
-  cursor: default;
-  border-color: var(--border);
-}
-
-.settings-select {
-  width: 280px;
-  max-width: 100%;
-}
-
-.settings-select option {
-  color: var(--text);
-  background: var(--input-bg);
-}
-
 /* A toggle switch: the checkbox itself, drawn as a track with a knob. */
 .settings-switch {
   position: relative;

@@ -18,7 +18,7 @@ export default function HotkeyUnavailableBanner({ status }: { status: InputStatu
       <span className="hotkey-banner-text">
         Windows didn't let Murmur watch the keyboard, so dictation is off. Restart Murmur to try again.
       </span>
-      <button type="button" className="hotkey-banner-button" onClick={() => void restart()}>
+      <button type="button" className="btn-ghost hotkey-banner-button" onClick={() => void restart()}>
         Restart Murmur
       </button>
       {error && <span className="hotkey-banner-error">{error}</span>}

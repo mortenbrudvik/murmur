@@ -77,7 +77,7 @@ export default function ModelStep({ engineStatus, cudaTipDismissed, onDismissCud
 
   return (
     <>
-      <h1 className="setup-title" tabIndex={-1}>
+      <h1 className="page-title setup-title" tabIndex={-1}>
         Getting Murmur ready
       </h1>
       <p className="setup-muted">{`Murmur turns speech into text on this PC. It needs its speech model once${size}.`}</p>

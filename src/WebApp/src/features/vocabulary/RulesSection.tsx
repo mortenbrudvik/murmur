@@ -65,7 +65,7 @@ export default function RulesSection({ replacements, apply, error }: Props) {
 
   return (
     <section className="page-section" aria-labelledby="vocab-rules-title">
-      <h2 id="vocab-rules-title">Replacement rules</h2>
+      <h2 className="section-title" id="vocab-rules-title">Replacement rules</h2>
       <div className="vocab-rules">
         <table aria-label="Replacement rules">
           <thead>
@@ -127,7 +127,7 @@ export default function RulesSection({ replacements, apply, error }: Props) {
                 />
               </td>
               <td className="vocab-rule-end">
-                <button type="button" className="vocab-add" disabled={spokenDraft.trim() === ""} onClick={() => void addRule()}>
+                <button type="button" className="btn-ghost" disabled={spokenDraft.trim() === ""} onClick={() => void addRule()}>
                   Add
                 </button>
               </td>
