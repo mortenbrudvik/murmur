@@ -238,6 +238,9 @@ public sealed class DictationController : IDisposable
                 Abandon();
                 _pill.Hide();
                 break;
+            case DictationAction.CancelNothingHeard:
+                CancelNothingHeard();
+                break;
             case DictationAction.None when !_machine.IsActive:
                 // An armed press that came to nothing (a shortcut, Esc, or a release only the tick saw) started nothing
                 // but its tick. Otherwise there is nothing running while idle, and this does nothing.
@@ -542,6 +545,23 @@ public sealed class DictationController : IDisposable
         _machine.Reset();
         ShowProblem(MicrophoneUnavailableNotice);
         LogRecordingEnded(DictationOutcome.Failed);
+    }
+
+    /// <summary>
+    /// A hands-free session heard no speech in its first seconds: drops it and says so, like a held recording that heard
+    /// nothing. Otherwise a muted microphone would look like Murmur giving up without a word.
+    /// </summary>
+    private void CancelNothingHeard()
+    {
+        // Logged here as silence, not by Abandon as a cancel: nobody cancelled it.
+        if (_recording)
+        {
+            _recording = false;
+            LogRecordingEnded(DictationOutcome.Silence);
+        }
+
+        Abandon();
+        ShowProblem(NothingHeardNotice);
     }
 
     private void StopRecording(bool paste, DateTimeOffset releasedAt)
