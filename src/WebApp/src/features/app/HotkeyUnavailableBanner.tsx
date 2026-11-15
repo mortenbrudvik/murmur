@@ -1,7 +1,6 @@
-import { useState } from "react";
 import "./HotkeyUnavailableBanner.css";
 import { restartMurmur } from "../settings/appActions";
-import { failure } from "../../interop/errorMessage";
+import { useAppAction } from "../../hooks/useAppAction";
 import type { InputStatus } from "../../types/domain";
 
 /**
@@ -10,18 +9,9 @@ import type { InputStatus } from "../../types/domain";
  * Nothing is shown while the hook works or its status is still unknown.
  */
 export default function HotkeyUnavailableBanner({ status }: { status: InputStatus | null }) {
-  const [error, setError] = useState<string | null>(null);
+  const [restart, error] = useAppAction(restartMurmur, "Could not restart Murmur");
 
   if (!status || status.hookInstalled) return null;
-
-  async function restart() {
-    setError(null);
-    try {
-      await restartMurmur();
-    } catch (err) {
-      setError(failure("Could not restart Murmur", err));
-    }
-  }
 
   return (
     <div className="hotkey-banner" role="alert">

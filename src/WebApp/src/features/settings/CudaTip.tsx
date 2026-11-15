@@ -1,7 +1,7 @@
 import { useState } from "react";
 import "./CudaTip.css";
 import { openLink, restartMurmur } from "./appActions";
-import { failure } from "../../interop/errorMessage";
+import { useAppAction } from "../../hooks/useAppAction";
 import type { GpuAdvice, LinkTarget } from "../../types/domain";
 
 interface Props {
@@ -20,7 +20,8 @@ interface Props {
 export default function CudaTip({ advice, variant, onDismiss }: Props) {
   // In the setup variant, Restart only makes sense once the user has gone to get CUDA.
   const [linkOpened, setLinkOpened] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [open, openError] = useAppAction(openLink, "Could not open the link");
+  const [restart, restartError] = useAppAction(restartMurmur, "Could not restart Murmur");
 
   if (!advice || (advice.state !== "installCuda" && advice.state !== "updateDriver")) return null;
 
@@ -29,22 +30,7 @@ export default function CudaTip({ advice, variant, onDismiss }: Props) {
   const gpuName = advice.gpuName || "NVIDIA graphics card";
 
   async function openTarget(target: LinkTarget) {
-    setError(null);
-    try {
-      await openLink(target);
-      setLinkOpened(true);
-    } catch (err) {
-      setError(failure("Could not open the link", err));
-    }
-  }
-
-  async function restart() {
-    setError(null);
-    try {
-      await restartMurmur();
-    } catch (err) {
-      setError(failure("Could not restart Murmur", err));
-    }
+    if (await open(target)) setLinkOpened(true);
   }
 
   return (
@@ -81,10 +67,13 @@ export default function CudaTip({ advice, variant, onDismiss }: Props) {
             </button>
           )}
         </div>
-        {error && (
-          <p className="cuda-tip-error" role="alert">
-            {error}
-          </p>
+        {[openError, restartError].map(
+          (error) =>
+            error && (
+              <p className="cuda-tip-error" role="alert" key={error}>
+                {error}
+              </p>
+            ),
         )}
       </div>
     </div>

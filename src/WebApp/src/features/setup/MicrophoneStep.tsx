@@ -1,11 +1,10 @@
-import { useState } from "react";
 import StepFooter from "./StepFooter";
 import { useMicLevel } from "./useMicLevel";
 import { openLink } from "../settings/appActions";
 import MicrophoneSelect from "../settings/MicrophoneSelect";
 import { useMicrophones } from "../settings/useMicrophones";
 import { useSettings } from "../settings/useSettings";
-import { failure } from "../../interop/errorMessage";
+import { useAppAction } from "../../hooks/useAppAction";
 
 interface Props {
   onNext: () => void;
@@ -29,16 +28,7 @@ function LevelMeter({ level }: { level: number }) {
 /** Listens on one microphone for as long as it is mounted: whether Windows lets Murmur in, and the level meter. */
 function MicrophoneTest({ microphoneId }: { microphoneId: string | null }) {
   const { level, result, restart } = useMicLevel(microphoneId);
-  const [linkError, setLinkError] = useState<string | null>(null);
-
-  async function openMicrophoneSettings() {
-    setLinkError(null);
-    try {
-      await openLink("microphonePrivacy");
-    } catch (err) {
-      setLinkError(failure("Could not open the link", err));
-    }
-  }
+  const [openMicrophoneSettings, linkError] = useAppAction(() => openLink("microphonePrivacy"), "Could not open the link");
 
   return (
     <div className="setup-row">
