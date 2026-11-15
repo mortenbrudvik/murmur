@@ -1,4 +1,5 @@
 import "./EngineStatus.css";
+import DownloadBar from "../../components/DownloadBar";
 import type { DownloadProgress, EngineStatus } from "../../types/domain";
 import { describeEngineStatus, describeModelSwitch, type EngineStatusView } from "./engineStatusText";
 import { formatDownloadLine } from "./formatDownload";
@@ -7,18 +8,7 @@ import { formatDownloadLine } from "./formatDownload";
 function StatusLine({ view, detail }: { view: EngineStatusView; detail: string | null }) {
   return (
     <div className="engine-status">
-      {view.progress !== null && (
-        <div
-          className="engine-progress"
-          role="progressbar"
-          aria-label="Model download"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={view.progress}
-        >
-          <div className="engine-progress-fill" style={{ width: `${view.progress}%` }} />
-        </div>
-      )}
+      {view.progress !== null && <DownloadBar percent={view.progress} />}
       <span className={`engine-status-text engine-status-${view.tone}`}>{view.text}</span>
       {detail && <span className="engine-status-detail">{detail}</span>}
     </div>
@@ -32,7 +22,7 @@ export default function EngineStatusLine({ status }: { status: EngineStatus }) {
   return <StatusLine view={describeEngineStatus(status)} detail={detail} />;
 }
 
-/** A model switch's download, which runs in the background while the old model stays ready. Shown by the banner. */
+/** A model switch's download, which runs in the background while the old model stays ready: in the banner, and under the Settings model choice. */
 export function ModelSwitchLine({ download }: { download: DownloadProgress }) {
   return <StatusLine view={describeModelSwitch(download)} detail={formatDownloadLine(download)} />;
 }

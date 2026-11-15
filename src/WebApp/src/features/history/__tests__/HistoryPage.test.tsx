@@ -98,16 +98,21 @@ describe("HistoryPage", () => {
     mockApi([todayEntry("a", 10, 0, { text: "copy me" })]);
 
     render(<HistoryPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    const button = await screen.findByRole("button", { name: "Copy dictation from 10:00 in Claude" });
+    fireEvent.click(button);
 
     // Not navigator.clipboard: that copy would land in Win+V clipboard history.
     expect(apiClient.call).toHaveBeenCalledWith("history", "copy", { id: "a" });
     expect(writeText).not.toHaveBeenCalled();
-    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    await waitFor(() => expect(button.textContent).toBe("Copied"));
+    // Read out politely, as the button keeps its name.
+    expect(screen.getByRole("status").textContent).toBe("Copied");
+    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
 
-    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(button.textContent).toBe("Copy");
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 
   it("keeps a card's Copied state when a new entry is pushed into the same day", async () => {
@@ -115,14 +120,14 @@ describe("HistoryPage", () => {
     mockApi([todayEntry("a", 10, 0, { text: "copy me" })]);
 
     render(<HistoryPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
-    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Copy dictation from 10:00 in Claude" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy dictation from 10:00 in Claude" }).textContent).toBe("Copied"));
 
     pushAdded(todayEntry("b", 11, 0, { text: "just dictated" }));
 
     expect(await screen.findByText("just dictated")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Copy dictation from 10:00 in Claude" }).textContent).toBe("Copied");
+    expect(screen.getByRole("button", { name: "Copy dictation from 11:00 in Claude" }).textContent).toBe("Copy");
   });
 
   it.each([
@@ -133,13 +138,15 @@ describe("HistoryPage", () => {
     mockApi([todayEntry("a", 10, 0)], { "history.copy": copy });
 
     render(<HistoryPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    const button = await screen.findByRole("button", { name: "Copy dictation from 10:00 in Claude" });
+    fireEvent.click(button);
 
-    expect(await screen.findByRole("button", { name: "Copy failed" })).toBeTruthy();
+    await waitFor(() => expect(button.textContent).toBe("Copy failed"));
+    expect(screen.getByRole("status").textContent).toBe("Copy failed");
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
 
-    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(button.textContent).toBe("Copy");
   });
 
   it("deletes an entry with the x button", async () => {
@@ -147,7 +154,7 @@ describe("HistoryPage", () => {
 
     render(<HistoryPage />);
     await screen.findByText("text a");
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete dictation from 10:00 in Claude" }));
 
     await waitFor(() => expect(screen.queryByText("text a")).toBeNull());
     expect(apiClient.call).toHaveBeenCalledWith("history", "delete", { id: "a" });
@@ -162,9 +169,12 @@ describe("HistoryPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
 
     expect(screen.getByText("Clear all history?")).toBeTruthy();
+    // Clear all is gone: the focus goes to the answer that keeps everything, not to the page.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "No" }));
     fireEvent.click(screen.getByRole("button", { name: "No" }));
 
     expect(screen.queryByText("Clear all history?")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Clear all" }));
     expect(apiClient.call).not.toHaveBeenCalledWith("history", "clear", {});
     expect(screen.getByText("text a")).toBeTruthy();
   });
@@ -181,6 +191,8 @@ describe("HistoryPage", () => {
     expect(apiClient.call).toHaveBeenCalledWith("history", "clear", {});
     expect(screen.queryByText("Clear all history?")).toBeNull();
     expect(await screen.findByText(/Nothing yet/)).toBeTruthy();
+    // Clear all goes with the history, so the focus waits in the search box.
+    expect(document.activeElement).toBe(screen.getByRole("searchbox", { name: "Search history" }));
   });
 
   it("shows an inline error when a delete fails", async () => {
@@ -188,7 +200,7 @@ describe("HistoryPage", () => {
 
     render(<HistoryPage />);
     await screen.findByText("text a");
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete dictation from 10:00 in Claude" }));
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/could not delete/i);
     expect(screen.getByText("text a")).toBeTruthy();

@@ -11,11 +11,17 @@ const LABELS: Record<CopyState, string> = {
   failed: "Copy failed",
 };
 
+interface Props {
+  entryId: string;
+  /** The button's accessible name ("Copy dictation from 10:42 in Notepad"), which stays put while the text shows the outcome. */
+  label: string;
+}
+
 /**
  * Copies a history entry's text. Through Murmur rather than navigator.clipboard, so the copy stays out of Win+V
  * clipboard history and the cloud clipboard, like every other clipboard write Murmur makes.
  */
-export default function CopyButton({ entryId }: { entryId: string }) {
+export default function CopyButton({ entryId, label }: Props) {
   const [state, setState] = useState<CopyState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -36,12 +42,19 @@ export default function CopyButton({ entryId }: { entryId: string }) {
   }
 
   return (
-    <button
-      type="button"
-      className={`history-action history-copy history-copy-${state}`}
-      onClick={() => void copy()}
-    >
-      {LABELS[state]}
-    </button>
+    <>
+      <button
+        type="button"
+        className={`history-action history-copy history-copy-${state}`}
+        aria-label={label}
+        onClick={() => void copy()}
+      >
+        {LABELS[state]}
+      </button>
+      {/* The outcome is only seen on the button, so it is read out here; empty again once the button says Copy. */}
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {state === "idle" ? "" : LABELS[state]}
+      </span>
+    </>
   );
 }

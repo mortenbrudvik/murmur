@@ -1,11 +1,10 @@
-import { useState } from "react";
 import StepFooter from "./StepFooter";
 import { useMicLevel } from "./useMicLevel";
 import { openLink } from "../settings/appActions";
 import MicrophoneSelect from "../settings/MicrophoneSelect";
 import { useMicrophones } from "../settings/useMicrophones";
 import { useSettings } from "../settings/useSettings";
-import { failure } from "../../interop/errorMessage";
+import { useAppAction } from "../../hooks/useAppAction";
 
 interface Props {
   onNext: () => void;
@@ -29,16 +28,7 @@ function LevelMeter({ level }: { level: number }) {
 /** Listens on one microphone for as long as it is mounted: whether Windows lets Murmur in, and the level meter. */
 function MicrophoneTest({ microphoneId }: { microphoneId: string | null }) {
   const { level, result, restart } = useMicLevel(microphoneId);
-  const [linkError, setLinkError] = useState<string | null>(null);
-
-  async function openMicrophoneSettings() {
-    setLinkError(null);
-    try {
-      await openLink("microphonePrivacy");
-    } catch (err) {
-      setLinkError(failure("Could not open the link", err));
-    }
-  }
+  const [openMicrophoneSettings, linkError] = useAppAction(() => openLink("microphonePrivacy"), "Could not open the link");
 
   return (
     <div className="setup-row">
@@ -56,12 +46,12 @@ function MicrophoneTest({ microphoneId }: { microphoneId: string | null }) {
         {(result?.state === "accessDenied" || result?.state === "failed") && (
           <div className="setup-actions">
             {result.state === "accessDenied" && (
-              <button type="button" className="setup-button" onClick={() => void openMicrophoneSettings()}>
+              <button type="button" className="btn-ghost setup-button" onClick={() => void openMicrophoneSettings()}>
                 Open microphone settings
               </button>
             )}
             {/* Windows' settings do not hide Murmur, so allowing access there is only noticed by testing again. */}
-            <button type="button" className="setup-button" onClick={restart}>
+            <button type="button" className="btn-ghost setup-button" onClick={restart}>
               Check again
             </button>
           </div>
@@ -86,7 +76,7 @@ export default function MicrophoneStep({ onNext, saveError }: Props) {
 
   return (
     <>
-      <h1 className="setup-title" tabIndex={-1}>
+      <h1 className="page-title setup-title" tabIndex={-1}>
         Check your microphone
       </h1>
       <p className="setup-muted">Say something — the bars should move.</p>
@@ -95,7 +85,7 @@ export default function MicrophoneStep({ onNext, saveError }: Props) {
           <label htmlFor="setup-microphone">Microphone</label>
           <MicrophoneSelect
             id="setup-microphone"
-            className="text-input setup-select"
+            className="text-input select"
             value={microphoneId}
             microphones={microphones}
             microphonesLoaded={loaded}

@@ -1,7 +1,6 @@
-import { useState } from "react";
 import "./HotkeyUnavailableBanner.css";
 import { restartMurmur } from "../settings/appActions";
-import { failure } from "../../interop/errorMessage";
+import { useAppAction } from "../../hooks/useAppAction";
 import type { InputStatus } from "../../types/domain";
 
 /**
@@ -10,25 +9,16 @@ import type { InputStatus } from "../../types/domain";
  * Nothing is shown while the hook works or its status is still unknown.
  */
 export default function HotkeyUnavailableBanner({ status }: { status: InputStatus | null }) {
-  const [error, setError] = useState<string | null>(null);
+  const [restart, error] = useAppAction(restartMurmur, "Could not restart Murmur");
 
   if (!status || status.hookInstalled) return null;
-
-  async function restart() {
-    setError(null);
-    try {
-      await restartMurmur();
-    } catch (err) {
-      setError(failure("Could not restart Murmur", err));
-    }
-  }
 
   return (
     <div className="hotkey-banner" role="alert">
       <span className="hotkey-banner-text">
         Windows didn't let Murmur watch the keyboard, so dictation is off. Restart Murmur to try again.
       </span>
-      <button type="button" className="hotkey-banner-button" onClick={() => void restart()}>
+      <button type="button" className="btn-ghost hotkey-banner-button" onClick={() => void restart()}>
         Restart Murmur
       </button>
       {error && <span className="hotkey-banner-error">{error}</span>}

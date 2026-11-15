@@ -1,7 +1,7 @@
 import { useState } from "react";
 import StepFooter from "./StepFooter";
 import { describeEngineStatus } from "../settings/engineStatusText";
-import { useHotkeyName } from "../history/useHotkeyName";
+import { useHotkeyName } from "../../hooks/useHotkeyName";
 import { useWebViewEvent } from "../../hooks/useWebViewEvent";
 import type { EngineStatus, HistoryEntry } from "../../types/domain";
 
@@ -24,14 +24,14 @@ export default function TryItStep({ engineStatus, onDone, saveError }: Props) {
 
   return (
     <>
-      <h1 className="setup-title" tabIndex={-1}>
+      <h1 className="page-title setup-title" tabIndex={-1}>
         Try it
       </h1>
       {/* Outside the branches below, so that it stays in the page when the model becomes ready. */}
       <div className="setup-live" role="status" aria-live="polite">
         {ready ? (
           <p className="setup-muted">
-            Click the box, hold <kbd className="setup-key">{hotkey}</kbd>, say a sentence, and let go.
+            Click the box, hold <kbd className="keycap keycap-inline">{hotkey}</kbd>, say a sentence, and let go.
           </p>
         ) : (
           <p className="setup-muted">Waiting for the speech model…</p>
@@ -46,7 +46,7 @@ export default function TryItStep({ engineStatus, onDone, saveError }: Props) {
             {dictated && <p className="setup-ok">✓ That's it — Murmur types wherever your cursor is.</p>}
           </div>
           <p className="setup-muted setup-small">
-            Tap <kbd className="setup-key">{hotkey}</kbd> once for hands-free; tap again to finish. Esc cancels. Change the key in Settings.
+            Tap <kbd className="keycap keycap-inline">{hotkey}</kbd> once for hands-free; tap again to finish. Esc cancels. Change the key in Settings.
           </p>
         </>
       ) : (

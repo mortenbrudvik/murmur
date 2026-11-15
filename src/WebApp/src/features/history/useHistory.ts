@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "../../interop/WebViewApiClient";
+import { errorMessage } from "../../interop/errorMessage";
 import { useWebViewEvent } from "../../hooks/useWebViewEvent";
 import type { HistoryEntry, HistoryPageResult } from "../../types/domain";
 
 const LIMIT = 200;
 const SEARCH_DEBOUNCE_MS = 200;
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error && err.message ? err.message : "Something went wrong.";
-}
 
 /** Same rule as the server: a blank search matches everything, otherwise a case-insensitive contains. */
 function matchesSearch(entry: HistoryEntry, search: string): boolean {

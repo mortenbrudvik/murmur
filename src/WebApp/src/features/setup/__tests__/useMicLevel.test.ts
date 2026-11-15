@@ -84,7 +84,7 @@ describe("useMicLevel", () => {
 
     expect(result.current.result).toBeNull();
     await waitFor(() => expect(result.current.result).toEqual(listening));
-    expect(apiClient.call).toHaveBeenCalledWith("setup", "startMicTest", { microphoneId: "headset" });
+    expect(apiClient.call).toHaveBeenCalledWith("setup", "startMicTest", { microphoneId: "headset" }, { timeoutMs: 30_000 });
   });
 
   it("tests the Windows default when no microphone is chosen", async () => {

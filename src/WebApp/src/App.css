@@ -1,3 +1,8 @@
+/* Inherited by every area that scrolls. */
+#root {
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
 .shell {
   display: flex;
   height: 100%;
@@ -47,11 +52,11 @@
 
 .sidebar-item.active {
   color: var(--text-strong);
-  background: rgba(143, 179, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+/* Inside the item: the sidebar's edge would cut the ring off. */
 .sidebar-item:focus-visible {
-  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -74,12 +79,12 @@
   flex: none;
   padding: 6px 24px;
   font-size: 12px;
-  background: rgba(143, 179, 255, 0.1);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   border-bottom: 1px solid var(--border-faint);
 }
 
 .engine-banner-error {
-  background: rgba(255, 107, 107, 0.1);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
 }
 
 /* Shared chrome of the Vocabulary and Settings pages: they scroll as a whole, History scrolls its list. */
@@ -87,10 +92,10 @@
   height: 100%;
   padding: 20px 24px 28px;
   overflow-y: auto;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
 }
 
-.page h1 {
+/* The h1 of every page and setup step. */
+.page-title {
   font-size: 20px;
   font-weight: 600;
   color: var(--text-strong);
@@ -106,7 +111,8 @@
   margin-top: 20px;
 }
 
-.page-section h2 {
+/* A small capitals heading over a group: a Vocabulary section, a History day. */
+.section-title {
   margin-bottom: 8px;
   font-size: 11px;
   font-weight: 600;
@@ -125,7 +131,7 @@
   padding: 7px 10px;
   font-size: 13px;
   color: var(--error);
-  background: rgba(255, 107, 107, 0.1);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
   border-radius: 6px;
 }
 
@@ -148,9 +154,79 @@
   border-color: var(--accent);
 }
 
-.page button:focus-visible,
-.page .text-input:focus-visible,
-.page input[type="checkbox"]:focus-visible {
+/* A picker: the Settings and setup microphone. */
+.select {
+  width: 280px;
+  max-width: 100%;
+}
+
+.select option {
+  color: var(--text);
+  background: var(--input-bg);
+}
+
+/* The outlined button in accent; disabled (or aria-disabled, to keep the focus) it goes grey. */
+.btn-ghost {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 6px;
+}
+
+.btn-ghost:hover:not(:disabled, [aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.btn-ghost:disabled,
+.btn-ghost[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+  border-color: var(--border);
+}
+
+/* The solid accent button: the one step that matters (Done, Get CUDA). */
+.btn-primary {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--bg);
+  cursor: pointer;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+/* A key: the hotkey on Settings, and (with .keycap-inline) a key named in a sentence. */
+.keycap {
+  padding: 3px 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-strong);
+  background: var(--keycap-bg);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-width: 3px;
+  border-radius: 6px;
+}
+
+.keycap-inline {
+  padding: 1px 6px;
+  font-size: 12px;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+
+/* One focus ring for every control (and the cards and headings script focuses). After .text-input, whose
+   outline: none is for the mouse. */
+:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

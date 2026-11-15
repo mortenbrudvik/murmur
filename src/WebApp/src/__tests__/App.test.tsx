@@ -156,6 +156,35 @@ describe("App engine status banner", () => {
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
+
+  it("leaves a download out on Settings, whose engine card shows it: one progress bar", async () => {
+    mockServer({ ...ready, state: "downloading", runtime: null, download });
+    // The model switch's line is under the model choice, so the choice has to be known.
+    const server = vi.mocked(apiClient.call).getMockImplementation()!;
+    vi.mocked(apiClient.call).mockImplementation(async (service, method, params) =>
+      service === "models" && method === "getChoice"
+        ? { selected: "smallEn", recommended: "largeV3Turbo", options: [{ id: "smallEn", label: "Fast", sizeBytes: 488_000_000 }] }
+        : server(service, method, params),
+    );
+
+    render(<App />);
+    expect(await screen.findByText("Downloading speech model… 25%")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getAllByRole("progressbar", { name: "Model download" })).toHaveLength(1);
+    expect(screen.getAllByText("Downloading speech model… 25%")).toHaveLength(1);
+    expect(document.querySelector(".engine-banner")).toBeNull();
+
+    pushStatus({ ...ready, download: { ...download, modelName: "Whisper small (English)" } });
+    expect(await screen.findByText("Downloading Whisper small (English)… 25%")).toBeTruthy();
+    expect(screen.getAllByRole("progressbar", { name: "Model download" })).toHaveLength(1);
+    expect(document.querySelector(".engine-banner")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByRole("heading", { name: "History" })).toBeTruthy();
+    expect(document.querySelector(".engine-banner")?.textContent).toContain("Downloading Whisper small (English)… 25%");
+  });
 });
 
 describe("App hotkey alert", () => {

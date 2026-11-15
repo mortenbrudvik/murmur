@@ -20,6 +20,12 @@
   --ok: #3ecf8e;
   --border: rgba(255, 255, 255, 0.1);
   --border-faint: rgba(255, 255, 255, 0.05);
+  /* Web only: the WPF windows have no counterpart. */
+  --text-body: #d5dae6;
+  --accent-soft-text: #c6d6ff;
+  --accent-2: #b59bff;
+  --keycap-bg: #2d323e;
+  --track: #2c313c;
 
   font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.5;

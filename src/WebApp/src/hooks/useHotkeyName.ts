@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { apiClient } from "../../interop/WebViewApiClient";
-import type { MurmurSettings } from "../../types/domain";
+import { apiClient } from "../interop/WebViewApiClient";
+import type { MurmurSettings } from "../types/domain";
 
-export const DEFAULT_HOTKEY_NAME = "Right Ctrl";
+const DEFAULT_HOTKEY_NAME = "Right Ctrl";
 
 /** The configured hotkey's display name; the default one until it is known or if it cannot be read. */
 export function useHotkeyName(): string {

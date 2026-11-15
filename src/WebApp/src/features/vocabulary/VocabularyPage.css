@@ -23,8 +23,8 @@
   max-width: 100%;
   padding: 2px 4px 2px 10px;
   font-size: 13px;
-  color: #c6d6ff;
-  background: rgba(143, 179, 255, 0.14);
+  color: var(--accent-soft-text);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 999px;
 }
 
@@ -51,7 +51,7 @@
 .vocab-chip button:hover,
 .vocab-rule-remove:hover {
   color: var(--error);
-  background: rgba(255, 107, 107, 0.12);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
 }
 
 .vocab-word-input {
@@ -110,25 +110,4 @@
 .vocab-rule-remove {
   padding: 2px 8px;
   font-size: 16px;
-}
-
-.vocab-add {
-  padding: 5px 12px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--accent);
-  cursor: pointer;
-  background: none;
-  border: 1px solid rgba(143, 179, 255, 0.45);
-  border-radius: 5px;
-}
-
-.vocab-add:hover:not(:disabled) {
-  background: rgba(143, 179, 255, 0.12);
-}
-
-.vocab-add:disabled {
-  color: var(--dim);
-  cursor: default;
-  border-color: var(--border);
 }

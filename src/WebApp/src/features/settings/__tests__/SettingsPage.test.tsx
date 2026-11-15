@@ -146,10 +146,17 @@ describe("SettingsPage", () => {
       let press: (key: HotkeyDefinition | null) => void = () => {};
       await renderLoaded({ captureHotkey: () => new Promise((resolve) => { press = resolve; }) });
 
-      fireEvent.click(screen.getByRole("button", { name: "Change" }));
+      const button = screen.getByRole("button", { name: "Change" });
+      button.focus();
+      fireEvent.click(button);
 
       const waiting = (await screen.findByRole("button", { name: "Press the key you want… (Esc to cancel)" })) as HTMLButtonElement;
-      expect(waiting.disabled).toBe(true);
+      // aria-disabled, not disabled: the focus stays on it rather than dropping to the page.
+      expect(waiting.getAttribute("aria-disabled")).toBe("true");
+      expect(waiting.disabled).toBe(false);
+      expect(document.activeElement).toBe(waiting);
+      // Pressing it again while waiting starts no second capture.
+      fireEvent.click(waiting);
       expect(callsTo("settings.captureHotkey")).toHaveLength(1);
 
       await act(async () => { press(f9); });
@@ -534,9 +541,10 @@ describe("SettingsPage", () => {
       await screen.findByRole("radio", { name: FAST });
 
       expect(screen.getByText("Ready · CUDA")).toBeTruthy();
-      expect(screen.getByText("Downloading Whisper small (English)")).toBeTruthy();
+      // The same line as the banner's, which App leaves out on this page.
+      expect(screen.getByText("Downloading Whisper small (English)… 25%")).toBeTruthy();
       expect(screen.getByText("122 MB of 488 MB · 18 MB/s · less than a minute left")).toBeTruthy();
-      expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("25");
+      expect(screen.getByRole("progressbar", { name: "Model download" }).getAttribute("aria-valuenow")).toBe("25");
     });
 
     it("shows Reconnecting… in the switch progress line", async () => {
@@ -544,7 +552,8 @@ describe("SettingsPage", () => {
       await renderLoaded({ choice }, engine({ state: "ready", runtime: "Cuda", download }));
       await screen.findByRole("radio", { name: FAST });
 
-      expect(screen.getByText("122 MB of 488 MB · Reconnecting…")).toBeTruthy();
+      expect(screen.getByText("Reconnecting…")).toBeTruthy();
+      expect(screen.getByText("122 MB of 488 MB")).toBeTruthy();
     });
 
     it("shows no switch progress line when nothing is downloading", async () => {

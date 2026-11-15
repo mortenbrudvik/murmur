@@ -1,5 +1,5 @@
 import StepFooter from "./StepFooter";
-import "../settings/EngineStatus.css";
+import DownloadBar from "../../components/DownloadBar";
 import CudaTip from "../settings/CudaTip";
 import { describeEngineStatus } from "../settings/engineStatusText";
 import { describeDownload, formatBytes } from "../settings/formatDownload";
@@ -25,16 +25,7 @@ function ModelCard({ status }: { status: EngineStatus | null }) {
           <span>Downloading speech model</span>
           {progress && <span className="setup-muted setup-small">{progress.amount}</span>}
         </div>
-        <div
-          className="engine-progress setup-bar"
-          role="progressbar"
-          aria-label="Model download"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={progress?.percent ?? 0}
-        >
-          <div className="engine-progress-fill" style={{ width: `${progress?.percent ?? 0}%` }} />
-        </div>
+        <DownloadBar className="setup-bar" percent={progress?.percent ?? 0} />
         <div className="setup-row setup-muted setup-small">
           <span>{progress?.detail}</span>
           <span>Resumes if interrupted</span>
@@ -86,7 +77,7 @@ export default function ModelStep({ engineStatus, cudaTipDismissed, onDismissCud
 
   return (
     <>
-      <h1 className="setup-title" tabIndex={-1}>
+      <h1 className="page-title setup-title" tabIndex={-1}>
         Getting Murmur ready
       </h1>
       <p className="setup-muted">{`Murmur turns speech into text on this PC. It needs its speech model once${size}.`}</p>

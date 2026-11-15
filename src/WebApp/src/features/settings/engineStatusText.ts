@@ -1,7 +1,7 @@
 import type { DownloadProgress, EngineStatus } from "../../types/domain";
 import { describeDownload } from "./formatDownload";
 
-export type EngineTone = "progress" | "info" | "ready" | "error";
+type EngineTone = "progress" | "info" | "ready" | "error";
 
 export interface EngineStatusView {
   text: string;
