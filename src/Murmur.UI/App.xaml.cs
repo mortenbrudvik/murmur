@@ -6,12 +6,9 @@ using Mediator;
 using Murmur.Common;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
-using Murmur.Core.Features.App;
 using Murmur.Core.Features.Engine;
 using Murmur.Core.Hardware;
-using Murmur.Core.Input;
 using Murmur.Core.Insertion;
-using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Setup;
 using Murmur.Core.Speech;
@@ -39,16 +36,13 @@ public partial class App : Application
     private IContainer? _container;
     private SingleInstanceGuard? _guard;
     private MainWindow? _mainWindow;
-    private InputHookHost? _inputHooks;
+    private InputHookService? _inputHooks;
     private TrayIconHost? _tray;
 
     /// <summary>The splash while it is up; null on a sign-in start and once it has handed over to the main window.</summary>
     private SplashWindow? _splash;
     private SplashViewModel? _splashModel;
     private SplashSession? _splashSession;
-
-    /// <summary>The About window while one is open.</summary>
-    private AboutWindow? _aboutWindow;
 
     // Knows whether Murmur is really exiting; until then closing the main window only hides it. Null before the
     // container exists, when there is no window to close yet.
@@ -213,15 +207,18 @@ public partial class App : Application
             ShowMainWindow();
             launcher.ShowSettings();
         };
-        _tray.AboutRequested += ShowAbout;
+        _tray.AboutRequested += _container.Resolve<AboutWindowPresenter>().Show;
         _tray.QuitRequested += Quit;
         _tray.Show();
 
         // 9. Dictation. The controller is created here, on the UI thread, because it captures this thread's
         // SynchronizationContext; hook signals reach it through the dispatcher. The hook starts in the background
-        // from here on, because a refused hook is tried once more after a short wait.
-        var controller = _container.Resolve<DictationController>();
-        StartInputHooksAsync(_container, controller).FireAndForget();
+        // from here on, because a refused hook is tried once more after a short wait. Everything the hook needs is
+        // resolved first, so a service that cannot be built still fails the start-up instead of passing for a refused
+        // hook.
+        _container.Resolve<DictationController>();
+        _inputHooks = _container.Resolve<InputHookService>();
+        _inputHooks.StartAsync().FireAndForget();
 
         // With "keep the microphone ready" on, the microphone opens now, in the background, so that the first
         // dictation is as quick as the ones after it.
@@ -239,13 +236,8 @@ public partial class App : Application
         var mediator = _container.Resolve<IMediator>();
         engine.StatusChanged += status => mediator.Publish(new EngineStatusChangedNotification(status)).FireAndForget();
 
-        // Windows notifications through the tray icon, for what happens while the window is not in front: the model is
-        // ready after a download, the engine failed, the download has no internet. The notifier's state lives on the
-        // UI thread, where the icon is.
-        var notifier = new TrayNotifier();
-        var settings = _container.Resolve<ISettingsService>();
-        var input = _container.Resolve<InputStatus>();
-        engine.StatusChanged += status => Dispatcher.BeginInvoke(() => NotifyTray(notifier, settings, input, status));
+        // Windows notifications through the tray icon, for what happens while the window is not in front.
+        _container.Resolve<TrayEngineNotifications>().Start();
 
         // The splash's status line follows the engine too, for as long as the splash is up.
         _splashModel?.Apply(engine.Status);
@@ -389,20 +381,6 @@ public partial class App : Application
     internal static bool ShouldShowSplash(LaunchArguments launch, IPackageIdentity identity) =>
         !IsSignInStart(launch, identity);
 
-    /// <summary>Shows what <see cref="TrayNotifier"/> finds worth a notification. Runs on the UI thread.</summary>
-    private void NotifyTray(TrayNotifier notifier, ISettingsService settings, InputStatus input, EngineStatus status)
-    {
-        if (IsQuitting)
-            return;
-
-        // Only a ready notice names the hotkey, so the settings are not read for every download progress update.
-        var defaultName = HotkeyDefinition.Default.DisplayName;
-        var hotkeyName = status.State == EngineState.Ready ? settings.ReadHotkeyName(fallback: defaultName) : defaultName;
-        var notice = notifier.OnStatus(status, _mainWindow?.IsActive == true, hotkeyName, input.HookInstalled);
-        if (notice is not null)
-            _tray?.ShowNotification(notice.Title, notice.Message);
-    }
-
     /// <summary>
     /// Applies the saved "keep the microphone ready" setting. Settings that cannot be read leave it off, which is its
     /// default; that must not keep Murmur from starting.
@@ -477,59 +455,6 @@ public partial class App : Application
             .CreateLogger();
     }
 
-    /// <summary>
-    /// Starts the keyboard hook, which <see cref="InputHookStarter"/> tries twice without holding up the UI thread. What
-    /// the hook needs is resolved here, before the first attempt, so a service that cannot be built still fails the
-    /// start-up instead of passing for a refused hook.
-    /// </summary>
-    private Task StartInputHooksAsync(IContainer container, DictationController controller)
-    {
-        var dispatcher = Dispatcher;
-        var matcher = container.Resolve<HotkeyMatcher>();
-        var coordinator = container.Resolve<HotkeyCaptureCoordinator>();
-        var keyboard = container.Resolve<IKeyboardSender>();
-        var time = container.Resolve<TimeProvider>();
-        var starter = new InputHookStarter(
-            () => new InputHookHost(
-                matcher, coordinator, keyboard, time,
-                (signal, at) => dispatcher.BeginInvoke(() => controller.HandleSignal(signal, at))),
-            time);
-
-        return KeepInputHooksAsync(starter, container.Resolve<InputStatus>(), container.Resolve<IMediator>());
-    }
-
-    /// <summary>
-    /// Keeps the host that <paramref name="starter"/> started for as long as Murmur runs. If the hook cannot be installed,
-    /// Murmur keeps running (history, settings) but the hotkey cannot work, so it says so: the tray tooltip and a
-    /// notification, and the main window's alert (through <see cref="InputStatus"/>, and a push for a window that
-    /// asked before the second attempt ended).
-    /// </summary>
-    private async Task KeepInputHooksAsync(InputHookStarter starter, InputStatus input, IMediator mediator)
-    {
-        // Resumes on the UI thread, where Quit also runs.
-        var hooks = await starter.StartAsync();
-        if (IsQuitting)
-        {
-            // Murmur began to quit during the wait, after StopInputAndTray found no hooks to remove.
-            hooks?.Dispose();
-            return;
-        }
-
-        if (hooks is not null)
-        {
-            _inputHooks = hooks;
-            return;
-        }
-
-        input.Error = starter.Failure?.Message;
-        input.HookInstalled = false;
-
-        _tray?.Refresh();
-        // Persistent: the hotkey stays off for the whole run, so no later notice may push this one out.
-        _tray?.ShowNotification(TrayNotifier.HotkeyUnavailable.Title, TrayNotifier.HotkeyUnavailable.Message, persistent: true);
-        mediator.Publish(new InputStatusChangedNotification(input)).FireAndForget();
-    }
-
     private static void ApplyStartupRegistration(IContainer container)
     {
         try
@@ -541,35 +466,6 @@ public partial class App : Application
         {
             Logger.Warning(ex, "Could not update the start-with-Windows entry");
         }
-    }
-
-    /// <summary>
-    /// "About" in the tray menu: the About window, on its own. The main window is not shown for it, and if it is open
-    /// it is left as it is. A second request brings the window that is already open to the front.
-    /// </summary>
-    private void ShowAbout()
-    {
-        if (IsQuitting || _container is null)
-            return;
-
-        // The history's totals and the engine's status as they are now, for a window opened again as for a new one.
-        _container.Resolve<AboutViewModel>().Refresh();
-
-        if (_aboutWindow is null)
-        {
-            var window = _container.Resolve<AboutWindow>();
-            window.Closed += (_, _) =>
-            {
-                if (ReferenceEquals(_aboutWindow, window))
-                    _aboutWindow = null;
-            };
-            _aboutWindow = window;
-        }
-
-        _aboutWindow.Show();
-        if (_aboutWindow.WindowState == WindowState.Minimized)
-            _aboutWindow.WindowState = WindowState.Normal;
-        _aboutWindow.Activate();
     }
 
     private void ShowMainWindow()
@@ -608,7 +504,6 @@ public partial class App : Application
 
         // A splash still up goes at once, without its hand-over.
         _splashSession?.Abandon();
-
 
         _inputHooks?.Dispose();
         _tray?.Dispose();

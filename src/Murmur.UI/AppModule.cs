@@ -56,9 +56,11 @@ public class AppModule : Module
         builder.RegisterType<MainWindow>().SingleInstance();
         builder.RegisterType<PillWindow>().SingleInstance();
         builder.RegisterType<AboutWindow>();
+        builder.RegisterType<AboutWindowPresenter>().SingleInstance();
         builder.RegisterType<PillPresenter>().As<IPillPresenter>().SingleInstance();
         builder.RegisterType<TrayIconHost>().SingleInstance();
         builder.RegisterType<TrayUserNotifier>().As<IUserNotifier>().SingleInstance();
+        builder.RegisterType<TrayEngineNotifications>().SingleInstance();
     }
 
     private static void RegisterCore(ContainerBuilder builder)
@@ -139,5 +141,6 @@ public class AppModule : Module
 
         // Resolve on the UI thread: it captures that thread's SynchronizationContext.
         builder.RegisterType<DictationController>().SingleInstance();
+        builder.RegisterType<InputHookService>().SingleInstance();
     }
 }
