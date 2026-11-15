@@ -85,4 +85,4 @@ Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Mur
 - .NET 10 SDK
 - Windows 11 SDK (10.0.26100)
 - Node.js 22+ LTS
-- WebView2 runtime (usually pre-installed on Windows 10/11)
+- WebView2 runtime (part of Windows 11)

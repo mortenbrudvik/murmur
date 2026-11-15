@@ -212,7 +212,7 @@ public sealed class AudioRecorderTests
     {
         // The capture thread has delivered a buffer (and is waiting for the recorder's lock) by the time
         // StartRecording throws. Releasing the device must not happen under that lock, because disposing
-        // the real WasapiCapture joins the capture thread.
+        // the real WasapiRecorder joins the capture thread.
         Thread? captureThread = null;
         FakeCaptureDevice? device = null;
         device = new FakeCaptureDevice

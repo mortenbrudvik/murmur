@@ -153,7 +153,7 @@ public sealed partial class TrayIconHost : IDisposable
     }
 
     /// <summary>
-    /// Shows a Windows notification (a balloon, which Windows 10 and 11 present as a toast) through the icon; clicking it
+    /// Shows a Windows notification (a balloon, which Windows 11 presents as a toast) through the icon; clicking it
     /// raises <see cref="OpenRequested"/>. Call on the UI thread. While the icon is not in the notification area yet
     /// (before <see cref="Show"/>, or while the taskbar is not ready) the notification waits and is shown as soon as the
     /// icon is there: right after a retry adds it, or at the next <see cref="Refresh"/> or status change when

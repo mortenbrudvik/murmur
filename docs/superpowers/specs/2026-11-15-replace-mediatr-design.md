@@ -1,7 +1,7 @@
 # Murmur — Replace MediatR with Mediator; platform packages on 11.x (design)
 
 **Date:** 2026-11-15
-**Status:** Approved in conversation 2026-11-15; this written spec awaits the owner's review
+**Status:** Approved 2026-11-15; implemented on `main` (`c141310`, with the review fixes in `353dbd9`)
 **Builds on:** `2026-10-29-murmur-design.md` (the IPC architecture), commit `9db4b87` (the last package update)
 
 ---

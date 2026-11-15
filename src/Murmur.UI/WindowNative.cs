@@ -11,7 +11,7 @@ internal static partial class WindowNative
     /// </summary>
     private const uint DWMWA_CLOAK = 13;
 
-    /// <summary>Cloaks or uncloaks a window. False when the compositor refused (it never does on Windows 10 and 11).</summary>
+    /// <summary>Cloaks or uncloaks a window. False when the compositor refused (it never does on Windows 11).</summary>
     internal static bool SetCloaked(nint window, bool cloaked)
     {
         var value = cloaked ? 1 : 0;
