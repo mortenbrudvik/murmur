@@ -38,6 +38,11 @@ public sealed class DictationDelivery
     private readonly IMediator _mediator;
     private readonly TimeProvider _time;
 
+    // The latest history write, which the next one waits for, so entries land in the order the dictations ended. Two can
+    // overlap: a dictation cancelled with Esc after Ctrl+V still saves, while the next one may already be saving.
+    private readonly Lock _storeLock = new();
+    private Task _lastStore = Task.CompletedTask;
+
     public DictationDelivery(
         ISpeechEngine engine, IEnumerable<ITranscriptPostProcessor> postProcessors, ITextInserter inserter,
         IHistoryStore history, IAudioArchive audioArchive, IVocabularyService vocabulary, IMediator mediator,
@@ -135,14 +140,24 @@ public sealed class DictationDelivery
 
     /// <summary>
     /// Records the dictation in history (with its audio, when kept) and announces it. The entry and its audio are written
-    /// on the thread pool; the announcement goes out on the caller's thread once both are done. Failures are logged,
-    /// never thrown.
+    /// on the thread pool, after any earlier dictation's; the announcement goes out on the caller's thread once both are
+    /// done. Failures are logged, never thrown.
     /// </summary>
     /// <param name="samples">The audio to keep with the entry, or null when audio is not kept.</param>
     /// <returns>Whether the entry is in history; losing only its audio or its announcement still counts as saved.</returns>
     private async Task<bool> SaveAsync(string text, string targetApp, bool pasted, float[]? samples)
     {
-        var entry = await Task.Run(() => Store(text, targetApp, pasted, samples));
+        Task<HistoryEntry?> storing;
+        lock (_storeLock)
+        {
+            // Store never throws, so a write that went wrong cannot hold up the ones after it.
+            storing = _lastStore.ContinueWith(
+                _ => Store(text, targetApp, pasted, samples),
+                CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            _lastStore = storing;
+        }
+
+        var entry = await storing;
         if (entry is null)
             return false;
 

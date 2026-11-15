@@ -231,8 +231,95 @@ public sealed class DictationDeliveryTests
         _inserter.DidNotReceiveWithAnyArgs().TryCopy(default!);
     }
 
+    [Fact]
+    public async Task KeepUnpastedAsync_WhileAnEarlierSaveIsStillWriting_SavesAfterIt()
+    {
+        // A dictation cancelled with Esc after Ctrl+V still saves, so its write can still be going when the next one's starts.
+        var history = new FirstAddWaitsStore();
+        var delivery = new DictationDelivery(
+            _engine, [], _inserter, history, _audioArchive, _vocabulary, _mediator, _time);
+
+        var first = delivery.KeepUnpastedAsync("first", Samples, keepAudio: false, IsCurrent);
+        await history.FirstWriting.WaitAsync(Ct);
+        var second = delivery.KeepUnpastedAsync("second", Samples, keepAudio: false, IsCurrent);
+
+        // Without the wait, the second write gets here and finishes first. With it, this times out.
+        await Task.WhenAny(history.SecondWriting, Task.Delay(TimeSpan.FromMilliseconds(200), Ct));
+        history.ReleaseFirst();
+        (await Task.WhenAll(first, second)).ShouldAllBe(outcome => outcome == DictationOutcome.SavedOnly);
+
+        history.Added.ShouldBe(["first", "second"]);
+    }
+
+    [Fact]
+    public async Task KeepUnpastedAsync_AfterAnEarlierSaveFailed_StillSaves()
+    {
+        _history.Add("first", Arg.Any<string>(), Arg.Any<bool>()).Throws(new IOException("locked"));
+        var delivery = Create();
+
+        await delivery.KeepUnpastedAsync("first", Samples, keepAudio: false, IsCurrent);
+        var outcome = await delivery.KeepUnpastedAsync("second", Samples, keepAudio: false, IsCurrent);
+
+        outcome.ShouldBe(DictationOutcome.SavedOnly);
+        _added.Select(e => e.Text).ShouldBe(["second"]);
+    }
+
     private bool IsCurrent() => _current;
 
     private DictationDelivery Create(IEnumerable<ITranscriptPostProcessor>? postProcessors = null) =>
         new(_engine, postProcessors ?? [], _inserter, _history, _audioArchive, _vocabulary, _mediator, _time);
+
+    /// <summary>
+    /// A history whose Add of "first" waits until <see cref="ReleaseFirst"/>, and which records the order the entries went
+    /// in. Hand-written rather than a substitute, which could itself make concurrent calls wait for each other.
+    /// </summary>
+    private sealed class FirstAddWaitsStore : IHistoryStore
+    {
+        private readonly TaskCompletionSource _firstWriting = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondWriting = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ManualResetEventSlim _releaseFirst = new();
+        private readonly List<string> _added = [];
+
+        public Task FirstWriting => _firstWriting.Task;
+
+        public Task SecondWriting => _secondWriting.Task;
+
+        public string[] Added
+        {
+            get
+            {
+                lock (_added)
+                    return [.. _added];
+            }
+        }
+
+        public void ReleaseFirst() => _releaseFirst.Set();
+
+        public HistoryEntry Add(string text, string targetApp, bool pasted)
+        {
+            if (text == "first")
+            {
+                _firstWriting.SetResult();
+                _releaseFirst.Wait(TimeSpan.FromSeconds(10));
+            }
+            else
+            {
+                _secondWriting.SetResult();
+            }
+
+            lock (_added)
+                _added.Add(text);
+            return new HistoryEntry(Guid.NewGuid(), DateTimeOffset.UnixEpoch, text, targetApp, pasted);
+        }
+
+        public HistoryPageResult Query(string? search, int limit, Guid? before) => throw new NotSupportedException();
+
+        public HistoryEntry? Find(Guid id) => throw new NotSupportedException();
+
+        public bool Delete(Guid id) => throw new NotSupportedException();
+
+        public void Clear() => throw new NotSupportedException();
+
+        public HistoryTotals Totals() => throw new NotSupportedException();
+    }
 }
