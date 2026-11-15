@@ -7,19 +7,19 @@ public static class IpcLogger
 {
     private const int MaxLoggedLength = 200;
 
+    private static ILogger Logger => Log.ForContext(typeof(IpcLogger));
+
     [Conditional("DEBUG")]
     public static void LogRequest(string serviceName, string methodName, string jsonParams)
     {
-        Log.ForContext(typeof(IpcLogger))
-            .Debug("[IPC ->] {ServiceName}.{MethodName}({Params})", serviceName, methodName,
+        Logger.Debug("[IPC ->] {ServiceName}.{MethodName}({Params})", serviceName, methodName,
                 DescribePayload(serviceName, jsonParams));
     }
 
     [Conditional("DEBUG")]
     public static void LogResponse(string serviceName, string methodName, string jsonResult)
     {
-        Log.ForContext(typeof(IpcLogger))
-            .Debug("[IPC <-] {ServiceName}.{MethodName} -> {Result}", serviceName, methodName,
+        Logger.Debug("[IPC <-] {ServiceName}.{MethodName} -> {Result}", serviceName, methodName,
                 DescribePayload(serviceName, jsonResult));
     }
 
@@ -29,15 +29,14 @@ public static class IpcLogger
         if (!LogsEvent(eventName))
             return;
 
-        Log.ForContext(typeof(IpcLogger))
-            .Debug("[IPC v] Event: {EventName} -> {Data}", eventName, DescribeEventPayload(eventName, json));
+        Logger.Debug("[IPC v] Event: {EventName} -> {Data}", eventName, DescribeEventPayload(eventName, json));
     }
 
     /// <summary>
     /// Whether <see cref="LogEvent"/> logs this event: every one but the microphone test's level, which comes about 20
     /// times a second.
     /// </summary>
-    public static bool LogsEvent(string eventName) => eventName != "setup.micLevel";
+    public static bool LogsEvent(string eventName) => eventName != IpcNames.Events.MicLevel;
 
     /// <summary>
     /// What the log shows of a payload to or from <paramref name="serviceName"/>. The history and vocabulary services
@@ -60,7 +59,8 @@ public static class IpcLogger
     public static string DescribeEventPayload(string eventName, string? json)
         => DescribePayload(ServiceOf(eventName), json);
 
-    private static bool CarriesUserText(string serviceName) => serviceName is "history" or "vocabulary";
+    private static bool CarriesUserText(string serviceName) =>
+        serviceName is IpcNames.Services.History or IpcNames.Services.Vocabulary;
 
     /// <summary>The service part of an event name such as <c>history.added</c>.</summary>
     private static string ServiceOf(string eventName)

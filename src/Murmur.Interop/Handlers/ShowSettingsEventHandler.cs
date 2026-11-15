@@ -9,7 +9,7 @@ public class ShowSettingsEventHandler(ApiEventAggregator eventAggregator)
 {
     public ValueTask Handle(ShowSettingsNotification notification, CancellationToken ct)
     {
-        eventAggregator.Publish("app.showSettings", new { });
+        eventAggregator.Publish(IpcNames.Events.ShowSettings, new { });
         return ValueTask.CompletedTask;
     }
 }

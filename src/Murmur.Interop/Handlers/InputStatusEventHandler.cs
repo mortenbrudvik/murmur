@@ -9,7 +9,7 @@ public class InputStatusEventHandler(ApiEventAggregator eventAggregator)
 {
     public ValueTask Handle(InputStatusChangedNotification notification, CancellationToken ct)
     {
-        eventAggregator.Publish("app.inputStatusChanged", notification.Status);
+        eventAggregator.Publish(IpcNames.Events.InputStatusChanged, notification.Status);
         return ValueTask.CompletedTask;
     }
 }

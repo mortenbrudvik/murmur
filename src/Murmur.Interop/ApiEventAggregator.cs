@@ -1,9 +1,9 @@
-using System.Windows;
 using Murmur.Common;
 using Murmur.WebView;
 
 namespace Murmur.Interop;
 
+/// <summary>Pushes an event to the page, from any thread: <see cref="IWebViewInterop"/> takes it to the UI thread.</summary>
 public class ApiEventAggregator(IWebViewInterop webViewInterop)
 {
     public virtual void Publish(string eventName, object data)
@@ -11,16 +11,6 @@ public class ApiEventAggregator(IWebViewInterop webViewInterop)
         var message = new { EventName = eventName, Data = data };
         var json = JsonUtils.Serialize(message);
         IpcLogger.LogEvent(eventName, json);
-
-        if (Application.Current == null) return;
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            Application.Current.Dispatcher.BeginInvoke(() =>
-                webViewInterop.PostWebMessageAsJson(json));
-        }
-        else
-        {
-            webViewInterop.PostWebMessageAsJson(json);
-        }
+        webViewInterop.PostWebMessageAsJson(json);
     }
 }

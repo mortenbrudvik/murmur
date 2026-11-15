@@ -1,4 +1,3 @@
-using System.Windows;
 using Murmur.Core.Dictation;
 
 namespace Murmur.UI.Tray;
@@ -9,6 +8,6 @@ public sealed class TrayUserNotifier(TrayIconHost tray) : IUserNotifier
     public void Notify(string title, string message)
     {
         // The tray icon is the UI thread's. ShowNotification never throws, and does nothing once the icon is disposed.
-        _ = Application.Current?.Dispatcher.BeginInvoke(() => tray.ShowNotification(title, message));
+        _ = tray.Dispatcher.BeginInvoke(() => tray.ShowNotification(title, message));
     }
 }

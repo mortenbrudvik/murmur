@@ -1,9 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <UseWpf>true</UseWpf>
-  </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Mediator.Abstractions" Version="3.*" />
   </ItemGroup>

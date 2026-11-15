@@ -9,7 +9,7 @@ public class HistoryAddedEventHandler(ApiEventAggregator eventAggregator)
 {
     public ValueTask Handle(HistoryEntryAddedNotification notification, CancellationToken ct)
     {
-        eventAggregator.Publish("history.added", notification.Entry);
+        eventAggregator.Publish(IpcNames.Events.HistoryAdded, notification.Entry);
         return ValueTask.CompletedTask;
     }
 }

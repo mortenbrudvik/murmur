@@ -98,13 +98,16 @@ public sealed class TrayIconHost : IDisposable
         _maxCreateAttempts = maxCreateAttempts;
     }
 
+    /// <summary>The UI thread's dispatcher: the host is created on it, and its icon and notifications belong to it.</summary>
+    public Dispatcher Dispatcher { get; } = Dispatcher.CurrentDispatcher;
+
     /// <summary>The icon itself was picked, or a notification clicked: show the main window as it is.</summary>
     public event Action? OpenRequested;
 
     /// <summary>"Settings" was picked: show the main window on its Settings page.</summary>
     public event Action? SettingsRequested;
 
-    /// <summary>"About" was picked: show the main window with its About dialog open.</summary>
+    /// <summary>"About" was picked: show the About window on its own.</summary>
     public event Action? AboutRequested;
 
     public event Action? QuitRequested;

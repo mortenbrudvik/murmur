@@ -9,7 +9,7 @@ public class MicLevelEventHandler(ApiEventAggregator eventAggregator)
 {
     public ValueTask Handle(MicLevelNotification notification, CancellationToken ct)
     {
-        eventAggregator.Publish("setup.micLevel", new { level = notification.Level, ended = notification.Ended });
+        eventAggregator.Publish(IpcNames.Events.MicLevel, new { level = notification.Level, ended = notification.Ended });
         return ValueTask.CompletedTask;
     }
 }

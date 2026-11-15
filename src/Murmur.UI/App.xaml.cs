@@ -8,11 +8,6 @@ using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
 using Murmur.Core.Features.App;
 using Murmur.Core.Features.Engine;
-using Murmur.Core.Features.History;
-using Murmur.Core.Features.Models;
-using Murmur.Core.Features.Settings;
-using Murmur.Core.Features.Setup;
-using Murmur.Core.Features.Vocabulary;
 using Murmur.Core.Hardware;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
@@ -183,29 +178,7 @@ public partial class App : Application
         var identity = _container.Resolve<IPackageIdentity>();
         Logger.Information("Running {Channel}", identity.IsPackaged ? "from its MSIX package" : "unpackaged");
 
-        var registry = _container.Resolve<ApiRegistry>();
-        registry.Register<GetHistoryRequest>("history", "get");
-        registry.Register<DeleteHistoryEntryRequest>("history", "delete");
-        registry.Register<ClearHistoryRequest>("history", "clear");
-        registry.Register<CopyHistoryEntryRequest>("history", "copy");
-        registry.Register<GetVocabularyRequest>("vocabulary", "get");
-        registry.Register<UpdateVocabularyRequest>("vocabulary", "update");
-        registry.Register<GetSettingsRequest>("settings", "get");
-        registry.Register<UpdateSettingsRequest>("settings", "update");
-        registry.Register<CaptureHotkeyRequest>("settings", "captureHotkey");
-        registry.Register<GetMicrophonesRequest>("settings", "getMicrophones");
-        registry.Register<GetEngineStatusRequest>("engine", "getStatus");
-        registry.Register<GetSetupStateRequest>("setup", "getState");
-        registry.Register<UpdateSetupStateRequest>("setup", "update");
-        registry.Register<StartMicTestRequest>("setup", "startMicTest");
-        registry.Register<StopMicTestRequest>("setup", "stopMicTest");
-        registry.Register<GetModelChoiceRequest>("models", "getChoice");
-        registry.Register<SetModelChoiceRequest>("models", "setChoice");
-        registry.Register<OpenLinkRequest>("app", "openLink");
-        registry.Register<RestartAppRequest>("app", "restart");
-        registry.Register<QuitAppRequest>("app", "quit");
-        registry.Register<GetInputStatusRequest>("app", "getInputStatus");
-        registry.Register<UiReadyRequest>("app", "ready");
+        ApiRegistrations.RegisterAll(_container.Resolve<ApiRegistry>());
 
         // The history file is read on first use, and the first dictation of a sign-in start would otherwise wait for
         // that read; touching the store here does it off the UI thread while the rest of start-up goes on.

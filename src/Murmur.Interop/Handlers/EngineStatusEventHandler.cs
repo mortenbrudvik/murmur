@@ -9,7 +9,7 @@ public class EngineStatusEventHandler(ApiEventAggregator eventAggregator)
 {
     public ValueTask Handle(EngineStatusChangedNotification notification, CancellationToken ct)
     {
-        eventAggregator.Publish("engine.statusChanged", notification.Status);
+        eventAggregator.Publish(IpcNames.Events.EngineStatusChanged, notification.Status);
         return ValueTask.CompletedTask;
     }
 }
