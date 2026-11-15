@@ -21,6 +21,14 @@ using Shouldly;
 
 namespace Murmur.Core.Tests.Dictation;
 
+[CollectionDefinition(nameof(GlobalLoggerCollection), DisableParallelization = true)]
+public sealed class GlobalLoggerCollection;
+
+/// <summary>
+/// Runs on its own: <see cref="LogCapture"/> swaps the global <see cref="Log.Logger"/>, and every class built in another
+/// test while it is swapped (they take their logger when constructed) would write into this test's capture.
+/// </summary>
+[Collection(nameof(GlobalLoggerCollection))]
 public sealed class DictationControllerTests : IDisposable
 {
     private const int RightCtrl = 0xA3;
