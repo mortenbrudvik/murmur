@@ -72,6 +72,7 @@ Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Mur
 - `Log.ForContext<T>()` for logging; all JSON (IPC and files) goes through `JsonUtils`
 - `TreatWarningsAsErrors` is on: builds must have zero warnings
 - No commercial packages: MediatR was replaced by Mediator (MIT) because MediatR 13 and later are RPL-1.5 or commercial. The `System.*` and `Microsoft.Extensions.*` packages float on `11.*`: their 11.0 releases ship `net10.0` builds
+- Frontend holds: `typescript` stays on 6.0 until `typescript-eslint` supports 7 (its peer range ends below 6.1, so 7 breaks `npm run lint`); `@types/node` follows the Node major that runs the build (24), not the newest types
 
 ## Testing
 
@@ -84,5 +85,5 @@ Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Mur
 
 - .NET 10 SDK
 - Windows 11 SDK (10.0.26100)
-- Node.js 22+ LTS
+- Node.js 22.22+, 24.15+ or 26+ (jsdom 31's range; Node 23 and 25 are not supported)
 - WebView2 runtime (part of Windows 11)

@@ -43,7 +43,7 @@ hotkey and the paste from reaching them.
 
 ## Building from source
 
-You need the .NET 10 SDK and Node.js 22 or later.
+You need the .NET 10 SDK and Node.js 22.22 or later on the 22 line, 24.15 or later on the 24 line, or 26 or later.
 
 ```powershell
 dotnet build Murmur.sln                              # also builds the React UI in src/WebApp
