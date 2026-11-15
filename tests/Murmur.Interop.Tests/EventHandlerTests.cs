@@ -49,12 +49,12 @@ public class EventHandlerTests
     }
 
     [Fact]
-    public async Task ShowAboutEventHandler_PublishesAppShowAbout()
+    public async Task ShowSettingsEventHandler_PublishesAppShowSettings()
     {
-        await new ShowAboutEventHandler(_events).Handle(new ShowAboutNotification(), CancellationToken.None);
+        await new ShowSettingsEventHandler(_events).Handle(new ShowSettingsNotification(), CancellationToken.None);
 
         // The page only needs to hear the event; the data is an empty object so the message has the usual shape.
-        _events.Received(1).Publish("app.showAbout", Arg.Is<object>(data => JsonUtils.Serialize(data) == "{}"));
+        _events.Received(1).Publish("app.showSettings", Arg.Is<object>(data => JsonUtils.Serialize(data) == "{}"));
     }
 
     [Fact]

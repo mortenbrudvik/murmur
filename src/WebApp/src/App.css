@@ -50,11 +50,6 @@
   background: rgba(143, 179, 255, 0.12);
 }
 
-/* Pushes About to the foot of the sidebar. */
-.sidebar-spacer {
-  flex: 1;
-}
-
 .sidebar-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -190,9 +185,5 @@
     overflow-x: auto;
     border-right: none;
     border-bottom: 1px solid var(--border-faint);
-  }
-
-  .sidebar-spacer {
-    display: none;
   }
 }

@@ -16,9 +16,10 @@ using DrawingIcon = System.Drawing.Icon;
 namespace Murmur.UI.Tray;
 
 /// <summary>
-/// Murmur's icon in the notification area: its home while the main window is hidden. Left click, Enter or Space on
-/// the focused icon (Win+B, then the arrow keys) or "Open Murmur" raises <see cref="OpenRequested"/>, "Quit" raises
-/// <see cref="QuitRequested"/>. The menu opens on a right click and from the keyboard (Shift+F10 or the menu key). The icon and tooltip follow the
+/// Murmur's icon in the notification area: its home while the main window is hidden. Left click, or Enter or Space on
+/// the focused icon (Win+B, then the arrow keys), raises <see cref="OpenRequested"/>. The menu has "Settings"
+/// (<see cref="SettingsRequested"/>), "About" (<see cref="AboutRequested"/>) and "Quit" (<see cref="QuitRequested"/>);
+/// it opens on a right click and from the keyboard (Shift+F10 or the menu key). The icon and tooltip follow the
 /// speech engine: a gradient dot when it is ready, a grey dot while it downloads, loads or has failed.
 /// <para>
 /// Adding the icon fails while Explorer's taskbar is not ready yet, which is likely right after sign-in, exactly when
@@ -42,6 +43,9 @@ public sealed partial class TrayIconHost : IDisposable
     private static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(3);
     private const int DefaultMaxCreateAttempts = 10; // the first attempt and about 30 s of retries
 
+    /// <summary>How long after the right button was used on the icon a request for the menu still belongs to that click.</summary>
+    private const long RightClickWindowMilliseconds = 1000;
+
     private readonly ILogger _logger = Log.ForContext<TrayIconHost>();
     private readonly ISpeechEngine _engine;
     private readonly ISettingsService _settings;
@@ -61,6 +65,12 @@ public sealed partial class TrayIconHost : IDisposable
     private string _hotkeyName = HotkeyDefinition.Default.DisplayName;
     private DateTime _hotkeyReadAt = DateTime.MinValue;
     private bool _disposed;
+
+    /// <summary>Where the menu goes when the keyboard opens it, in screen pixels; null when the mouse does.</summary>
+    private Point? _keyboardMenuAnchor;
+
+    /// <summary>When the right mouse button was last pressed or released on the icon; null until it has been.</summary>
+    private long? _lastRightMouseAt;
 
     public TrayIconHost(ISpeechEngine engine, ISettingsService settings, InputStatus input)
         // Efficiency Mode (H.NotifyIcon's default) would run all of Murmur at idle priority, which delays the keyboard
@@ -88,9 +98,13 @@ public sealed partial class TrayIconHost : IDisposable
         _maxCreateAttempts = maxCreateAttempts;
     }
 
+    /// <summary>The icon itself was picked, or a notification clicked: show the main window as it is.</summary>
     public event Action? OpenRequested;
 
-    /// <summary>"About Murmur" was picked: show the main window with its About dialog open.</summary>
+    /// <summary>"Settings" was picked: show the main window on its Settings page.</summary>
+    public event Action? SettingsRequested;
+
+    /// <summary>"About" was picked: show the main window with its About dialog open.</summary>
     public event Action? AboutRequested;
 
     public event Action? QuitRequested;
@@ -105,17 +119,19 @@ public sealed partial class TrayIconHost : IDisposable
         if (_icon is not null)
             return;
 
-        var open = new MenuItem { Header = "Open Murmur" };
-        open.Click += (_, _) => OpenRequested?.Invoke();
-        var about = new MenuItem { Header = "About Murmur" };
+        var settings = new MenuItem { Header = "Settings" };
+        settings.Click += (_, _) => SettingsRequested?.Invoke();
+        var about = new MenuItem { Header = "About" };
         about.Click += (_, _) => AboutRequested?.Invoke();
         var quit = new MenuItem { Header = "Quit" };
         quit.Click += (_, _) => QuitRequested?.Invoke();
 
+        var menu = new ContextMenu { Items = { settings, about, new Separator(), quit } };
+
         _icon = new TaskbarIcon
         {
             NoLeftClickDelay = true,
-            ContextMenu = new ContextMenu { Items = { open, about, new Separator(), quit } },
+            ContextMenu = menu,
         };
         _icon.TrayLeftMouseUp += (_, _) => OpenRequested?.Invoke();
         // H.NotifyIcon only handles the mouse by itself; without these a keyboard-only user could neither open Murmur
@@ -123,6 +139,11 @@ public sealed partial class TrayIconHost : IDisposable
         _icon.TrayKeyboardSelect += (_, _) => OpenRequested?.Invoke();
         _icon.TrayKeyboardKeySelect += (_, _) => OpenRequested?.Invoke();
         _icon.TrayKeyboardContextMenu += (_, _) => ShowMenuFromKeyboard();
+        // Both ends of a right click: see IsFromMouse.
+        _icon.TrayRightMouseDown += (_, _) => _lastRightMouseAt = Environment.TickCount64;
+        _icon.TrayRightMouseUp += (_, _) => _lastRightMouseAt = Environment.TickCount64;
+        // Raised each time H.NotifyIcon has opened the menu or moved an open one.
+        _icon.TrayContextMenuOpen += (_, _) => AnchorMenu(menu);
         _icon.TrayBalloonTipClicked += (_, _) => OpenRequested?.Invoke();
         _icon.TrayMouseMove += (_, _) => Update(rereadHotkey: false);
 
@@ -198,18 +219,76 @@ public sealed partial class TrayIconHost : IDisposable
 
     private static bool IsCreated(TaskbarIcon icon) => icon.IsCreated;
 
-    /// <summary>Opens the menu at the notification area, where the keyboard focus is, rather than at the mouse.</summary>
+    /// <summary>
+    /// Moves the menu next to the icon as it opens: to the click, or to the notification area when the keyboard
+    /// opened it. Where H.NotifyIcon and WPF put it by themselves is wrong when monitors are scaled differently (see
+    /// <see cref="TrayMenuPlacement"/>).
+    /// </summary>
+    private void AnchorMenu(ContextMenu menu)
+    {
+        var anchor = _keyboardMenuAnchor ?? TrayMenuNative.CursorPosition();
+        _keyboardMenuAnchor = null;
+        if (anchor is not { } point)
+            return;
+
+        PlaceMenu(menu, point, report: false);
+
+        // Once more when the menu has been laid out: WPF places a popup again when its size settles, or when the move
+        // took it to a monitor with another scale.
+        menu.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => PlaceMenu(menu, point, report: true));
+    }
+
+    /// <summary>Never throws: a menu in the wrong place is still a menu.</summary>
+    private void PlaceMenu(ContextMenu menu, Point anchor, bool report)
+    {
+        try
+        {
+            if (!menu.IsOpen)
+                return;
+
+            var placed = TrayMenuPlacement.TryPlace(menu, anchor);
+            if (!report)
+                return;
+
+            // Where it ended up is the first thing to know when it is reported in the wrong place on some arrangement
+            // of monitors.
+            var window = PresentationSource.FromVisual(menu) is System.Windows.Interop.HwndSource source
+                ? TrayMenuNative.WindowBounds(source.Handle)
+                : null;
+            _logger.Debug("Tray menu opened for {Anchor}: placed {Placed}, its window is at {Window}", anchor, placed, window);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning(ex, "Could not move the tray menu next to the icon");
+        }
+    }
+
+    /// <summary>
+    /// Whether a request for the menu comes from a right click that H.NotifyIcon answers by itself. Windows sends the
+    /// "context menu" notification for a right click as well as for Shift+F10 or the menu key on the focused icon,
+    /// and nothing in it says which it was; what tells them apart is that the right button was used on the icon a
+    /// moment before. Times are <see cref="Environment.TickCount64"/> values.
+    /// </summary>
+    internal static bool IsFromMouse(long? lastRightMouseAt, long now) =>
+        lastRightMouseAt is { } at && now - at < RightClickWindowMilliseconds;
+
+    /// <summary>
+    /// Opens the menu at the notification area, where the keyboard focus is, rather than at the mouse. Not after a
+    /// right click: that menu is opened by H.NotifyIcon, at the click.
+    /// </summary>
     private void ShowMenuFromKeyboard()
     {
-        if (_icon is null)
+        if (_icon is null || IsFromMouse(_lastRightMouseAt, Environment.TickCount64))
             return;
 
         try
         {
+            _keyboardMenuAnchor = TrayMenuNative.NotificationAreaCorner();
             _icon.ShowContextMenu(TrayInfo.GetTrayLocation(0));
         }
         catch (Exception ex)
         {
+            _keyboardMenuAnchor = null;
             _logger.Warning(ex, "Could not open the tray menu from the keyboard");
         }
     }

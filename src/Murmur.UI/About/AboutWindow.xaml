@@ -1,0 +1,272 @@
+<Window x:Class="Murmur.UI.About.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:about="clr-namespace:Murmur.UI.About"
+        xmlns:models="clr-namespace:Murmur.Core.Models;assembly=Murmur.Core"
+        Title="About Murmur"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="CenterScreen"
+        UseLayoutRounding="True"
+        FontFamily="Segoe UI Variable Text, Segoe UI"
+        FontSize="13"
+        Foreground="{DynamicResource AboutTextBrush}"
+        FocusManager.FocusedElement="{Binding ElementName=CloseButton}">
+
+  <Window.InputBindings>
+    <KeyBinding Key="Escape" Command="{Binding CloseCommand}" />
+  </Window.InputBindings>
+
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="VisibleWhenTrue" />
+
+    <!-- The keyboard focus mark: the accent's outline, a little outside the control. -->
+    <Style x:Key="AboutFocusVisual">
+      <Setter Property="Control.Template">
+        <Setter.Value>
+          <ControlTemplate>
+            <Rectangle Margin="-3" RadiusX="4" RadiusY="4" StrokeThickness="2" Stroke="{DynamicResource AboutAccentBrush}" />
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- A link: accent-coloured text, underlined under the mouse. -->
+    <Style x:Key="AboutLinkStyle" TargetType="Button">
+      <Setter Property="Foreground" Value="{DynamicResource AboutAccentBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FocusVisualStyle" Value="{StaticResource AboutFocusVisual}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <!-- A background, so the gaps between the letters take the click too. -->
+            <Border Background="Transparent">
+              <TextBlock x:Name="Text" Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Text" Property="TextDecorations" Value="Underline" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="AboutButtonStyle" TargetType="Button">
+      <Setter Property="Foreground" Value="{DynamicResource AboutStrongTextBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AboutButtonBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AboutBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="14,6,14,7" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{StaticResource AboutFocusVisual}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="6"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="{DynamicResource AboutButtonHoverBrush}" />
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Foreground" Value="{DynamicResource AboutDimBrush}" />
+          <Setter Property="Cursor" Value="Arrow" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="AboutPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AboutButtonStyle}">
+      <Setter Property="Foreground" Value="{DynamicResource AboutOnAccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AboutAccentBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="{DynamicResource AboutAccentHoverBrush}" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="AboutFactNameStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AboutMutedBrush}" />
+      <Setter Property="Margin" Value="0,0,16,8" />
+    </Style>
+
+    <Style x:Key="AboutFactStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AboutStrongTextBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+  </Window.Resources>
+
+  <!-- The margin is transparent window area that the drop shadow is drawn into. -->
+  <Grid Margin="28" Width="460">
+    <!-- The shadow has an element of its own: the header redraws with every frame, and an effect on the card would
+         be worked out again each time. -->
+    <Border CornerRadius="10" Background="{DynamicResource AboutBackgroundBrush}">
+      <Border.Effect>
+        <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270" Opacity="0.55" Color="{DynamicResource AboutShadowColor}" />
+      </Border.Effect>
+    </Border>
+
+    <!-- Gives the card's content its rounded corners: the header's glow and the foot's background reach the edges. -->
+    <Border x:Name="CardShape" CornerRadius="10" Background="{DynamicResource AboutBackgroundBrush}" />
+
+    <StackPanel>
+      <StackPanel.OpacityMask>
+        <VisualBrush Visual="{Binding ElementName=CardShape}" />
+      </StackPanel.OpacityMask>
+
+      <!-- The header is also where the window is dragged by: it has no title bar. -->
+      <Grid Background="Transparent" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+        <about:AboutHeader />
+      </Grid>
+
+      <StackPanel Margin="24,2,24,20">
+        <TextBlock Text="Murmur"
+                   HorizontalAlignment="Center"
+                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource AboutStrongTextBrush}" />
+        <TextBlock Text="{Binding VersionLine}"
+                   HorizontalAlignment="Center"
+                   Margin="0,3,0,0"
+                   FontSize="12"
+                   Foreground="{DynamicResource AboutMutedBrush}" />
+
+        <TextBlock Text="{Binding Tagline}"
+                   HorizontalAlignment="Center"
+                   MaxWidth="330"
+                   Margin="0,14,0,0"
+                   FontSize="13.5"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap" />
+
+        <Border Margin="0,14,0,0"
+                Padding="0,14,0,6"
+                BorderThickness="0,1,0,1"
+                BorderBrush="{DynamicResource AboutFaintBorderBrush}">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Text="Speech model" Style="{StaticResource AboutFactNameStyle}" />
+            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SpeechModel}" Style="{StaticResource AboutFactStyle}" />
+
+            <TextBlock Grid.Row="1" Text="Running on" Style="{StaticResource AboutFactNameStyle}" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding RunningOn}" Style="{StaticResource AboutFactStyle}" />
+
+            <TextBlock Grid.Row="2" Text="Dictated so far" Style="{StaticResource AboutFactNameStyle}" />
+            <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,8">
+              <TextBlock Text="{Binding DictatedMain}" Foreground="{DynamicResource AboutStrongTextBrush}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding DictatedDetail}" FontSize="12" Foreground="{DynamicResource AboutDimBrush}" TextWrapping="Wrap">
+                <TextBlock.Style>
+                  <Style TargetType="TextBlock">
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding DictatedDetail}" Value="{x:Null}">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </TextBlock.Style>
+              </TextBlock>
+            </StackPanel>
+
+            <TextBlock Grid.Row="3" Text="Your data" Style="{StaticResource AboutFactNameStyle}" />
+            <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,0,0,8">
+              <TextBlock Text="{Binding DataFolder}"
+                         FontFamily="Cascadia Mono, Consolas"
+                         FontSize="12"
+                         Foreground="{DynamicResource AboutStrongTextBrush}"
+                         TextWrapping="Wrap" />
+              <Button Content="Open folder"
+                      HorizontalAlignment="Left"
+                      Margin="0,3,0,0"
+                      FontSize="12"
+                      Style="{StaticResource AboutLinkStyle}"
+                      Command="{Binding OpenLinkCommand}"
+                      CommandParameter="{x:Static models:LinkTarget.DataFolder}" />
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,14,0,0">
+          <Button Content="Source on GitHub"
+                  Style="{StaticResource AboutLinkStyle}"
+                  Command="{Binding OpenLinkCommand}"
+                  CommandParameter="{x:Static models:LinkTarget.Repository}" />
+          <Button Content="Privacy policy"
+                  Margin="16,0,0,0"
+                  Style="{StaticResource AboutLinkStyle}"
+                  Command="{Binding OpenLinkCommand}"
+                  CommandParameter="{x:Static models:LinkTarget.PrivacyPolicy}" />
+          <Button Content="MIT License"
+                  Margin="16,0,0,0"
+                  Style="{StaticResource AboutLinkStyle}"
+                  Command="{Binding OpenLinkCommand}"
+                  CommandParameter="{x:Static models:LinkTarget.License}" />
+        </StackPanel>
+
+        <TextBlock Text="Could not open the link."
+                   HorizontalAlignment="Center"
+                   Margin="0,10,0,0"
+                   Foreground="{DynamicResource AboutErrorBrush}"
+                   Visibility="{Binding LinkFailed, Converter={StaticResource VisibleWhenTrue}}" />
+      </StackPanel>
+
+      <Border Padding="24,12"
+              Background="{DynamicResource AboutFootBrush}"
+              BorderThickness="0,1,0,0"
+              BorderBrush="{DynamicResource AboutFaintBorderBrush}">
+        <DockPanel LastChildFill="False">
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+            <TextBlock Text="{Binding Copyright}" FontSize="12" Foreground="{DynamicResource AboutDimBrush}" VerticalAlignment="Center" />
+            <Button Content="Morten Brudvik"
+                    Margin="4,0,0,0"
+                    FontSize="12"
+                    Style="{StaticResource AboutLinkStyle}"
+                    Command="{Binding OpenLinkCommand}"
+                    CommandParameter="{x:Static models:LinkTarget.HomePage}" />
+          </StackPanel>
+
+          <Button x:Name="CloseButton"
+                  DockPanel.Dock="Right"
+                  Content="Close"
+                  Margin="8,0,0,0"
+                  Style="{StaticResource AboutPrimaryButtonStyle}"
+                  Command="{Binding CloseCommand}" />
+          <Button DockPanel.Dock="Right"
+                  Content="{Binding CopyLabel}"
+                  Style="{StaticResource AboutButtonStyle}"
+                  Command="{Binding CopyDetailsCommand}" />
+        </DockPanel>
+      </Border>
+    </StackPanel>
+
+    <!-- The card's outline, on top so that nothing inside the card paints over it. -->
+    <Border CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource AboutBorderBrush}" IsHitTestVisible="False" />
+  </Grid>
+</Window>

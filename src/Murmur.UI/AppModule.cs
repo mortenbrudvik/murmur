@@ -11,6 +11,7 @@ using Murmur.Core.Setup;
 using Murmur.Core.Speech;
 using Murmur.Core.Text;
 using Murmur.Interop;
+using Murmur.UI.About;
 using Murmur.UI.Pill;
 using Murmur.UI.Tray;
 using Murmur.WebView;
@@ -48,10 +49,13 @@ public class AppModule : Module
         // ViewModels
         builder.RegisterType<MainViewModel>().SingleInstance();
         builder.RegisterType<PillViewModel>().SingleInstance();
+        // One for every About window that is opened; the windows themselves are made anew each time.
+        builder.RegisterType<AboutViewModel>().SingleInstance();
 
         // Views
         builder.RegisterType<MainWindow>().SingleInstance();
         builder.RegisterType<PillWindow>().SingleInstance();
+        builder.RegisterType<AboutWindow>();
         builder.RegisterType<PillPresenter>().As<IPillPresenter>().SingleInstance();
         builder.RegisterType<TrayIconHost>().SingleInstance();
         builder.RegisterType<TrayUserNotifier>().As<IUserNotifier>().SingleInstance();
@@ -84,7 +88,7 @@ public class AppModule : Module
         builder.RegisterType<AppInfo>().As<IAppInfo>().SingleInstance();
         builder.RegisterType<LaunchOptions>().SingleInstance();
         builder.RegisterType<UiReadiness>().SingleInstance();
-        builder.RegisterType<AboutLauncher>().SingleInstance();
+        builder.RegisterType<UiLauncher>().SingleInstance();
         builder.RegisterType<SetupCoordinator>().SingleInstance();
         builder.RegisterType<ShellLinkOpener>().As<ILinkOpener>().SingleInstance();
         // Also as itself, so that App can subscribe to RestartRequested, which the interface does not carry.

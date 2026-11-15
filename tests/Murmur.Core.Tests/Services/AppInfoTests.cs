@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Murmur.Core.Services;
 using NSubstitute;
@@ -55,6 +56,37 @@ public sealed class AppInfoTests
     {
         new AppInfo(Identity(false), new MurmurPaths(@"C:\x")).WindowsBuild
             .ShouldBe(AppInfo.FormatWindows(Environment.OSVersion.Version));
+    }
+
+    [Theory]
+    [InlineData("2026", 2026)]
+    [InlineData("2031", 2031)]
+    public void ParseBuildYear_ReadsTheYearTheBuildStamped(string stamped, int expected)
+    {
+        AppInfo.ParseBuildYear(stamped, fallback: 1999).ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("soon")]
+    [InlineData("26")]
+    public void ParseBuildYear_NothingUsableStamped_FallsBack(string? stamped)
+    {
+        AppInfo.ParseBuildYear(stamped, fallback: 1999).ShouldBe(1999);
+    }
+
+    /// <summary>
+    /// Pins the wiring in Directory.Build.props: every assembly carries the year it was built in, for the About
+    /// window's copyright line. Symptom if this regresses: the line shows the year the app is run in.
+    /// </summary>
+    [Fact]
+    public void BuildYear_IsStampedIntoTheAssembly()
+    {
+        typeof(AppInfo).Assembly.GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
+            .Where(attribute => attribute.Key == "BuildYear")
+            .Select(attribute => attribute.Value)
+            .ShouldBe([new AppInfo(Identity(false), new MurmurPaths(@"C:\x")).BuildYear.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
     }
 
     private static IPackageIdentity Identity(bool packaged)

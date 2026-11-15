@@ -3,9 +3,9 @@ using System.Windows;
 namespace Murmur.UI.Splash;
 
 /// <summary>
-/// Where the splash's line is. At rest it is the icon's own line (murmur-icon.svg) with the tile 96 DIPs wide and
-/// its flat ends extended to the splash's edges; before that it is a speech waveform that folds into it. The web
-/// app's humLine.ts draws the same path for the About dialog's header.
+/// Where the line is. At rest it is the icon's own line (murmur-icon.svg), scaled with the tile and with its flat
+/// ends extended to the drawing's edges. On the splash it starts as a speech waveform that folds into that line; in
+/// the About window's header it hums a little outside the tile.
 /// </summary>
 internal static class HumGeometry
 {
@@ -15,33 +15,38 @@ internal static class HumGeometry
     internal const double TileY = 46;
     internal const double TileSize = 96;
 
-    /// <summary>The icon's tile is 56 units wide on a 64-unit grid, with its corner at (4, 4).</summary>
-    private const double TileUnits = 56;
-    private const double TileOrigin = 4;
-    private const double BaselineUnits = 43;
-
     /// <summary>The waveform's peak, in DIPs, and how far from each edge it is held down to nothing.</summary>
     private const double WavePeak = 21;
     private const double EdgeTaper = 70;
 
-    internal static readonly double Scale = TileSize / TileUnits;
-    private static readonly double OffsetX = TileX - TileOrigin * Scale;
-    private static readonly double OffsetY = TileY - TileOrigin * Scale;
+    /// <summary>How far from the tile the humming line is free to move; inside the tile it is the icon, and stays still.</summary>
+    private const double HumFallOff = 46;
 
-    /// <summary>Where the line's flat ends run.</summary>
-    internal static readonly double Baseline = OffsetY + BaselineUnits * Scale;
+    /// <summary>The splash's drawing: the tile 96 DIPs wide.</summary>
+    internal static readonly HumFrame Splash = new(Width, TileX, TileY, TileSize);
 
-    /// <summary>The line's stroke width and the tile's corner radius, in DIPs (5.8 and 15 units on the icon's grid).</summary>
-    internal static readonly double StrokeWidth = 5.8 * Scale;
-    internal static readonly double CornerRadius = 15 * Scale;
+    internal static readonly double Scale = Splash.Scale;
+
+    /// <summary>Where the splash's line has its flat ends.</summary>
+    internal static readonly double Baseline = Splash.Baseline;
+
+    /// <summary>The splash's stroke width and its tile's corner radius, in DIPs.</summary>
+    internal static readonly double StrokeWidth = Splash.StrokeWidth;
+    internal static readonly double CornerRadius = Splash.CornerRadius;
+
+    /// <summary>The splash's line at rest.</summary>
+    internal static Point[] RestPoints(int count) => RestPoints(Splash, count);
 
     /// <summary>
-    /// The line at rest: <paramref name="count"/> points spaced evenly along it, from the splash's left edge to its
-    /// right edge, rising into the m where the tile is.
+    /// The line at rest in <paramref name="frame"/>: <paramref name="count"/> points spaced evenly along it, from the
+    /// drawing's left edge to its right edge, rising into the m where the tile is.
     /// </summary>
-    internal static Point[] RestPoints(int count)
+    internal static Point[] RestPoints(HumFrame frame, int count)
     {
-        var parts = Segments(-OffsetX / Scale, (Width - OffsetX) / Scale);
+        var scale = frame.Scale;
+        var offsetX = frame.OffsetX;
+        var offsetY = frame.OffsetY;
+        var parts = Segments(-offsetX / scale, (frame.Width - offsetX) / scale);
         var total = parts.Sum(part => part.Length);
 
         var points = new Point[count];
@@ -58,10 +63,27 @@ internal static class HumGeometry
 
             var part = parts[index];
             var p = part.At(part.Length > 0 ? Math.Min(1, (distance - before) / part.Length) : 0);
-            points[i] = new Point(OffsetX + p.X * Scale, OffsetY + p.Y * Scale);
+            points[i] = new Point(offsetX + p.X * scale, offsetY + p.Y * scale);
         }
 
         return points;
+    }
+
+    /// <summary>
+    /// The line humming at <paramref name="time"/> seconds: outside the tile a slow wave a few DIPs high, growing
+    /// with the distance from the tile; inside it the line is the icon and does not move. Written into
+    /// <paramref name="into"/>, which has the same length as <paramref name="rest"/>.
+    /// </summary>
+    internal static void Hum(double time, HumFrame frame, Point[] rest, Point[] into)
+    {
+        var tileRight = frame.TileX + frame.TileSize;
+        for (var i = 0; i < rest.Length; i++)
+        {
+            var x = rest[i].X;
+            var outside = x < frame.TileX ? frame.TileX - x : x > tileRight ? x - tileRight : 0;
+            var fall = Math.Min(1, outside / HumFallOff);
+            into[i] = new Point(x, rest[i].Y + fall * (2.6 * Math.Sin(x * 0.06 - time * 2.2) + 1.3 * Math.Sin(x * 0.13 + time * 3.1)));
+        }
     }
 
     /// <summary>
@@ -97,16 +119,16 @@ internal static class HumGeometry
         const double half = Math.PI / 2;
         return
         [
-            Segment.Line(x0, BaselineUnits, 15, BaselineUnits),
+            Segment.Line(x0, HumFrame.BaselineUnits, 15, HumFrame.BaselineUnits),
             Segment.Arc(15, 39, 4, half, -half),
             Segment.Line(19, 39, 19, 28.5),
             Segment.Arc(25.5, 28.5, 6.5, Math.PI, Math.PI),
-            Segment.Line(32, 28.5, 32, BaselineUnits),
-            Segment.Line(32, BaselineUnits, 32, 28.5),
+            Segment.Line(32, 28.5, 32, HumFrame.BaselineUnits),
+            Segment.Line(32, HumFrame.BaselineUnits, 32, 28.5),
             Segment.Arc(38.5, 28.5, 6.5, Math.PI, Math.PI),
             Segment.Line(45, 28.5, 45, 39),
             Segment.Arc(49, 39, 4, Math.PI, -half),
-            Segment.Line(49, BaselineUnits, x1, BaselineUnits),
+            Segment.Line(49, HumFrame.BaselineUnits, x1, HumFrame.BaselineUnits),
         ];
     }
 

@@ -54,24 +54,6 @@ public sealed class AppHandlerTests
     }
 
     [Fact]
-    public async Task GetAbout_ReturnsAppInfoAndHistoryTotals()
-    {
-        var app = Substitute.For<IAppInfo>();
-        app.Version.Returns("1.1.0");
-        app.Channel.Returns("Microsoft Store");
-        app.DataFolder.Returns(@"C:\Users\me\AppData\Local\Murmur");
-        app.WindowsBuild.Returns("Windows 11, build 26200");
-        var since = new DateTimeOffset(2026, 10, 3, 8, 0, 0, TimeSpan.Zero);
-        var history = Substitute.For<IHistoryStore>();
-        history.Totals().Returns(new HistoryTotals(1204, 18420, since));
-
-        var about = await new GetAboutHandler(app, history).Handle(new GetAboutRequest(), CancellationToken.None);
-
-        about.ShouldBe(new AboutInfo(
-            "1.1.0", "Microsoft Store", @"C:\Users\me\AppData\Local\Murmur", "Windows 11, build 26200", 1204, 18420, since));
-    }
-
-    [Fact]
     public async Task OpenLink_UnknownTarget_OpensNothing()
     {
         var opener = Substitute.For<ILinkOpener>();

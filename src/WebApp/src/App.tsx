@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 import Sidebar from "./components/Sidebar";
-import AboutDialog from "./features/about/AboutDialog";
 import HotkeyUnavailableBanner from "./features/app/HotkeyUnavailableBanner";
 import { useInputStatus } from "./features/app/useInputStatus";
 import HistoryPage from "./features/history/HistoryPage";
@@ -21,11 +20,10 @@ function App() {
   const inputStatus = useInputStatus();
   // Null until the user picks a page: the page the launch asked for (if any) is shown until then.
   const [chosenPage, setChosenPage] = useState<Page | null>(null);
-  const [aboutOpen, setAboutOpen] = useState(false);
 
-  // "About Murmur" in the tray menu. Subscribed from the first mount, before the ready call below: the shell holds a
+  // "Settings" in the tray menu. Subscribed from the first mount, before the ready call below: the shell holds a
   // request back until this page reports ready, and sends it right after.
-  useWebViewEvent<object>("app.showAbout", () => setAboutOpen(true));
+  useWebViewEvent<object>("app.showSettings", () => setChosenPage("settings"));
 
   // Tells the shell that the first real page is on screen (the setup page or the normal window), so that the splash
   // can hand over to a window that is already drawn. Once: `drawn` only ever goes from false to true.
@@ -41,16 +39,12 @@ function App() {
   // The setup state arrives within milliseconds; showing the normal window first would flash it before the setup.
   if (!setup) return null;
 
-  // Over the setup page as well: the tray's About Murmur works on a first run, where there is no sidebar.
-  const about = <AboutDialog open={aboutOpen} engineStatus={engineStatus} onClose={() => setAboutOpen(false)} />;
-
   if (setup.showSetup) {
     // The alert is there too: the Try it step cannot work without the hotkey.
     return (
       <div className="setup-frame">
         <HotkeyUnavailableBanner status={inputStatus} />
         <SetupPage state={setup} engineStatus={engineStatus} update={updateSetup} onDone={() => setChosenPage("history")} />
-        {about}
       </div>
     );
   }
@@ -59,7 +53,7 @@ function App() {
 
   return (
     <div className="shell">
-      <Sidebar page={page} onNavigate={setChosenPage} onAbout={() => setAboutOpen(true)} />
+      <Sidebar page={page} onNavigate={setChosenPage} />
       <div className="main-column">
         <HotkeyUnavailableBanner status={inputStatus} />
         <EngineStatusBanner status={engineStatus} />
@@ -69,7 +63,6 @@ function App() {
           {page === "settings" && <SettingsPage engineStatus={engineStatus} />}
         </main>
       </div>
-      {about}
     </div>
   );
 }

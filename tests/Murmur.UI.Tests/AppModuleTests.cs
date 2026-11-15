@@ -11,6 +11,7 @@ using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Setup;
+using Murmur.UI.About;
 using NSubstitute;
 using Shouldly;
 
@@ -70,10 +71,11 @@ public sealed class AppModuleTests
         container.Resolve<IRequestHandler<RestartAppRequest>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<QuitAppRequest>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<GetInputStatusRequest, InputStatus>>().ShouldNotBeNull();
-        container.Resolve<IRequestHandler<GetAboutRequest, AboutInfo>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<UiReadyRequest>>().ShouldNotBeNull();
-        // App resolves it at start, for the tray's About Murmur.
-        container.Resolve<AboutLauncher>().ShouldNotBeNull();
+        // App resolves it at start, for the tray menu's Settings.
+        container.Resolve<UiLauncher>().ShouldNotBeNull();
+        // The tray menu's About: one view model for every About window that is opened.
+        container.Resolve<AboutViewModel>().ShouldBeSameAs(container.Resolve<AboutViewModel>());
         container.Resolve<IRequestHandler<StartMicTestRequest, MicTestResult>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<StopMicTestRequest>>().ShouldNotBeNull();
     }

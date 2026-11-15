@@ -152,6 +152,14 @@ chosen way can show the main window both activated and not activated.
 
 ## 6. About dialog
 
+> **Changed on 2026-11-15, at the owner's request.** About is no longer part of the main window. It is a small native
+> window of its own (`Murmur.UI/About`: `AboutWindow`, `AboutViewModel`, `AboutHeader`), opened only from the tray
+> menu, and it never shows or touches the main window. The tray menu reads **Settings** (the main window on its
+> Settings page), **About**, **Quit**. The sidebar has no About item, and the web UI has no About code: §6.1 and §6.4
+> below describe the first version and no longer hold. The content and wording of §6.2, §6.2.1, §6.3 and §6.5 are
+> unchanged; the wording now lives in `AboutText` (Core), and the copyright year is stamped into the assemblies by
+> `Directory.Build.props` (`AppInfo.BuildYear`). The window closes with Close or Esc and is dragged by its header.
+
 ### 6.1 Where it lives and how it opens
 
 A React modal dialog over the current page, in the existing UI. Opened by:

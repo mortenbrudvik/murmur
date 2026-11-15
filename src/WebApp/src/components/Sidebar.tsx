@@ -9,11 +9,9 @@ const ITEMS: { page: Page; label: string }[] = [
 interface Props {
   page: Page;
   onNavigate: (page: Page) => void;
-  /** Opens the About dialog. It is not a page: the current page stays where it is, behind the dialog. */
-  onAbout: () => void;
 }
 
-export default function Sidebar({ page, onNavigate, onAbout }: Props) {
+export default function Sidebar({ page, onNavigate }: Props) {
   return (
     <nav className="sidebar" aria-label="Pages">
       {ITEMS.map((item) => {
@@ -30,10 +28,6 @@ export default function Sidebar({ page, onNavigate, onAbout }: Props) {
           </button>
         );
       })}
-      <span className="sidebar-spacer" />
-      <button type="button" className="sidebar-item" onClick={onAbout}>
-        About
-      </button>
     </nav>
   );
 }

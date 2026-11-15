@@ -21,6 +21,7 @@ using Murmur.Core.Services;
 using Murmur.Core.Setup;
 using Murmur.Core.Speech;
 using Murmur.Interop;
+using Murmur.UI.About;
 using Murmur.UI.Pill;
 using Murmur.UI.Splash;
 using Murmur.UI.Themes;
@@ -50,6 +51,9 @@ public partial class App : Application
     private SplashWindow? _splash;
     private SplashViewModel? _splashModel;
     private SplashSession? _splashSession;
+
+    /// <summary>The About window while one is open.</summary>
+    private AboutWindow? _aboutWindow;
 
     // Knows whether Murmur is really exiting; until then closing the main window only hides it. Null before the
     // container exists, when there is no window to close yet.
@@ -201,7 +205,6 @@ public partial class App : Application
         registry.Register<RestartAppRequest>("app", "restart");
         registry.Register<QuitAppRequest>("app", "quit");
         registry.Register<GetInputStatusRequest>("app", "getInputStatus");
-        registry.Register<GetAboutRequest>("app", "getAbout");
         registry.Register<UiReadyRequest>("app", "ready");
 
         // The history file is read on first use, and the first dictation of a sign-in start would otherwise wait for
@@ -231,12 +234,13 @@ public partial class App : Application
         _tray.OpenRequested += ShowMainWindow;
 
         // Resolved here, not when first asked: it must be listening before the web UI can report that it has drawn.
-        var about = _container.Resolve<AboutLauncher>();
-        _tray.AboutRequested += () =>
+        var launcher = _container.Resolve<UiLauncher>();
+        _tray.SettingsRequested += () =>
         {
             ShowMainWindow();
-            about.Show();
+            launcher.ShowSettings();
         };
+        _tray.AboutRequested += ShowAbout;
         _tray.QuitRequested += Quit;
         _tray.Show();
 
@@ -564,6 +568,35 @@ public partial class App : Application
         {
             Logger.Warning(ex, "Could not update the start-with-Windows entry");
         }
+    }
+
+    /// <summary>
+    /// "About" in the tray menu: the About window, on its own. The main window is not shown for it, and if it is open
+    /// it is left as it is. A second request brings the window that is already open to the front.
+    /// </summary>
+    private void ShowAbout()
+    {
+        if (IsQuitting || _container is null)
+            return;
+
+        // The history's totals and the engine's status as they are now, for a window opened again as for a new one.
+        _container.Resolve<AboutViewModel>().Refresh();
+
+        if (_aboutWindow is null)
+        {
+            var window = _container.Resolve<AboutWindow>();
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_aboutWindow, window))
+                    _aboutWindow = null;
+            };
+            _aboutWindow = window;
+        }
+
+        _aboutWindow.Show();
+        if (_aboutWindow.WindowState == WindowState.Minimized)
+            _aboutWindow.WindowState = WindowState.Normal;
+        _aboutWindow.Activate();
     }
 
     private void ShowMainWindow()

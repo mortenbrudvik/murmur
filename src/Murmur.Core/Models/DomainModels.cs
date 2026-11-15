@@ -79,21 +79,6 @@ public enum LinkTarget
     DataFolder
 }
 
-/// <summary>
-/// What the About dialog shows that only the shell knows. The history figures are those of <see cref="HistoryTotals"/>.
-/// </summary>
-/// <param name="Version">The three-part version ("1.1.0").</param>
-/// <param name="Channel">"Microsoft Store" or "Built from source".</param>
-/// <param name="WindowsBuild">"Windows 11, build 26200", for "Copy details".</param>
-public sealed record AboutInfo(
-    string Version,
-    string Channel,
-    string DataFolder,
-    string WindowsBuild,
-    int Dictations,
-    long Words,
-    DateTimeOffset? Since);
-
 public enum MicTestState
 {
     Listening,
@@ -141,7 +126,7 @@ public sealed record HistoryEntry(Guid Id, DateTimeOffset Timestamp, string Text
 public sealed record HistoryPageResult(IReadOnlyList<HistoryEntry> Entries, bool HasMore);
 
 /// <summary>
-/// What the history adds up to, for the About dialog. A word is a run of non-whitespace characters.
+/// What the history adds up to, for the About window. A word is a run of non-whitespace characters.
 /// <paramref name="Since"/> is the oldest entry's timestamp, null for an empty history.
 /// </summary>
 public sealed record HistoryTotals(int Dictations, long Words, DateTimeOffset? Since);

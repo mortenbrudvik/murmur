@@ -539,7 +539,7 @@ public sealed class TrayIconHostTests
     }
 
     [Fact]
-    public void Show_Menu_HasOpenAboutSeparatorQuit_InThatOrder()
+    public void Show_Menu_HasSettingsAboutSeparatorQuit_InThatOrder()
     {
         StaHost.Run(() =>
         {
@@ -549,15 +549,37 @@ public sealed class TrayIconHostTests
             var items = host.Menu.ShouldNotBeNull().Items;
 
             items.Count.ShouldBe(4);
-            ((System.Windows.Controls.MenuItem)items[0]).Header.ShouldBe("Open Murmur");
-            ((System.Windows.Controls.MenuItem)items[1]).Header.ShouldBe("About Murmur");
+            ((System.Windows.Controls.MenuItem)items[0]).Header.ShouldBe("Settings");
+            ((System.Windows.Controls.MenuItem)items[1]).Header.ShouldBe("About");
             items[2].ShouldBeOfType<System.Windows.Controls.Separator>();
             ((System.Windows.Controls.MenuItem)items[3]).Header.ShouldBe("Quit");
         });
     }
 
     [Fact]
-    public void AboutMurmur_Clicked_RaisesAboutRequestedAndNothingElse()
+    public void Settings_Clicked_RaisesSettingsRequestedAndNothingElse()
+    {
+        StaHost.Run(() =>
+        {
+            using var host = NewHostWithCreator(_ => { }, maxCreateAttempts: 1);
+            var settings = 0;
+            var others = 0;
+            host.SettingsRequested += () => settings++;
+            host.OpenRequested += () => others++;
+            host.AboutRequested += () => others++;
+            host.QuitRequested += () => others++;
+            host.Show();
+
+            var item = (System.Windows.Controls.MenuItem)host.Menu.ShouldNotBeNull().Items[0];
+            item.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+
+            settings.ShouldBe(1);
+            others.ShouldBe(0);
+        });
+    }
+
+    [Fact]
+    public void About_Clicked_RaisesAboutRequestedAndNothingElse()
     {
         StaHost.Run(() =>
         {
@@ -566,6 +588,7 @@ public sealed class TrayIconHostTests
             var others = 0;
             host.AboutRequested += () => about++;
             host.OpenRequested += () => others++;
+            host.SettingsRequested += () => others++;
             host.QuitRequested += () => others++;
             host.Show();
 
@@ -575,6 +598,57 @@ public sealed class TrayIconHostTests
             about.ShouldBe(1);
             others.ShouldBe(0);
         });
+    }
+
+    /// <summary>
+    /// The menu is moved next to the icon as it opens (TrayMenuPlacement). An opening that cannot be placed, here a
+    /// menu with no window, must stay a menu: nothing thrown.
+    /// </summary>
+    [Fact]
+    public void MenuOpened_NothingToPlace_DoesNotThrow()
+    {
+        StaHost.Run(() =>
+        {
+            H.NotifyIcon.TaskbarIcon? icon = null;
+            using var host = NewHostWithCreator(created => icon = created, maxCreateAttempts: 1);
+            host.Show();
+
+            Should.NotThrow(() => icon.ShouldNotBeNull().RaiseEvent(
+                new System.Windows.RoutedEventArgs(H.NotifyIcon.TaskbarIcon.TrayContextMenuOpenEvent)));
+            StaHost.Pump(TimeSpan.FromMilliseconds(50));
+        });
+    }
+
+    /// <summary>
+    /// Windows asks for the menu in the same way for a right click as for Shift+F10 on the focused icon. A right click
+    /// is answered by H.NotifyIcon, at the click; answering it as a keyboard request as well moved the menu to the
+    /// corner of the screen, away from the icon (seen on the owner's PC).
+    /// </summary>
+    [Fact]
+    public void KeyboardContextMenu_RightAfterARightClick_IsLeftToTheClick()
+    {
+        StaHost.Run(() =>
+        {
+            H.NotifyIcon.TaskbarIcon? icon = null;
+            using var host = NewHostWithCreator(created => icon = created, maxCreateAttempts: 1);
+            host.Show();
+
+            icon.ShouldNotBeNull().RaiseEvent(new System.Windows.RoutedEventArgs(H.NotifyIcon.TaskbarIcon.TrayRightMouseDownEvent));
+            icon.RaiseEvent(new System.Windows.RoutedEventArgs(H.NotifyIcon.TaskbarIcon.TrayKeyboardContextMenuEvent));
+
+            host.Menu.ShouldNotBeNull().IsOpen.ShouldBeFalse();
+        });
+    }
+
+    [Theory]
+    [InlineData(null, 5_000L, false)] // the mouse has not touched the icon
+    [InlineData(4_900L, 5_000L, true)]
+    [InlineData(4_001L, 5_000L, true)]
+    [InlineData(4_000L, 5_000L, false)] // a second ago: that click is over
+    [InlineData(1_000L, 5_000L, false)]
+    public void IsFromMouse_OnlyRightAfterTheRightButtonWasUsedOnTheIcon(long? lastRightMouseAt, long now, bool expected)
+    {
+        TrayIconHost.IsFromMouse(lastRightMouseAt, now).ShouldBe(expected);
     }
 
     private static TrayIconHost NewHostWithCreator(

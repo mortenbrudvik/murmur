@@ -24,41 +24,13 @@ internal sealed class SplashCanvas : FrameworkElement
 
     private static readonly Rect Tile = new(HumGeometry.TileX, HumGeometry.TileY, HumGeometry.TileSize, HumGeometry.TileSize);
     private static readonly Point TileCentre = new(Tile.X + Tile.Width / 2, Tile.Y + Tile.Height / 2);
-    private static readonly Geometry TileClip = Frozen(new RectangleGeometry(Tile, HumGeometry.CornerRadius, HumGeometry.CornerRadius));
+    private static readonly Geometry TileClip = HumPaint.Frozen(new RectangleGeometry(Tile, HumGeometry.CornerRadius, HumGeometry.CornerRadius));
 
-    private static readonly Brush TileBrush = Frozen(new LinearGradientBrush(
-        [
-            new GradientStop(Color.FromRgb(0x56, 0xA0, 0xFF), 0),
-            new GradientStop(Color.FromRgb(0x7A, 0x78, 0xFF), 0.55),
-            new GradientStop(Color.FromRgb(0xAE, 0x62, 0xF2), 1),
-        ],
-        new Point(0, 0), new Point(1, 1)));
+    private static readonly Pen LinePen = HumPaint.LinePen(HumGeometry.Splash);
+    private static readonly Pen LitPen = HumPaint.LitPen(HumGeometry.Splash);
 
-    private static readonly Brush GlowBrush = Frozen(new RadialGradientBrush(
-        Color.FromArgb(0x80, 0x7A, 0x78, 0xFF), Color.FromArgb(0x00, 0x7A, 0x78, 0xFF)));
-
-    /// <summary>The line outside the tile: periwinkle to violet across the splash, fading to nothing at both edges.</summary>
-    private static readonly Pen LinePen = RoundPen(Absolute(new LinearGradientBrush(
-        [
-            new GradientStop(Color.FromArgb(0x00, 0x8F, 0xB3, 0xFF), 0),
-            new GradientStop(Color.FromRgb(0x8F, 0xB3, 0xFF), 0.14),
-            new GradientStop(Color.FromRgb(0xB5, 0x9B, 0xFF), 0.86),
-            new GradientStop(Color.FromArgb(0x00, 0xB5, 0x9B, 0xFF), 1),
-        ],
-        new Point(0, 0), new Point(HumGeometry.Width, 0))));
-
-    /// <summary>The line inside the tile: white, a little faint towards the tile's sides, as on the icon.</summary>
-    private static readonly Pen LitPen = RoundPen(Absolute(new LinearGradientBrush(
-        [
-            new GradientStop(Color.FromArgb(0x4D, 0xFF, 0xFF, 0xFF), 0),
-            new GradientStop(Colors.White, 0.24),
-            new GradientStop(Colors.White, 0.76),
-            new GradientStop(Color.FromArgb(0x4D, 0xFF, 0xFF, 0xFF), 1),
-        ],
-        new Point(Tile.Left, 0), new Point(Tile.Right, 0))));
-
-    private static readonly Brush NameBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xE9, 0xEC, 0xF5)));
-    private static readonly Brush CaretBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x8F, 0xB3, 0xFF)));
+    private static readonly Brush NameBrush = HumPaint.Frozen(new SolidColorBrush(Color.FromRgb(0xE9, 0xEC, 0xF5)));
+    private static readonly Brush CaretBrush = HumPaint.Frozen(new SolidColorBrush(Color.FromRgb(0x8F, 0xB3, 0xFF)));
     private static readonly Typeface NameTypeface = new(
         new FontFamily("Segoe UI Variable Display, Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
 
@@ -88,13 +60,13 @@ internal sealed class SplashCanvas : FrameworkElement
         var time = Time;
         var reveal = SplashTimeline.TileReveal(time);
         HumGeometry.PointsAt(time, _rest, _points);
-        var line = Line(_points);
+        var line = HumPaint.Line(_points);
 
         if (reveal > 0)
         {
             dc.PushOpacity(reveal);
             var glow = HumGeometry.TileSize * 1.35;
-            dc.DrawEllipse(GlowBrush, null, TileCentre, glow, glow);
+            dc.DrawEllipse(HumPaint.GlowBrush, null, TileCentre, glow, glow);
             dc.Pop();
         }
 
@@ -109,7 +81,7 @@ internal sealed class SplashCanvas : FrameworkElement
             // The tile grows the last tenth of its size as it lights up.
             var scale = 0.9 + 0.1 * reveal;
             dc.PushTransform(new ScaleTransform(scale, scale, TileCentre.X, TileCentre.Y));
-            dc.DrawRoundedRectangle(TileBrush, null, Tile, HumGeometry.CornerRadius, HumGeometry.CornerRadius);
+            dc.DrawRoundedRectangle(HumPaint.TileBrush, null, Tile, HumGeometry.CornerRadius, HumGeometry.CornerRadius);
             dc.Pop();
 
             dc.PushClip(TileClip);
@@ -150,38 +122,4 @@ internal sealed class SplashCanvas : FrameworkElement
     private FormattedText Text(string text) => new(
         text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, NameTypeface, NameSize, NameBrush,
         VisualTreeHelper.GetDpi(this).PixelsPerDip);
-
-    private static StreamGeometry Line(Point[] points)
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
-        {
-            context.BeginFigure(points[0], isFilled: false, isClosed: false);
-            context.PolyLineTo(points.AsSpan(1).ToArray(), isStroked: true, isSmoothJoin: true);
-        }
-
-        geometry.Freeze();
-        return geometry;
-    }
-
-    private static Pen RoundPen(Brush brush) => Frozen(new Pen(brush, HumGeometry.StrokeWidth)
-    {
-        StartLineCap = PenLineCap.Round,
-        EndLineCap = PenLineCap.Round,
-        LineJoin = PenLineJoin.Round,
-    });
-
-    /// <summary>A gradient laid out in the splash's own coordinates, not stretched over whatever it paints.</summary>
-    private static LinearGradientBrush Absolute(LinearGradientBrush brush)
-    {
-        brush.MappingMode = BrushMappingMode.Absolute;
-        return Frozen(brush);
-    }
-
-    private static T Frozen<T>(T freezable)
-        where T : Freezable
-    {
-        freezable.Freeze();
-        return freezable;
-    }
 }

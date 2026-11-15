@@ -38,7 +38,7 @@ public static class EngineStatusText
     };
 
     /// <summary>The runtime names the engine reports ("Cuda", "Vulkan", "Cpu") as they are written.</summary>
-    private static string RuntimeLabel(string runtime) => runtime switch
+    internal static string RuntimeLabel(string runtime) => runtime switch
     {
         "Cuda" => "CUDA",
         "Cpu" => "CPU",

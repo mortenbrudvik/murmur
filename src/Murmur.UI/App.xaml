@@ -8,6 +8,7 @@
         <ui:ThemesDictionary Theme="Dark" />
         <ui:ControlsDictionary />
         <ResourceDictionary Source="Themes/PillColors.xaml" />
+        <ResourceDictionary Source="Themes/AboutColors.xaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>

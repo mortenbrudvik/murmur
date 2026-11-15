@@ -69,10 +69,10 @@ function pushInputStatus(status: InputStatus) {
   act(() => callbacks.forEach((callback) => callback(status)));
 }
 
-/** Delivers an app.showAbout push: the tray menu's About Murmur. */
-function pushShowAbout() {
+/** Delivers an app.showSettings push: the tray menu's Settings. */
+function pushShowSettings() {
   const callbacks = vi.mocked(apiClient.on).mock.calls
-    .filter(([name]) => name === "app.showAbout")
+    .filter(([name]) => name === "app.showSettings")
     .map(([, callback]) => callback as (data: object) => void);
   expect(callbacks.length).toBeGreaterThan(0);
   act(() => callbacks.forEach((callback) => callback({})));
@@ -412,57 +412,55 @@ describe("App ready signal", () => {
   });
 });
 
-describe("App About dialog", () => {
+describe("App sidebar", () => {
   beforeEach(() => {
     vi.mocked(apiClient.call).mockReset();
     vi.mocked(apiClient.on).mockClear();
   });
 
-  it("opens from the sidebar's About item, over the page that was showing", async () => {
+  /** About is a window of its own, opened from the tray menu: the main window has no trace of it. */
+  it("has the three pages and nothing about About", async () => {
     mockServer(ready);
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "History" });
 
-    fireEvent.click(screen.getByRole("button", { name: "About" }));
+    const items = [...screen.getByRole("navigation", { name: "Pages" }).querySelectorAll("button")].map((button) => button.textContent);
 
-    expect(await screen.findByRole("dialog", { name: "Murmur" })).toBeTruthy();
-    // About is not a page: Settings is still the current one, behind the dialog.
-    expect(screen.getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("button", { name: "About" }).getAttribute("aria-current")).toBeNull();
-  });
-
-  it("closes again and gives focus back to the About item", async () => {
-    mockServer(ready);
-    render(<App />);
-    const item = await screen.findByRole("button", { name: "About" });
-    item.focus();
-    fireEvent.click(item);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
-
+    expect(items).toEqual(["History", "Vocabulary", "Settings"]);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(item);
+    expect(vi.mocked(apiClient.on).mock.calls.map(([name]) => name)).not.toContain("app.showAbout");
+  });
+});
+
+describe("App Settings from the tray menu", () => {
+  beforeEach(() => {
+    vi.mocked(apiClient.call).mockReset();
+    vi.mocked(apiClient.on).mockClear();
   });
 
-  it("opens when the shell asks (About Murmur in the tray menu)", async () => {
+  it("goes to the Settings page when the shell asks", async () => {
     mockServer(ready);
     render(<App />);
-    await screen.findByRole("button", { name: "Settings" });
+    await screen.findByRole("heading", { name: "History" });
 
-    pushShowAbout();
+    pushShowSettings();
 
-    expect(await screen.findByRole("dialog", { name: "Murmur" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "History" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("opens over the setup page too, where there is no sidebar", async () => {
-    mockServer(ready, firstRun);
+  it("leaves the setup page where it is on a first run, and setup still ends on History", async () => {
+    mockServer(ready, { ...firstRun, step: "tryIt" });
     render(<App />);
-    await screen.findByRole("button", { name: "Next" });
+    await screen.findByRole("button", { name: "Done" });
 
-    pushShowAbout();
+    pushShowSettings();
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Pages" })).toBeNull();
 
-    expect(await screen.findByRole("dialog", { name: "Murmur" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(await screen.findByRole("heading", { name: "History" })).toBeTruthy();
   });
 
   it("listens for the shell's request before it reports ready, so an early request is not lost", async () => {
@@ -482,17 +480,8 @@ describe("App About dialog", () => {
     render(<App />);
     await waitFor(() => expect(order).toContain("call:app.ready"));
 
-    expect(order.indexOf("on:app.showAbout")).toBeGreaterThanOrEqual(0);
-    expect(order.indexOf("on:app.showAbout")).toBeLessThan(order.indexOf("call:app.ready"));
-  });
-
-  it("is closed until asked for", async () => {
-    mockServer(ready);
-    render(<App />);
-    await screen.findByRole("button", { name: "About" });
-
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(callsTo("app.getAbout")).toHaveLength(0);
+    expect(order.indexOf("on:app.showSettings")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("on:app.showSettings")).toBeLessThan(order.indexOf("call:app.ready"));
   });
 });
 

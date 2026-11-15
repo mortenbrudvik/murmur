@@ -11,7 +11,7 @@ export interface EngineStatusView {
 }
 
 /** The runtime names the engine reports ("Cuda", "Vulkan", "Cpu") as they are written. */
-export function runtimeLabel(runtime: string): string {
+function runtimeLabel(runtime: string): string {
   switch (runtime) {
     case "Cuda":
       return "CUDA";
