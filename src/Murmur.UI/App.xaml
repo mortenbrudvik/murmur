@@ -9,6 +9,7 @@
         <ui:ControlsDictionary />
         <ResourceDictionary Source="Themes/PillColors.xaml" />
         <ResourceDictionary Source="Themes/AboutColors.xaml" />
+        <ResourceDictionary Source="Themes/SplashColors.xaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>

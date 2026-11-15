@@ -28,9 +28,6 @@ internal static class HumGeometry
     /// <summary>Where the splash's line has its flat ends.</summary>
     internal static readonly double Baseline = Splash.Baseline;
 
-    /// <summary>The splash's tile's corner radius, in DIPs.</summary>
-    internal static readonly double CornerRadius = Splash.CornerRadius;
-
     /// <summary>The splash's line at rest.</summary>
     internal static Point[] RestPoints(int count) => RestPoints(Splash, count);
 

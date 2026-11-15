@@ -1,0 +1,14 @@
+<!-- The colours the native windows share. They copy the web app's palette in src/WebApp/src/index.css (text, muted, dim,
+     accent, error, ok and the border), which is their source: change them there, then here. PillColors, AboutColors and
+     SplashColors build their brushes from these; a colour only one window uses stays in that window's dictionary. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Color x:Key="PaletteTextColor">#DFE3EE</Color>
+  <Color x:Key="PaletteStrongTextColor">#E9ECF5</Color>
+  <Color x:Key="PaletteMutedColor">#9AA3B8</Color>
+  <Color x:Key="PaletteDimColor">#7D859B</Color>
+  <Color x:Key="PaletteAccentColor">#8FB3FF</Color>
+  <Color x:Key="PaletteErrorColor">#FF6B6B</Color>
+  <Color x:Key="PaletteOkColor">#3ECF8E</Color>
+  <Color x:Key="PaletteBorderColor">#1AFFFFFF</Color>
+</ResourceDictionary>

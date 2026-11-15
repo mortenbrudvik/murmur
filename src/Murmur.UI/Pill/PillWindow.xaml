@@ -1,11 +1,7 @@
 <Window x:Class="Murmur.UI.Pill.PillWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:pill="clr-namespace:Murmur.UI.Pill"
-        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
-        mc:Ignorable="po"
         Title="Murmur recording indicator"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -20,80 +16,35 @@
 
   <!-- The colours (PillBackgroundBrush and the rest) are app resources, in Themes/PillColors.xaml. -->
   <Window.Resources>
-    <pill:BarHeightConverter x:Key="BarHeightConverter" />
-    <SineEase x:Key="PulseEasing" EasingMode="EaseInOut" po:Freeze="True" />
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="/Murmur.UI;component/Themes/PulsingDots.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+      <pill:BarHeightConverter x:Key="BarHeightConverter" />
 
-    <!-- The faces of the pill are all collapsed until the view model's Mode selects one. -->
-    <Style x:Key="ModeSection" TargetType="FrameworkElement">
-      <Setter Property="Visibility" Value="Collapsed" />
-    </Style>
+      <!-- The faces of the pill are all collapsed until the view model's Mode selects one. -->
+      <Style x:Key="ModeSection" TargetType="FrameworkElement">
+        <Setter Property="Visibility" Value="Collapsed" />
+      </Style>
 
-    <!-- A part of the recording face that only shows once the microphone is live. -->
-    <Style x:Key="ListeningOnly" TargetType="FrameworkElement" BasedOn="{StaticResource ModeSection}">
-      <Style.Triggers>
-        <DataTrigger Binding="{Binding Mode}" Value="Listening">
-          <Setter Property="Visibility" Value="Visible" />
-        </DataTrigger>
-      </Style.Triggers>
-    </Style>
+      <!-- A part of the recording face that only shows once the microphone is live. -->
+      <Style x:Key="ListeningOnly" TargetType="FrameworkElement" BasedOn="{StaticResource ModeSection}">
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding Mode}" Value="Listening">
+            <Setter Property="Visibility" Value="Visible" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
 
-    <!-- A part of the recording face that only shows while the microphone is being started. -->
-    <Style x:Key="StartingOnly" TargetType="FrameworkElement" BasedOn="{StaticResource ModeSection}">
-      <Style.Triggers>
-        <DataTrigger Binding="{Binding Mode}" Value="Starting">
-          <Setter Property="Visibility" Value="Visible" />
-        </DataTrigger>
-      </Style.Triggers>
-    </Style>
-
-    <!-- Three dots that pulse in turn (1 s cycle, 0.15 s apart) for as long as they are visible. The control's Tag says
-         whether Windows' animation effects are on (Settings > Accessibility > Visual effects); with them off the dots
-         stand still, half lit. -->
-    <ControlTemplate x:Key="PulsingDotsTemplate" TargetType="Control">
-      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <Ellipse x:Name="Dot1" Width="4" Height="4" Opacity="0.25" Fill="{DynamicResource PillAccentBrush}" />
-        <Ellipse x:Name="Dot2" Width="4" Height="4" Opacity="0.25" Margin="3,0,0,0" Fill="{DynamicResource PillAccentBrush}" />
-        <Ellipse x:Name="Dot3" Width="4" Height="4" Opacity="0.25" Margin="3,0,0,0" Fill="{DynamicResource PillAccentBrush}" />
-      </StackPanel>
-      <ControlTemplate.Triggers>
-        <Trigger Property="Tag">
-          <Trigger.Value>
-            <sys:Boolean>False</sys:Boolean>
-          </Trigger.Value>
-          <Setter TargetName="Dot1" Property="Opacity" Value="0.6" />
-          <Setter TargetName="Dot2" Property="Opacity" Value="0.6" />
-          <Setter TargetName="Dot3" Property="Opacity" Value="0.6" />
-        </Trigger>
-        <MultiTrigger>
-          <MultiTrigger.Conditions>
-            <Condition Property="IsVisible" Value="True" />
-            <Condition Property="Tag">
-              <Condition.Value>
-                <sys:Boolean>True</sys:Boolean>
-              </Condition.Value>
-            </Condition>
-          </MultiTrigger.Conditions>
-          <MultiTrigger.EnterActions>
-            <BeginStoryboard Name="Pulse">
-              <Storyboard>
-                <DoubleAnimation Storyboard.TargetName="Dot1" Storyboard.TargetProperty="Opacity"
-                                 From="0.25" To="1" Duration="0:0:0.5" AutoReverse="True" RepeatBehavior="Forever"
-                                 EasingFunction="{StaticResource PulseEasing}" />
-                <DoubleAnimation Storyboard.TargetName="Dot2" Storyboard.TargetProperty="Opacity"
-                                 From="0.25" To="1" Duration="0:0:0.5" BeginTime="0:0:0.15" AutoReverse="True" RepeatBehavior="Forever"
-                                 EasingFunction="{StaticResource PulseEasing}" />
-                <DoubleAnimation Storyboard.TargetName="Dot3" Storyboard.TargetProperty="Opacity"
-                                 From="0.25" To="1" Duration="0:0:0.5" BeginTime="0:0:0.3" AutoReverse="True" RepeatBehavior="Forever"
-                                 EasingFunction="{StaticResource PulseEasing}" />
-              </Storyboard>
-            </BeginStoryboard>
-          </MultiTrigger.EnterActions>
-          <MultiTrigger.ExitActions>
-            <RemoveStoryboard BeginStoryboardName="Pulse" />
-          </MultiTrigger.ExitActions>
-        </MultiTrigger>
-      </ControlTemplate.Triggers>
-    </ControlTemplate>
+      <!-- A part of the recording face that only shows while the microphone is being started. -->
+      <Style x:Key="StartingOnly" TargetType="FrameworkElement" BasedOn="{StaticResource ModeSection}">
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding Mode}" Value="Starting">
+            <Setter Property="Visibility" Value="Visible" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+    </ResourceDictionary>
   </Window.Resources>
 
   <!-- The margin is transparent window area that the drop shadow is drawn into. The capsule is 30 DIPs high in every
@@ -181,6 +132,7 @@
       <!-- Transcribing: three pulsing dots -->
       <Control x:Name="TranscribingDots"
                Template="{StaticResource PulsingDotsTemplate}"
+               Foreground="{DynamicResource PillAccentBrush}"
                Tag="{DynamicResource {x:Static SystemParameters.ClientAreaAnimationKey}}"
                Focusable="False"
                IsTabStop="False">

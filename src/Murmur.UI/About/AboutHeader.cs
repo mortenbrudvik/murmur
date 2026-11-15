@@ -18,14 +18,7 @@ internal sealed class AboutHeader : FrameworkElement
     private const double HeaderHeight = 104;
     private const int PointCount = 260;
 
-    /// <summary>How much of the line outside the tile is left; inside it the line is white, as on the icon.</summary>
-    private const double DimmedLine = 0.38;
-
-    private static readonly Rect Tile = new(Frame.TileX, Frame.TileY, Frame.TileSize, Frame.TileSize);
-    private static readonly Point TileCentre = new(Tile.X + Tile.Width / 2, Tile.Y + Tile.Height / 2);
-    private static readonly Geometry TileClip = HumPaint.Frozen(new RectangleGeometry(Tile, Frame.CornerRadius, Frame.CornerRadius));
-    private static readonly Pen LinePen = HumPaint.LinePen(Frame);
-    private static readonly Pen LitPen = HumPaint.LitPen(Frame);
+    private static readonly HumTile Tile = new(Frame);
 
     private readonly Point[] _rest = HumGeometry.RestPoints(Frame, PointCount);
     private readonly Point[] _points = new Point[PointCount];
@@ -73,18 +66,6 @@ internal sealed class AboutHeader : FrameworkElement
         else
             _rest.CopyTo(_points, 0);
 
-        var line = HumPaint.Line(_points);
-        var glow = Frame.TileSize * 1.35;
-        dc.DrawEllipse(HumPaint.GlowBrush, null, TileCentre, glow, glow);
-
-        dc.PushOpacity(DimmedLine);
-        dc.DrawGeometry(null, LinePen, line);
-        dc.Pop();
-
-        dc.DrawRoundedRectangle(HumPaint.TileBrush, null, Tile, Frame.CornerRadius, Frame.CornerRadius);
-
-        dc.PushClip(TileClip);
-        dc.DrawGeometry(null, LitPen, line);
-        dc.Pop();
+        Tile.Draw(dc, HumPaint.Line(_points));
     }
 }

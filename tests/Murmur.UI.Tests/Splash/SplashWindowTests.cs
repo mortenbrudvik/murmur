@@ -1,3 +1,5 @@
+using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using Murmur.UI.Splash;
@@ -11,6 +13,21 @@ namespace Murmur.UI.Tests.Splash;
 /// </summary>
 public sealed class SplashWindowTests
 {
+    /// <summary>With Windows' animation effects off, the busy dots must stand still, as the pill's do.</summary>
+    [Fact]
+    public void BusyDots_FollowWindowsAnimationSetting()
+    {
+        StaHost.Run(() =>
+        {
+            var window = new SplashWindow(new SplashViewModel("1.1.0"));
+
+            var dots = window.FindName("BusyDots").ShouldBeOfType<Control>();
+
+            dots.Tag.ShouldBe(SystemParameters.ClientAreaAnimation);
+            window.Close();
+        });
+    }
+
     [Fact]
     public void MouseDown_AsksToBeSkipped()
     {
