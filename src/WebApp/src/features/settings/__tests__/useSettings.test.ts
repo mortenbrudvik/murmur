@@ -148,7 +148,7 @@ describe("useSettings", () => {
     let key: HotkeyDefinition | null = null;
     await act(async () => { key = await result.current.captureHotkey(); });
 
-    expect(apiClient.call).toHaveBeenCalledWith("settings", "captureHotkey", {});
+    expect(apiClient.call).toHaveBeenCalledWith("settings", "captureHotkey", {}, { timeoutMs: 20_000 });
     expect(key).toEqual(f9);
     expect(updateCalls()).toHaveLength(0);
   });

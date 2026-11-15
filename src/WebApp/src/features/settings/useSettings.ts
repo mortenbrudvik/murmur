@@ -4,6 +4,9 @@ import { failure } from "../../interop/errorMessage";
 import { useServerDocument } from "../../hooks/useServerDocument";
 import type { HotkeyDefinition, MurmurSettings } from "../../types/domain";
 
+/** The capture waits on the user: the .NET side gives up after 10 seconds, so the page waits longer than that. */
+const CAPTURE_TIMEOUT_MS = 20_000;
+
 // The server replaces the whole document (a missing flag would reset to false), so every save sends all six fields,
 // and what it returns is what the page shows: an unusable hotkey comes back unchanged.
 const toParams = (doc: MurmurSettings) => ({
@@ -52,7 +55,7 @@ export function useSettings(): {
     setSaveError(null);
     setCapturing(true);
     try {
-      const key = await apiClient.call<HotkeyDefinition | null>("settings", "captureHotkey", {});
+      const key = await apiClient.call<HotkeyDefinition | null>("settings", "captureHotkey", {}, { timeoutMs: CAPTURE_TIMEOUT_MS });
       // A key pressed after the page was left is ignored, not saved.
       return mounted.current ? (key ?? null) : null;
     } catch (err) {

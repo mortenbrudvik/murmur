@@ -5,6 +5,9 @@ import { useSerialQueue } from "../../hooks/useSerialQueue";
 import { useWebViewEvent } from "../../hooks/useWebViewEvent";
 import type { MicLevelEvent, MicTestResult } from "../../types/domain";
 
+/** Opening a microphone can take seconds (a Bluetooth headset switches profile first), longer than an ordinary call. */
+const START_TIMEOUT_MS = 30_000;
+
 /** How the test went, and for which microphone: an answer about the previous microphone is not shown for the next one. */
 interface Answer {
   microphoneId: string | null;
@@ -77,7 +80,8 @@ export function useMicLevel(microphoneId: string | null): { level: number; resul
         if (!running.current) setLevel(0);
       };
 
-      enqueue(() => apiClient.call<MicTestResult>("setup", "startMicTest", { microphoneId })).then(accept, (err: unknown) =>
+      const startTest = () => apiClient.call<MicTestResult>("setup", "startMicTest", { microphoneId }, { timeoutMs: START_TIMEOUT_MS });
+      enqueue(startTest).then(accept, (err: unknown) =>
         accept({ state: "failed", error: failure("Could not test the microphone", err) }),
       );
     }
