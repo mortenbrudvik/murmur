@@ -10,4 +10,8 @@
     <ProjectReference Include="..\Murmur.Core\Murmur.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Murmur.Interop.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mediator;
+using Murmur.Core.Audio;
 using NSubstitute;
 using Murmur.Interop;
 using Shouldly;
@@ -89,11 +90,11 @@ public class ApiBridgeTests
 
     // A handler that throws before its first await throws out of Send itself instead of returning a faulted task.
     [Fact]
-    public async Task InvokeMethod_SendThrowsSynchronously_ReturnsErrorWithExceptionMessage()
+    public async Task InvokeMethod_SendThrowsSynchronously_ReturnsError()
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<object?>>(_ => throw new InvalidOperationException("thrown at once"));
+            .Returns<ValueTask<object?>>(_ => throw new ArgumentException("thrown at once"));
         var bridge = BridgeFor(mediator);
 
         var result = await bridge.InvokeMethod("test", "get", "{}");
@@ -102,16 +103,69 @@ public class ApiBridgeTests
     }
 
     [Fact]
-    public async Task InvokeMethod_HandlerThrows_ReturnsErrorWithExceptionMessage()
+    public async Task InvokeMethod_HandlerRefuses_ReturnsItsMessage()
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromException<object?>(new InvalidOperationException("handler failed")));
+            .Returns(ValueTask.FromException<object?>(new ArgumentException("There can be at most 200 rules.")));
         var bridge = BridgeFor(mediator);
 
         var result = await bridge.InvokeMethod("test", "get", "{}");
 
-        ShouldBeError(result).ShouldBe("handler failed");
+        ShouldBeError(result).ShouldBe("There can be at most 200 rules.");
+    }
+
+    [Fact]
+    public async Task InvokeMethod_HandlerHasABug_ReturnsTheGenericMessage()
+    {
+        var mediator = Substitute.For<IMediator>();
+        mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromException<object?>(new InvalidOperationException("Collection was modified")));
+        var bridge = BridgeFor(mediator);
+
+        var result = await bridge.InvokeMethod("test", "get", "{}");
+
+        ShouldBeError(result).ShouldBe(ApiBridge.UnexpectedError);
+    }
+
+    [Theory]
+    [MemberData(nameof(MessagesForPeople))]
+    public void ErrorMessage_ExceptionsWrittenForPeople_PassTheirMessageOn(Exception ex)
+    {
+        ApiBridge.ErrorMessage(ex).ShouldBe(ex.Message);
+    }
+
+    public static TheoryData<Exception> MessagesForPeople() =>
+    [
+        new ArgumentException("There can be at most 200 rules."),
+        new IOException("There is not enough space on the disk."),
+        new FileNotFoundException("Could not find the file."),
+        new UnauthorizedAccessException("Access is denied."),
+        new AudioDeviceException("Microphone 'x' is not available (Unplugged)."),
+    ];
+
+    [Theory]
+    [MemberData(nameof(Bugs))]
+    public void ErrorMessage_OtherExceptions_AreGeneric(Exception ex)
+    {
+        ApiBridge.ErrorMessage(ex).ShouldBe(ApiBridge.UnexpectedError);
+    }
+
+    public static TheoryData<Exception> Bugs() =>
+    [
+        new NullReferenceException(),
+        new InvalidOperationException("Sequence contains no elements"),
+        new ArgumentNullException("value"),
+        new System.Text.Json.JsonException("'n' is an invalid start of a value."),
+    ];
+
+    [Fact]
+    public void ScriptSeesOnlyInvokeMethod()
+    {
+        typeof(ApiBridge).GetCustomAttributes(typeof(System.Runtime.InteropServices.ClassInterfaceAttribute), false)
+            .ShouldHaveSingleItem().ShouldBeOfType<System.Runtime.InteropServices.ClassInterfaceAttribute>()
+            .Value.ShouldBe(System.Runtime.InteropServices.ClassInterfaceType.None);
+        typeof(IApiBridge).GetMethods().Select(m => m.Name).ShouldBe(["InvokeMethod"]);
     }
 
     [Fact]
