@@ -1,7 +1,7 @@
 import { useState } from "react";
 import StepFooter from "./StepFooter";
 import { describeEngineStatus } from "../settings/engineStatusText";
-import { useHotkeyName } from "../history/useHotkeyName";
+import { useHotkeyName } from "../../hooks/useHotkeyName";
 import { useWebViewEvent } from "../../hooks/useWebViewEvent";
 import type { EngineStatus, HistoryEntry } from "../../types/domain";
 

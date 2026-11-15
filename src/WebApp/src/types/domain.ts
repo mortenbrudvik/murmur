@@ -119,3 +119,9 @@ export interface MicTestResult {
   state: MicTestState;
   error: string | null;
 }
+
+/** The "setup.micLevel" event: the volume from 0 to 1, and whether the .NET side ended the test without being asked. */
+export interface MicLevelEvent {
+  level: number;
+  ended?: boolean;
+}

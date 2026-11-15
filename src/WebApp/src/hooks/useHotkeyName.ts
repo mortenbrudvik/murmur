@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { apiClient } from "../../interop/WebViewApiClient";
-import type { MurmurSettings } from "../../types/domain";
+import { apiClient } from "../interop/WebViewApiClient";
+import type { MurmurSettings } from "../types/domain";
 
 const DEFAULT_HOTKEY_NAME = "Right Ctrl";
 

@@ -2,22 +2,23 @@ import { useEffect, useState } from "react";
 import "./App.css";
 import Sidebar from "./components/Sidebar";
 import HotkeyUnavailableBanner from "./features/app/HotkeyUnavailableBanner";
-import { useInputStatus } from "./features/app/useInputStatus";
 import HistoryPage from "./features/history/HistoryPage";
 import EngineStatusBanner from "./features/settings/EngineStatusBanner";
 import SettingsPage from "./features/settings/SettingsPage";
-import { useEngineStatus } from "./features/settings/useEngineStatus";
 import SetupPage from "./features/setup/SetupPage";
 import { useSetupState } from "./features/setup/useSetupState";
+import { usePushedState } from "./hooks/usePushedState";
 import { useWebViewEvent } from "./hooks/useWebViewEvent";
 import { apiClient } from "./interop/WebViewApiClient";
 import VocabularyPage from "./features/vocabulary/VocabularyPage";
-import type { Page } from "./types/domain";
+import type { EngineStatus, InputStatus, Page } from "./types/domain";
 
 function App() {
   const { state: setup, update: updateSetup } = useSetupState();
-  const engineStatus = useEngineStatus();
-  const inputStatus = useInputStatus();
+  const engineStatus = usePushedState<EngineStatus>("engine", "getStatus", "engine.statusChanged");
+  // Whether Windows let Murmur install the keyboard hook the hotkey needs. The hook may still be starting when the window
+  // asks, and "installed" is the answer until a failure is pushed.
+  const inputStatus = usePushedState<InputStatus>("app", "getInputStatus", "app.inputStatusChanged");
   // Null until the user picks a page: the page the launch asked for (if any) is shown until then.
   const [chosenPage, setChosenPage] = useState<Page | null>(null);
 

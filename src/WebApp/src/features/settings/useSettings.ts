@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "../../interop/WebViewApiClient";
-import { errorMessage, failure } from "../../interop/errorMessage";
-import { useSerialQueue } from "../../hooks/useSerialQueue";
+import { failure } from "../../interop/errorMessage";
+import { useServerDocument } from "../../hooks/useServerDocument";
 import type { HotkeyDefinition, MurmurSettings } from "../../types/domain";
+
+// The server replaces the whole document (a missing flag would reset to false), so every save sends all six fields,
+// and what it returns is what the page shows: an unusable hotkey comes back unchanged.
+const toParams = (doc: MurmurSettings) => ({
+  hotkey: doc.hotkey,
+  microphoneId: doc.microphoneId,
+  soundCues: doc.soundCues,
+  startWithWindows: doc.startWithWindows,
+  keepAudio: doc.keepAudio,
+  keepMicrophoneReady: doc.keepMicrophoneReady,
+});
 
 export function useSettings(): {
   settings: MurmurSettings | null;
@@ -21,16 +32,14 @@ export function useSettings(): {
    */
   captureHotkey(): Promise<HotkeyDefinition | null>;
 } {
-  const [settings, setSettings] = useState<MurmurSettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const { doc, loading, error, edit, setSaveError } = useServerDocument<MurmurSettings>({
+    service: "settings",
+    toParams,
+    saveFailure: "Could not save the settings",
+    notLoaded: "The settings have not been loaded yet.",
+  });
   const [capturing, setCapturing] = useState(false);
-
-  // The document the server last confirmed, which edits are built from.
-  const latest = useRef<MurmurSettings | null>(null);
   const mounted = useRef(false);
-  const enqueue = useSerialQueue();
 
   useEffect(() => {
     mounted.current = true;
@@ -38,58 +47,6 @@ export function useSettings(): {
       mounted.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .call<MurmurSettings>("settings", "get", {})
-      .then((loaded) => {
-        if (cancelled) return;
-        latest.current = loaded;
-        setSettings(loaded);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setLoadError(errorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // The server replaces the whole document (a missing flag would reset to false), so every save sends
-  // all six fields, and what it returns is what the page shows: an unusable hotkey comes back unchanged.
-  const send = useCallback(async (doc: MurmurSettings) => {
-    setSaveError(null);
-    try {
-      const saved = await apiClient.call<MurmurSettings>("settings", "update", {
-        hotkey: doc.hotkey,
-        microphoneId: doc.microphoneId,
-        soundCues: doc.soundCues,
-        startWithWindows: doc.startWithWindows,
-        keepAudio: doc.keepAudio,
-        keepMicrophoneReady: doc.keepMicrophoneReady,
-      });
-      latest.current = saved;
-      setSettings(saved);
-    } catch (err) {
-      setSaveError(failure("Could not save the settings", err));
-      throw err;
-    }
-  }, []);
-
-  const edit = useCallback(
-    (change: (current: MurmurSettings) => MurmurSettings) =>
-      enqueue(async () => {
-        const current = latest.current;
-        if (!current) throw new Error("The settings have not been loaded yet.");
-        await send(change(current));
-      }),
-    [enqueue, send],
-  );
 
   const captureHotkey = useCallback(async (): Promise<HotkeyDefinition | null> => {
     setSaveError(null);
@@ -104,7 +61,7 @@ export function useSettings(): {
     } finally {
       if (mounted.current) setCapturing(false);
     }
-  }, []);
+  }, [setSaveError]);
 
-  return { settings, loading, error: saveError ?? loadError, capturing, edit, captureHotkey };
+  return { settings: doc, loading, error, capturing, edit, captureHotkey };
 }

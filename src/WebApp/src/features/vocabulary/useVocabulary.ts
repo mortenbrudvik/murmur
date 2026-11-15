@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { apiClient } from "../../interop/WebViewApiClient";
-import { errorMessage, failure } from "../../interop/errorMessage";
-import { useSerialQueue } from "../../hooks/useSerialQueue";
+import { useServerDocument } from "../../hooks/useServerDocument";
 import type { Vocabulary } from "../../types/domain";
+
+// The server replaces the whole document, so every save sends both lists, and what it returns (trimmed,
+// de-duplicated) is what the page shows.
+const toParams = (doc: Vocabulary) => ({ hintWords: doc.hintWords, replacements: doc.replacements });
 
 export function useVocabulary(): {
   vocabulary: Vocabulary | null;
@@ -14,62 +15,12 @@ export function useVocabulary(): {
    */
   edit(change: (current: Vocabulary) => Vocabulary): Promise<void>;
 } {
-  const [vocabulary, setVocabulary] = useState<Vocabulary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const { doc, loading, error, edit } = useServerDocument<Vocabulary>({
+    service: "vocabulary",
+    toParams,
+    saveFailure: "Could not save the vocabulary",
+    notLoaded: "The vocabulary has not been loaded yet.",
+  });
 
-  // The document the server last confirmed, which edits are built from.
-  const latest = useRef<Vocabulary | null>(null);
-  const enqueue = useSerialQueue();
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .call<Vocabulary>("vocabulary", "get", {})
-      .then((loaded) => {
-        if (cancelled) return;
-        latest.current = loaded;
-        setVocabulary(loaded);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setLoadError(errorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // The server replaces the whole document, so every save sends both lists, and what it returns
-  // (trimmed, de-duplicated) is what the page shows.
-  const send = useCallback(async (doc: Vocabulary) => {
-    setSaveError(null);
-    try {
-      const saved = await apiClient.call<Vocabulary>("vocabulary", "update", {
-        hintWords: doc.hintWords,
-        replacements: doc.replacements,
-      });
-      latest.current = saved;
-      setVocabulary(saved);
-    } catch (err) {
-      setSaveError(failure("Could not save the vocabulary", err));
-      throw err;
-    }
-  }, []);
-
-  const edit = useCallback(
-    (change: (current: Vocabulary) => Vocabulary) =>
-      enqueue(async () => {
-        const current = latest.current;
-        if (!current) throw new Error("The vocabulary has not been loaded yet.");
-        await send(change(current));
-      }),
-    [enqueue, send],
-  );
-
-  return { vocabulary, loading, error: saveError ?? loadError, edit };
+  return { vocabulary: doc, loading, error, edit };
 }

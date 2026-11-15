@@ -3,7 +3,7 @@ import "./HistoryPage.css";
 import HistoryEntryCard from "./HistoryEntryCard";
 import { groupByDay } from "./groupByDay";
 import { useHistory } from "./useHistory";
-import { useHotkeyName } from "./useHotkeyName";
+import { useHotkeyName } from "../../hooks/useHotkeyName";
 
 export default function HistoryPage() {
   const [search, setSearch] = useState("");

@@ -3,18 +3,12 @@ import { apiClient } from "../../interop/WebViewApiClient";
 import { failure } from "../../interop/errorMessage";
 import { useSerialQueue } from "../../hooks/useSerialQueue";
 import { useWebViewEvent } from "../../hooks/useWebViewEvent";
-import type { MicTestResult } from "../../types/domain";
+import type { MicLevelEvent, MicTestResult } from "../../types/domain";
 
 /** How the test went, and for which microphone: an answer about the previous microphone is not shown for the next one. */
 interface Answer {
   microphoneId: string | null;
   result: MicTestResult;
-}
-
-/** The "setup.micLevel" event: the volume from 0 to 1, and whether the .NET side ended the test without being asked. */
-interface MicLevelEvent {
-  level: number;
-  ended?: boolean;
 }
 
 /**
