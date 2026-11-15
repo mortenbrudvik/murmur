@@ -11,6 +11,7 @@ using Murmur.Core.Insertion;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.Core.Tests.Helpers;
 using Murmur.Core.Tests.Input;
 using Murmur.Core.Text;
 using NSubstitute;
@@ -92,14 +93,7 @@ public sealed class DictationControllerTests : IDisposable
             .Returns(new TranscriptionResult("Hello world.", 0.01f));
         _inserter.InsertAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new InsertResult(InsertOutcome.Pasted, "Notepad"));
-        _history.Add(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>()).Returns(call =>
-        {
-            var entry = new HistoryEntry(
-                Guid.NewGuid(), _time.GetUtcNow(), call.ArgAt<string>(0), call.ArgAt<string>(1), call.ArgAt<bool>(2));
-            lock (_added)
-                _added.Add(entry);
-            return entry;
-        });
+        _history.RecordAdds(_time, _added);
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

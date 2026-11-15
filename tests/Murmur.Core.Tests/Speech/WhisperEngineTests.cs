@@ -6,6 +6,7 @@ using Murmur.Core.Hardware;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.Core.Tests.Helpers;
 using NSubstitute;
 using Shouldly;
 
@@ -1111,16 +1112,7 @@ public sealed class WhisperEngineTests : IDisposable
         }
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string what)
-    {
-        var deadline = DateTime.UtcNow + Patience;
-        while (!condition())
-        {
-            if (DateTime.UtcNow > deadline)
-                throw new TimeoutException($"Timed out waiting for {what}.");
-            await Task.Delay(10, Ct);
-        }
-    }
+    private static Task WaitUntilAsync(Func<bool> condition, string what) => Wait.UntilAsync(condition, Patience, what);
 
     private sealed class FakeLoader(Action<string> log) : IWhisperModelLoader
     {

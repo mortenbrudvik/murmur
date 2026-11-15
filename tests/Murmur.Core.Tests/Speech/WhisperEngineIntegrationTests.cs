@@ -7,6 +7,7 @@ using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.Core.Tests.Helpers;
 using Murmur.Core.Text;
 using Shouldly;
 
@@ -27,7 +28,7 @@ namespace Murmur.Core.Tests.Speech;
 /// </summary>
 public sealed class WhisperEngineFixture : IAsyncDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-integration-" + Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new();
     private readonly HttpClient _http = new();
     private readonly Lazy<Task> _start;
 
@@ -42,7 +43,7 @@ public sealed class WhisperEngineFixture : IAsyncDisposable
 
     private async Task StartEngineAsync()
     {
-        var paths = new MurmurPaths(_root);
+        var paths = new MurmurPaths(_temp.Path);
         var settings = new SettingsService(paths, new Win32KeyboardLayout());
         var models = new ModelManager(paths, _http, TimeProvider.System, new DiskSpace());
         var gpu = new GpuInfo(paths);
@@ -69,8 +70,7 @@ public sealed class WhisperEngineFixture : IAsyncDisposable
 
         Engine?.Dispose();
         _http.Dispose();
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
+        _temp.Dispose();
     }
 
     /// <summary>Reads (never writes) the app's models folder, to spare a download when the model is already there.</summary>

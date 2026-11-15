@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Input;
 using Murmur.Core.Insertion;
 using Murmur.Core.Models;
@@ -23,7 +24,7 @@ public sealed class InputHookHostTests
     private readonly HotkeyMatcher _matcher = new(HotkeyDefinition.Default, Substitute.For<IKeyStateProbe>());
     private readonly HotkeyCaptureCoordinator _coordinator = new(TimeProvider.System, Substitute.For<IKeyboardLayout>());
     private readonly IKeyboardSender _keyboard = Substitute.For<IKeyboardSender>();
-    private readonly ManualTime _time = new();
+    private readonly FakeTimeProvider _time = new();
     private readonly ConcurrentQueue<HotkeySignal> _signals = new();
     private readonly ConcurrentQueue<DateTimeOffset> _stamps = new();
     private readonly InputHookHost _host;
@@ -45,9 +46,9 @@ public sealed class InputHookHostTests
     [Fact]
     public void OnKey_StampsEachSignalWithTheTimeTheHookSawIt()
     {
-        var pressedAt = _time.Now;
+        var pressedAt = _time.GetUtcNow();
         _host.OnKey(Down(VkRightCtrl));
-        _time.Now += TimeSpan.FromMilliseconds(150);
+        _time.Advance(TimeSpan.FromMilliseconds(150));
         _host.OnKey(Up(VkRightCtrl));
 
         _signals.ShouldBe([HotkeySignal.HotkeyDown, HotkeySignal.HotkeyUp]);
@@ -254,13 +255,5 @@ public sealed class InputHookHostTests
             if (InstallFailure is not null)
                 throw InstallFailure;
         }
-    }
-
-    /// <summary>A clock that only moves when the test moves it.</summary>
-    private sealed class ManualTime : TimeProvider
-    {
-        public DateTimeOffset Now { get; set; } = new(2026, 10, 29, 10, 0, 0, TimeSpan.Zero);
-
-        public override DateTimeOffset GetUtcNow() => Now;
     }
 }

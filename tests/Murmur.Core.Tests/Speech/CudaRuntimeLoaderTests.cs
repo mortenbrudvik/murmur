@@ -1,4 +1,5 @@
 using Murmur.Core.Speech;
+using Murmur.Core.Tests.Helpers;
 using Shouldly;
 
 namespace Murmur.Core.Tests.Speech;
@@ -49,27 +50,20 @@ public sealed class CudaRuntimeLoaderTests
     [Fact]
     public void TryLoad_UnloadableFiles_ReturnsFalse()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "murmur-cuda-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        try
-        {
-            foreach (var dll in CudaRuntimeLoader.RuntimeDlls)
-                File.WriteAllText(Path.Combine(directory, dll), "not a DLL");
+        using var temp = new TempDirectory();
+        Directory.CreateDirectory(temp.Path);
+        foreach (var dll in CudaRuntimeLoader.RuntimeDlls)
+            File.WriteAllText(Path.Combine(temp.Path, dll), "not a DLL");
 
-            CudaRuntimeLoader.TryLoad(directory).ShouldBeFalse();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        CudaRuntimeLoader.TryLoad(temp.Path).ShouldBeFalse();
     }
 
     [Fact]
     public void TryLoad_DirectoryWithoutTheDlls_ReturnsFalse()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "murmur-cuda-tests-" + Guid.NewGuid().ToString("N"));
+        using var temp = new TempDirectory();
 
-        CudaRuntimeLoader.TryLoad(directory).ShouldBeFalse();
+        CudaRuntimeLoader.TryLoad(temp.Path).ShouldBeFalse();
     }
 
     private static Func<string, bool> Has(params string[] directories) => file =>

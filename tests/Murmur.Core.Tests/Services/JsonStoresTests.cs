@@ -2,6 +2,7 @@ using Murmur.Common;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
+using Murmur.Core.Tests.Helpers;
 using Murmur.Core.Tests.Input;
 using Shouldly;
 
@@ -9,16 +10,12 @@ namespace Murmur.Core.Tests.Services;
 
 public sealed class JsonStoresTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-tests-" + Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new();
     private readonly MurmurPaths _paths;
 
-    public JsonStoresTests() => _paths = new MurmurPaths(_root);
+    public JsonStoresTests() => _paths = new MurmurPaths(_temp.Path);
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
-    }
+    public void Dispose() => _temp.Dispose();
 
     private SettingsService NewSettingsService(IKeyboardLayout? layout = null) => new(_paths, layout ?? FakeKeyboardLayout.Unmapped);
 
@@ -53,7 +50,7 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void SettingsService_LoadVersion10File_DefaultsTheNewFields()
     {
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(
             _paths.SettingsFile,
             "{\"hotkey\":{\"virtualKey\":163,\"modifiers\":\"none\",\"displayName\":\"Right Ctrl\"},\"microphoneId\":null,"
@@ -173,7 +170,7 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void Settings_CorruptFile_ReturnsDefaults()
     {
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_paths.SettingsFile, "{not json");
 
         NewSettingsService().Load().ShouldBe(MurmurSettings.Default);
@@ -198,7 +195,7 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void Settings_MissingHotkeyOnDisk_FallsBackToDefault()
     {
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_paths.SettingsFile, "{\"microphoneId\":\"mic-3\"}");
 
         var loaded = NewSettingsService().Load();
@@ -248,7 +245,7 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void Vocabulary_CorruptFile_ReturnsEmpty()
     {
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_paths.VocabularyFile, "[[[ not json");
 
         var loaded = new VocabularyService(_paths).Load();
@@ -260,7 +257,7 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void Vocabulary_PartialFile_NormalizesNullLists()
     {
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_paths.VocabularyFile, "{\"hintWords\":[\"x\"]}");
 
         var loaded = new VocabularyService(_paths).Load();
@@ -286,7 +283,7 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void SettingsService_Load_ReadsTheFileOnce()
     {
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_paths.SettingsFile, "{\"microphoneId\":\"mic-1\"}");
         var service = NewSettingsService();
         service.Load();
@@ -311,7 +308,7 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void SettingsService_ReadFails_KeepsNothingAndReadsAgainNextTime()
     {
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_paths.SettingsFile, "{\"microphoneId\":\"mic-1\"}");
         var service = NewSettingsService();
 
@@ -380,13 +377,13 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void Paths_AreUnderRootWithSpecifiedNames()
     {
-        _paths.SettingsFile.ShouldBe(Path.Combine(_root, "settings.json"));
-        _paths.VocabularyFile.ShouldBe(Path.Combine(_root, "vocabulary.json"));
-        _paths.HistoryFile.ShouldBe(Path.Combine(_root, "history.jsonl"));
-        _paths.ModelsDirectory.ShouldBe(Path.Combine(_root, "models"));
-        _paths.AudioDirectory.ShouldBe(Path.Combine(_root, "audio"));
-        _paths.LogsDirectory.ShouldBe(Path.Combine(_root, "Logs"));
-        _paths.WebView2Directory.ShouldBe(Path.Combine(_root, "WebView2"));
+        _paths.SettingsFile.ShouldBe(Path.Combine(_temp.Path, "settings.json"));
+        _paths.VocabularyFile.ShouldBe(Path.Combine(_temp.Path, "vocabulary.json"));
+        _paths.HistoryFile.ShouldBe(Path.Combine(_temp.Path, "history.jsonl"));
+        _paths.ModelsDirectory.ShouldBe(Path.Combine(_temp.Path, "models"));
+        _paths.AudioDirectory.ShouldBe(Path.Combine(_temp.Path, "audio"));
+        _paths.LogsDirectory.ShouldBe(Path.Combine(_temp.Path, "Logs"));
+        _paths.WebView2Directory.ShouldBe(Path.Combine(_temp.Path, "WebView2"));
     }
 
     [Fact]

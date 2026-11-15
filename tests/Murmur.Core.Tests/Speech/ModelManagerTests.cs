@@ -6,6 +6,7 @@ using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.Core.Tests.Helpers;
 using NSubstitute;
 using Shouldly;
 
@@ -16,7 +17,7 @@ public sealed class ModelManagerTests : IDisposable
     /// <summary>Real time to wait for something that should take microseconds, so a hang fails instead of freezing the run.</summary>
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-models-" + Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new();
     private readonly MurmurPaths _paths;
     private readonly FakeTimeProvider _time = new();
     private readonly IDiskSpace _disk = Substitute.For<IDiskSpace>();
@@ -27,19 +28,15 @@ public sealed class ModelManagerTests : IDisposable
 
     public ModelManagerTests()
     {
-        _paths = new MurmurPaths(_root);
+        _paths = new MurmurPaths(_temp.Path);
         _disk.GetAvailableFreeSpace(Arg.Any<string>()).Returns(long.MaxValue);
         _model = new SpeechModelInfo(SpeechModelId.SmallEn, "Test", "test.bin", _body.Length, Sha256Hex(_body),
             new Uri("https://example.test/test.bin"));
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
-    }
+    public void Dispose() => _temp.Dispose();
 
-    private string ModelPath => Path.Combine(_root, "models", "test.bin");
+    private string ModelPath => Path.Combine(_temp.Path, "models", "test.bin");
 
     private string PartPath => ModelPath + ".part";
 
@@ -496,7 +493,7 @@ public sealed class ModelManagerTests : IDisposable
         ex.RequiredBytes.ShouldBe(1100);
         ex.AvailableBytes.ShouldBe(500);
         _handler.Calls.ShouldBe(0);
-        _disk.Received().GetAvailableFreeSpace(Path.Combine(_root, "models"));
+        _disk.Received().GetAvailableFreeSpace(Path.Combine(_temp.Path, "models"));
     }
 
     [Fact]
@@ -914,17 +911,7 @@ public sealed class ModelManagerTests : IDisposable
         new AuthenticationException("The remote certificate is invalid because of errors in the certificate chain: UntrustedRoot"));
 
     /// <summary>Polls in real time for something another thread is about to do.</summary>
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        var clock = Stopwatch.StartNew();
-        while (!condition())
-        {
-            if (clock.Elapsed > Patience)
-                throw new TimeoutException("The condition was not met in time.");
-
-            await Task.Delay(5, TestContext.Current.CancellationToken);
-        }
-    }
+    private static Task WaitUntilAsync(Func<bool> condition) => Wait.UntilAsync(condition, Patience);
 
     /// <summary>
     /// Moves the fake clock forward in steps until the condition holds. Stepping rather than one big jump means the

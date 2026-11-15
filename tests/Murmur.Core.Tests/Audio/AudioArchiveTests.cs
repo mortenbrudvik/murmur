@@ -1,5 +1,6 @@
 using Murmur.Core.Audio;
 using Murmur.Core.Services;
+using Murmur.Core.Tests.Helpers;
 using NAudio.Wave;
 using Shouldly;
 
@@ -7,16 +8,12 @@ namespace Murmur.Core.Tests.Audio;
 
 public sealed class AudioArchiveTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-tests-" + Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new();
     private readonly MurmurPaths _paths;
 
-    public AudioArchiveTests() => _paths = new MurmurPaths(_root);
+    public AudioArchiveTests() => _paths = new MurmurPaths(_temp.Path);
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
-    }
+    public void Dispose() => _temp.Dispose();
 
     private string WavPath(Guid id) => Path.Combine(_paths.AudioDirectory, id + ".wav");
 

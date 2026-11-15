@@ -1,5 +1,6 @@
 using Murmur.Core.Hardware;
 using Murmur.Core.Services;
+using Murmur.Core.Tests.Helpers;
 using Shouldly;
 
 namespace Murmur.Core.Tests.Hardware;
@@ -7,20 +8,16 @@ namespace Murmur.Core.Tests.Hardware;
 /// <summary>Runs the real detection on this PC's GPU and NVIDIA driver.</summary>
 public sealed class GpuInfoTests(ITestOutputHelper output) : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "MurmurTests", Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new();
 
     private GpuReport Detect()
     {
-        var report = new GpuInfo(new MurmurPaths(_root)).Report;
+        var report = new GpuInfo(new MurmurPaths(_temp.Path)).Report;
         output.WriteLine(GpuInfo.Describe(report));
         return report;
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
-    }
+    public void Dispose() => _temp.Dispose();
 
     [Fact]
     public void Report_OnThisPc_DoesNotThrow()
@@ -46,7 +43,7 @@ public sealed class GpuInfoTests(ITestOutputHelper output) : IDisposable
     [Fact]
     public void Report_ReadTwice_IsDetectedOnce()
     {
-        var gpu = new GpuInfo(new MurmurPaths(_root));
+        var gpu = new GpuInfo(new MurmurPaths(_temp.Path));
 
         gpu.Report.ShouldBeSameAs(gpu.Report);
     }
@@ -55,8 +52,8 @@ public sealed class GpuInfoTests(ITestOutputHelper output) : IDisposable
     [Fact]
     public void Report_SimulateNoGpuFlag_IsEmpty()
     {
-        var paths = new MurmurPaths(_root);
-        Directory.CreateDirectory(_root);
+        var paths = new MurmurPaths(_temp.Path);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(paths.SimulateNoGpuFile, "");
 
         new GpuInfo(paths).Report.ShouldBeSameAs(GpuReport.Empty);

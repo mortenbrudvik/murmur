@@ -2,23 +2,20 @@ using Microsoft.Extensions.Time.Testing;
 using Murmur.Common;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
+using Murmur.Core.Tests.Helpers;
 using Shouldly;
 
 namespace Murmur.Core.Tests.Services;
 
 public sealed class HistoryStoreTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "murmur-tests-" + Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new();
     private readonly MurmurPaths _paths;
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 10, 29, 9, 0, 0, TimeSpan.Zero));
 
-    public HistoryStoreTests() => _paths = new MurmurPaths(_root);
+    public HistoryStoreTests() => _paths = new MurmurPaths(_temp.Path);
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
-    }
+    public void Dispose() => _temp.Dispose();
 
     private HistoryStore CreateStore() => new(_paths, _time);
 
@@ -334,7 +331,7 @@ public sealed class HistoryStoreTests : IDisposable
     {
         var first = new HistoryEntry(Guid.NewGuid(), _time.GetUtcNow(), "first", "app", true);
         var second = new HistoryEntry(Guid.NewGuid(), _time.GetUtcNow().AddSeconds(1), "second", "app", false);
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllLines(_paths.HistoryFile, [JsonUtils.Serialize(first), "garbage", "", JsonUtils.Serialize(second)]);
 
         var entries = CreateStore().Query(null, 10, null).Entries;
@@ -347,7 +344,7 @@ public sealed class HistoryStoreTests : IDisposable
     public void Add_AfterCorruptLoad_KeepsValidEntries()
     {
         var first = new HistoryEntry(Guid.NewGuid(), _time.GetUtcNow(), "first", "app", true);
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllLines(_paths.HistoryFile, [JsonUtils.Serialize(first), "garbage"]);
 
         var store = CreateStore();
@@ -361,7 +358,7 @@ public sealed class HistoryStoreTests : IDisposable
     public void Load_SkipsIncompleteEntries()
     {
         var valid = new HistoryEntry(Guid.NewGuid(), _time.GetUtcNow(), "valid", "app", true);
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllLines(_paths.HistoryFile, ["{}", "null", JsonUtils.Serialize(valid)]);
 
         CreateStore().Query(null, 10, null).Entries.Select(e => e.Text).ShouldBe(["valid"]);
@@ -371,7 +368,7 @@ public sealed class HistoryStoreTests : IDisposable
     public void Add_WhenFileLacksTrailingNewline_StartsNewLine()
     {
         var first = new HistoryEntry(Guid.NewGuid(), _time.GetUtcNow(), "first", "app", true);
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_paths.HistoryFile, JsonUtils.Serialize(first));
 
         var store = CreateStore();

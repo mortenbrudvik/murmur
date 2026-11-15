@@ -3,6 +3,7 @@ using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 using Murmur.Core.Setup;
+using Murmur.Core.Tests.Helpers;
 using NSubstitute;
 using Shouldly;
 
@@ -30,20 +31,13 @@ public sealed class AppHandlerTests
     [Fact]
     public async Task OpenLink_DataFolder_CreatesAndOpensThePathsRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "murmur-tests-" + Guid.NewGuid().ToString("N"));
+        using var temp = new TempDirectory();
         var opener = Substitute.For<ILinkOpener>();
-        try
-        {
-            await new OpenLinkHandler(opener, new MurmurPaths(root)).Handle(new OpenLinkRequest(LinkTarget.DataFolder), CancellationToken.None);
 
-            Directory.Exists(root).ShouldBeTrue();
-            opener.Received(1).Open(root);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
+        await new OpenLinkHandler(opener, new MurmurPaths(temp.Path)).Handle(new OpenLinkRequest(LinkTarget.DataFolder), CancellationToken.None);
+
+        Directory.Exists(temp.Path).ShouldBeTrue();
+        opener.Received(1).Open(temp.Path);
     }
 
     /// <summary>The data folder is a path, not an address: only the handler, which knows the paths, can open it.</summary>

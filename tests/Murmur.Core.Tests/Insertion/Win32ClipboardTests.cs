@@ -25,9 +25,9 @@ public sealed class Win32ClipboardTests
     private const uint CF_ENHMETAFILE = 14;
     private const uint CF_PRIVATEFIRST = 0x200;
 
-    private static readonly uint ExcludeFromMonitoring = RegisterFormat("ExcludeClipboardContentFromMonitorProcessing");
-    private static readonly uint CanIncludeInHistory = RegisterFormat("CanIncludeInClipboardHistory");
-    private static readonly uint CanUploadToCloud = RegisterFormat("CanUploadToCloudClipboard");
+    private static readonly uint ExcludeFromMonitoring = Win32Clipboard.ExcludeFromMonitoringFormat;
+    private static readonly uint CanIncludeInHistory = Win32Clipboard.CanIncludeInHistoryFormat;
+    private static readonly uint CanUploadToCloud = Win32Clipboard.CanUploadToCloudFormat;
     private static readonly Lazy<string?> NoClipboardAccessReason = new(ProbeClipboardAccess);
 
     private readonly Win32Clipboard _clipboard = new();
@@ -64,7 +64,7 @@ public sealed class Win32ClipboardTests
     {
         OnClipboardThread(() =>
         {
-            var custom = RegisterFormat("Murmur.Test.Format");
+            var custom = Win32Clipboard.RegisterFormat("Murmur.Test.Format");
             RawClipboard.Write((custom, [1, 2, 3]), (CF_UNICODETEXT, EncodeText("orig")));
 
             var snapshot = _clipboard.Capture();
@@ -147,7 +147,7 @@ public sealed class Win32ClipboardTests
     [Fact]
     public void IsSkippedFormat_RegisteredFormats_KeptExceptExclusionMarkers()
     {
-        var custom = RegisterFormat("Murmur.Test.Format");
+        var custom = Win32Clipboard.RegisterFormat("Murmur.Test.Format");
 
         custom.ShouldBeGreaterThanOrEqualTo(0xC000u);
         Win32Clipboard.IsSkippedFormat(custom).ShouldBeFalse();
@@ -311,14 +311,6 @@ public sealed class Win32ClipboardTests
         return $"This session cannot open the clipboard (Win32 error {Marshal.GetLastPInvokeError()}), "
             + "for example because the workstation is locked or the process is sandboxed.";
     });
-
-    private static uint RegisterFormat(string name)
-    {
-        var format = NativeMethods.RegisterClipboardFormat(name);
-        if (format == 0)
-            throw new Win32Exception(Marshal.GetLastPInvokeError());
-        return format;
-    }
 
     private static byte[] EncodeText(string text) => Encoding.Unicode.GetBytes(text + '\0');
 

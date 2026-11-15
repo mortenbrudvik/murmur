@@ -30,9 +30,9 @@ public sealed class Win32Clipboard : IClipboard
 
     // Clipboard history (Win+V) and cloud clipboard skip content that carries these formats. The first one takes
     // any data; the other two take a DWORD, where 0 means "exclude".
-    private static readonly uint ExcludeFromMonitoringFormat = RegisterFormat("ExcludeClipboardContentFromMonitorProcessing");
-    private static readonly uint CanIncludeInHistoryFormat = RegisterFormat("CanIncludeInClipboardHistory");
-    private static readonly uint CanUploadToCloudFormat = RegisterFormat("CanUploadToCloudClipboard");
+    internal static readonly uint ExcludeFromMonitoringFormat = RegisterFormat("ExcludeClipboardContentFromMonitorProcessing");
+    internal static readonly uint CanIncludeInHistoryFormat = RegisterFormat("CanIncludeInClipboardHistory");
+    internal static readonly uint CanUploadToCloudFormat = RegisterFormat("CanUploadToCloudClipboard");
     private static readonly byte[] DwordZero = [0, 0, 0, 0];
 
     public uint SequenceNumber => NativeMethods.GetClipboardSequenceNumber();
@@ -235,7 +235,7 @@ public sealed class Win32Clipboard : IClipboard
         }
     }
 
-    private static uint RegisterFormat(string name)
+    internal static uint RegisterFormat(string name)
     {
         var format = NativeMethods.RegisterClipboardFormat(name);
         if (format == 0)

@@ -1,5 +1,6 @@
 using Murmur.Core.Services;
 using Murmur.Core.Speech;
+using Murmur.Core.Tests.Helpers;
 using Shouldly;
 
 namespace Murmur.Core.Tests.Speech;
@@ -7,18 +8,14 @@ namespace Murmur.Core.Tests.Speech;
 /// <summary>Runs the real search on this PC; what it finds depends on whether the CUDA 13 runtime is installed.</summary>
 public sealed class CudaRuntimeLocatorTests(ITestOutputHelper output) : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "MurmurTests", Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new();
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
-    }
+    public void Dispose() => _temp.Dispose();
 
     [Fact]
     public void FindRuntimeDirectory_OnThisPc_FindsADirectoryWithEveryDllOrNothing()
     {
-        var directory = new CudaRuntimeLocator(new MurmurPaths(_root)).FindRuntimeDirectory();
+        var directory = new CudaRuntimeLocator(new MurmurPaths(_temp.Path)).FindRuntimeDirectory();
         output.WriteLine(directory ?? "(none)");
 
         if (directory is not null)
@@ -29,8 +26,8 @@ public sealed class CudaRuntimeLocatorTests(ITestOutputHelper output) : IDisposa
     [Fact]
     public void FindRuntimeDirectory_SimulateNoCudaRuntimeFlag_IsNull()
     {
-        var paths = new MurmurPaths(_root);
-        Directory.CreateDirectory(_root);
+        var paths = new MurmurPaths(_temp.Path);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(paths.SimulateNoCudaRuntimeFile, "");
 
         new CudaRuntimeLocator(paths).FindRuntimeDirectory().ShouldBeNull();
