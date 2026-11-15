@@ -1,6 +1,6 @@
 import type { HistoryEntry } from "../../types/domain";
 
-export interface DayGroup {
+interface DayGroup {
   label: string;
   entries: HistoryEntry[];
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeDownload, formatBytes, formatDownloadLine, formatRemaining, formatSpeed } from "../formatDownload";
+import { describeDownload, formatBytes, formatDownloadLine } from "../formatDownload";
 import type { DownloadProgress } from "../../../types/domain";
 
 const d: DownloadProgress = {
@@ -11,6 +11,10 @@ const d: DownloadProgress = {
   retries: 0,
   reconnecting: false,
 };
+
+/** The detail with only the speed known, and with only the time left known. */
+const formatSpeed = (bytesPerSecond: number) => describeDownload({ ...d, bytesPerSecond }).detail;
+const formatRemaining = (secondsRemaining: number | null) => describeDownload({ ...d, secondsRemaining }).detail;
 
 describe("formatBytes", () => {
   it("uses decimal units: whole megabytes below a gigabyte, one decimal of gigabytes above", () => {
@@ -31,7 +35,7 @@ describe("formatBytes", () => {
   });
 });
 
-describe("formatSpeed", () => {
+describe("describeDownload: the speed", () => {
   it("rounds to whole megabytes per second", () => {
     expect(formatSpeed(18_400_000)).toBe("18 MB/s");
   });
@@ -49,7 +53,7 @@ describe("formatSpeed", () => {
   });
 });
 
-describe("formatRemaining", () => {
+describe("describeDownload: the time left", () => {
   it("is null when the time is unknown or not finite", () => {
     expect(formatRemaining(null)).toBeNull();
     expect(formatRemaining(Infinity)).toBeNull();

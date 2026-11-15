@@ -14,7 +14,7 @@ export function formatBytes(bytes: number): string {
 }
 
 /** "18 MB/s", or "640 KB/s" below a megabyte; null when there is no speed to show. */
-export function formatSpeed(bytesPerSecond: number): string | null {
+function formatSpeed(bytesPerSecond: number): string | null {
   if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return null;
   const kilobytes = Math.max(1, Math.round(bytesPerSecond / 1000));
   if (kilobytes < 1000) return `${kilobytes} KB/s`;
@@ -22,7 +22,7 @@ export function formatSpeed(bytesPerSecond: number): string | null {
 }
 
 /** "about 5 minutes left"; null when the time is unknown. */
-export function formatRemaining(seconds: number | null): string | null {
+function formatRemaining(seconds: number | null): string | null {
   if (seconds === null || !Number.isFinite(seconds)) return null;
   if (seconds < 60) return "less than a minute left";
   if (seconds < 90) return "about 1 minute left";
@@ -34,7 +34,7 @@ export function formatRemaining(seconds: number | null): string | null {
   return hours === 1 ? "about 1 hour left" : `about ${hours} hours left`;
 }
 
-export interface DownloadDescription {
+interface DownloadDescription {
   /** "612 MB of 1.6 GB" */
   amount: string;
   /** "Reconnecting…", or the speed and the time left ("18 MB/s · about 1 minute left"); null when neither is known. */

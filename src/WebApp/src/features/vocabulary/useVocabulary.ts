@@ -8,8 +8,6 @@ export function useVocabulary(): {
   vocabulary: Vocabulary | null;
   loading: boolean;
   error: string | null;
-  /** Saves the whole document. Resolves once stored; rejects (and sets `error`) when the save fails. */
-  save(v: Vocabulary): Promise<void>;
   /**
    * Saves the document that `change` makes from the latest stored one. Edits run one after another, so
    * several quick edits never overwrite each other. Rejects (and sets `error`) when the save fails.
@@ -63,8 +61,6 @@ export function useVocabulary(): {
     }
   }, []);
 
-  const save = useCallback((doc: Vocabulary) => enqueue(() => send(doc)), [enqueue, send]);
-
   const edit = useCallback(
     (change: (current: Vocabulary) => Vocabulary) =>
       enqueue(async () => {
@@ -75,5 +71,5 @@ export function useVocabulary(): {
     [enqueue, send],
   );
 
-  return { vocabulary, loading, error: saveError ?? loadError, save, edit };
+  return { vocabulary, loading, error: saveError ?? loadError, edit };
 }

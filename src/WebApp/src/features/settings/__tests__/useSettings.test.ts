@@ -77,8 +77,7 @@ describe("useSettings", () => {
     const serverResult: MurmurSettings = { ...stored, soundCues: false };
     vi.mocked(apiClient.call).mockImplementation(async (_service, method) => (method === "update" ? serverResult : stored));
 
-    const next: MurmurSettings = { ...stored, soundCues: false, hotkey: f9 };
-    await act(async () => { await result.current.save(next); });
+    await act(async () => { await result.current.edit((current) => ({ ...current, soundCues: false, hotkey: f9 })); });
 
     expect(apiClient.call).toHaveBeenCalledWith("settings", "update", {
       hotkey: f9,
@@ -101,7 +100,7 @@ describe("useSettings", () => {
 
     let failure: unknown;
     await act(async () => {
-      await result.current.save({ ...stored, soundCues: false }).catch((err: unknown) => { failure = err; });
+      await result.current.edit((current) => ({ ...current, soundCues: false })).catch((err: unknown) => { failure = err; });
     });
 
     expect(failure).toBeInstanceOf(Error);

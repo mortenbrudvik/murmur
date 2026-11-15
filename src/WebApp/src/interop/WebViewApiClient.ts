@@ -7,11 +7,11 @@ type Listener = (data: unknown) => void;
 
 export class WebViewApiClient {
   private listeners: { [eventName: string]: Listener[] } = {};
-  private messageHandler: ((event: MessageEvent<unknown>) => void) | null = null;
 
+  // One client lives as long as the page, so the message listener is never removed.
   constructor() {
     if (window?.chrome?.webview) {
-      this.messageHandler = (event: MessageEvent<unknown>) => {
+      window.chrome.webview.addEventListener("message", (event: MessageEvent<unknown>) => {
         try {
           const msg = event.data as WebViewMessage | null | undefined;
           if (!msg || typeof msg.eventName !== "string") return;
@@ -20,8 +20,7 @@ export class WebViewApiClient {
         } catch (err) {
           console.error("WebView message handler error:", err);
         }
-      };
-      window.chrome.webview.addEventListener("message", this.messageHandler);
+      });
     }
   }
 
@@ -51,14 +50,6 @@ export class WebViewApiClient {
         delete this.listeners[eventName];
       }
     };
-  }
-
-  dispose() {
-    if (this.messageHandler && window?.chrome?.webview) {
-      window.chrome.webview.removeEventListener("message", this.messageHandler);
-    }
-    this.messageHandler = null;
-    this.listeners = {};
   }
 }
 

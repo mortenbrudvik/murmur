@@ -63,7 +63,7 @@ describe("useVocabulary", () => {
     await waitFor(() => expect(result.current.vocabulary).toEqual(stored));
 
     const input: Vocabulary = { hintWords: [" Murmur ", "whisper", "WHISPER", ""], replacements: [{ spoken: "", written: "x" }] };
-    await act(async () => { await result.current.save(input); });
+    await act(async () => { await result.current.edit(() => input); });
 
     expect(apiClient.call).toHaveBeenCalledWith("vocabulary", "update", {
       hintWords: input.hintWords,
@@ -83,7 +83,7 @@ describe("useVocabulary", () => {
 
     let failure: unknown;
     await act(async () => {
-      await result.current.save({ hintWords: ["x"], replacements: [] }).catch((err: unknown) => { failure = err; });
+      await result.current.edit(() => ({ hintWords: ["x"], replacements: [] })).catch((err: unknown) => { failure = err; });
     });
 
     expect(failure).toBeInstanceOf(Error);
@@ -104,10 +104,10 @@ describe("useVocabulary", () => {
     const { result } = renderHook(() => useVocabulary());
     await waitFor(() => expect(result.current.vocabulary).toEqual(stored));
 
-    await act(async () => { await result.current.save(stored).catch(() => {}); });
+    await act(async () => { await result.current.edit((v) => v).catch(() => {}); });
     expect(result.current.error).not.toBeNull();
 
-    await act(async () => { await result.current.save(stored); });
+    await act(async () => { await result.current.edit((v) => v); });
     expect(result.current.error).toBeNull();
   });
 

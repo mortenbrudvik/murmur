@@ -10,8 +10,6 @@ export function useSettings(): {
   error: string | null;
   /** True while waiting for the user to press a new hotkey. */
   capturing: boolean;
-  /** Saves the whole document. Resolves once stored; rejects (and sets `error`) when the save fails. */
-  save(s: MurmurSettings): Promise<void>;
   /**
    * Saves the document that `change` makes from the latest stored one. Edits run one after another, so
    * several quick changes never overwrite each other. Rejects (and sets `error`) when the save fails.
@@ -83,8 +81,6 @@ export function useSettings(): {
     }
   }, []);
 
-  const save = useCallback((doc: MurmurSettings) => enqueue(() => send(doc)), [enqueue, send]);
-
   const edit = useCallback(
     (change: (current: MurmurSettings) => MurmurSettings) =>
       enqueue(async () => {
@@ -110,5 +106,5 @@ export function useSettings(): {
     }
   }, []);
 
-  return { settings, loading, error: saveError ?? loadError, capturing, save, edit, captureHotkey };
+  return { settings, loading, error: saveError ?? loadError, capturing, edit, captureHotkey };
 }
