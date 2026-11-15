@@ -176,32 +176,14 @@ public class WebViewHandler
                     AllowSingleSignOnUsingOSPrimaryAccount = false
                 });
 
-            // Given to the browser as it is created, so not even its first frame is white, and kept on the control so
-            // the control does not put its own default back. A runtime too old for the option still gets the
-            // control's colour, a moment later.
-            CoreWebView2ControllerOptions? controllerOptions = null;
-            if (DefaultBackgroundColor is { } background)
-            {
-                WebView.DefaultBackgroundColor = background;
-                try
-                {
-                    controllerOptions = environment.CreateCoreWebView2ControllerOptions();
-                    controllerOptions.DefaultBackgroundColor = background;
-                }
-                catch (Exception ex) when (ex is NotImplementedException or InvalidCastException or COMException)
-                {
-                    _logger.Debug(ex, "This WebView2 runtime cannot take the background colour at creation");
-                    controllerOptions = null;
-                }
-            }
+            await WebView.EnsureCoreWebView2Async(environment, ControllerOptions(environment));
+            var core = WebView.CoreWebView2;
 
-            await WebView.EnsureCoreWebView2Async(environment, controllerOptions);
-
-            ApplySettings(WebView.CoreWebView2.Settings);
+            ApplySettings(core.Settings);
 
             if (!EnableDevTools)
             {
-                WebView.CoreWebView2.ContextMenuRequested += (_, args) =>
+                core.ContextMenuRequested += (_, args) =>
                 {
                     var target = args.ContextMenuTarget;
                     if (!ShouldShowContextMenu(target.IsEditable, target.HasSelection))
@@ -210,70 +192,24 @@ public class WebViewHandler
             }
 
             if (HostObject != null)
-            {
-                WebView.CoreWebView2.AddHostObjectToScript(HostObjectName, HostObject);
-            }
+                core.AddHostObjectToScript(HostObjectName, HostObject);
 
             if (EnableDevTools)
-                WebView.CoreWebView2.OpenDevToolsWindow();
+                core.OpenDevToolsWindow();
 
             if (!string.IsNullOrEmpty(HostWebRootFolder))
             {
                 // The page is served from this host, and its own requests are same-origin, which CORS does not govern.
                 // DenyCors only stops pages from other origins (which the filters below block anyway) reading the files.
-                WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                core.SetVirtualHostNameToFolderMapping(
                     HostWebHostNameForFolder,
                     HostWebRootFolder,
                     CoreWebView2HostResourceAccessKind.DenyCors);
             }
 
-            // Every request from the page, its frames and workers: anything outside the allowed origins gets a 403
-            // without reaching the network. The bundled CSP already blocks such requests in Release; this also covers
-            // Debug, which has no CSP, and anything the CSP does not govern.
-            WebView.CoreWebView2.AddWebResourceRequestedFilter(
-                "*", CoreWebView2WebResourceContext.All, CoreWebView2WebResourceRequestSourceKinds.All);
-            WebView.CoreWebView2.WebResourceRequested += (_, args) =>
-            {
-                if (IsAllowedOrigin(args.Request.Uri, AllowedOrigins))
-                    return;
-                _logger.Warning("Blocked request to {Uri}", args.Request.Uri);
-                args.Response = WebView.CoreWebView2.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "");
-            };
-
-            WebView.CoreWebView2.ProcessFailed += (_, args) => OnProcessFailed(args.ProcessFailedKind, args.Reason, args.ExitCode);
-
-            WebView.CoreWebView2.NavigationCompleted += (sender, args) =>
-            {
-                if (args.IsSuccess)
-                    _logger.Debug("Navigation completed successfully");
-                else
-                    _logger.Warning("Navigation failed: {WebErrorStatus}", args.WebErrorStatus);
-            };
-
-            // The initial about:blank is navigated while the control is created, before these handlers exist.
-            WebView.CoreWebView2.NavigationStarting += (sender, args) =>
-            {
-                if (!IsAllowedOrigin(args.Uri, AllowedOrigins))
-                {
-                    _logger.Warning("Blocked navigation to {Uri}", args.Uri);
-                    args.Cancel = true;
-                }
-            };
-
-            WebView.CoreWebView2.FrameNavigationStarting += (sender, args) =>
-            {
-                if (!IsAllowedOrigin(args.Uri, AllowedOrigins))
-                {
-                    _logger.Warning("Blocked frame navigation to {Uri}", args.Uri);
-                    args.Cancel = true;
-                }
-            };
-
-            WebView.CoreWebView2.NewWindowRequested += (sender, args) =>
-            {
-                _logger.Warning("Blocked popup request to {Uri}", args.Uri);
-                args.Handled = true;
-            };
+            InstallRequestFilter(core);
+            InstallNavigationGuards(core);
+            core.ProcessFailed += (_, args) => OnProcessFailed(args.ProcessFailedKind, args.Reason, args.ExitCode);
 
             if (!string.IsNullOrEmpty(InitialUrl))
                 WebView.Source = new Uri(InitialUrl);
@@ -283,5 +219,85 @@ public class WebViewHandler
             _logger.Error(ex, "WebView2 initialization failed");
             InitializeFailed?.Invoke(ex);
         }
+    }
+
+    /// <summary>
+    /// The background colour, given to the browser as it is created so not even its first frame is white, and kept on
+    /// the control so the control does not put its own default back. A runtime too old for the option still gets the
+    /// control's colour, a moment later. Null when there is no colour to give, or the runtime cannot take it.
+    /// </summary>
+    private CoreWebView2ControllerOptions? ControllerOptions(CoreWebView2Environment environment)
+    {
+        if (DefaultBackgroundColor is not { } background)
+            return null;
+
+        WebView.DefaultBackgroundColor = background;
+        try
+        {
+            var options = environment.CreateCoreWebView2ControllerOptions();
+            options.DefaultBackgroundColor = background;
+            return options;
+        }
+        catch (Exception ex) when (ex is NotImplementedException or InvalidCastException or COMException)
+        {
+            _logger.Debug(ex, "This WebView2 runtime cannot take the background colour at creation");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Every request from the page, its frames and workers: anything outside the allowed origins gets a 403 without
+    /// reaching the network. The bundled CSP already blocks such requests in Release; this also covers Debug, which has
+    /// no CSP, and anything the CSP does not govern.
+    /// </summary>
+    private void InstallRequestFilter(CoreWebView2 core)
+    {
+        core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All, CoreWebView2WebResourceRequestSourceKinds.All);
+        core.WebResourceRequested += (_, args) =>
+        {
+            if (IsAllowedOrigin(args.Request.Uri, AllowedOrigins))
+                return;
+            _logger.Warning("Blocked request to {Uri}", args.Request.Uri);
+            args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "");
+        };
+    }
+
+    /// <summary>
+    /// The page and its frames navigate only within the allowed origins, and never open a window. The initial
+    /// about:blank is navigated while the control is created, before these handlers exist.
+    /// </summary>
+    private void InstallNavigationGuards(CoreWebView2 core)
+    {
+        core.NavigationCompleted += (_, args) =>
+        {
+            if (args.IsSuccess)
+                _logger.Debug("Navigation completed successfully");
+            else
+                _logger.Warning("Navigation failed: {WebErrorStatus}", args.WebErrorStatus);
+        };
+
+        core.NavigationStarting += (_, args) =>
+        {
+            if (!IsAllowedOrigin(args.Uri, AllowedOrigins))
+            {
+                _logger.Warning("Blocked navigation to {Uri}", args.Uri);
+                args.Cancel = true;
+            }
+        };
+
+        core.FrameNavigationStarting += (_, args) =>
+        {
+            if (!IsAllowedOrigin(args.Uri, AllowedOrigins))
+            {
+                _logger.Warning("Blocked frame navigation to {Uri}", args.Uri);
+                args.Cancel = true;
+            }
+        };
+
+        core.NewWindowRequested += (_, args) =>
+        {
+            _logger.Warning("Blocked popup request to {Uri}", args.Uri);
+            args.Handled = true;
+        };
     }
 }
