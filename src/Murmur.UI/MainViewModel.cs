@@ -24,10 +24,6 @@ public partial class MainViewModel : ObservableObject
     private readonly MicrophoneLevelMonitor _micTest;
     private readonly AppLifecycle _lifecycle;
     private readonly ILinkOpener _links;
-    private readonly WebViewHandler _handler;
-
-    [ObservableProperty]
-    private WebViewControl _webView;
 
     /// <summary>WebView2 could not start, or failed for good: the window shows the native failure panel instead.</summary>
     [ObservableProperty]
@@ -37,7 +33,7 @@ public partial class MainViewModel : ObservableObject
         WebViewControl webView, ApiBridge bridge, HotkeyCaptureCoordinator hotkeyCapture, MicrophoneLevelMonitor micTest,
         AppLifecycle lifecycle, ILinkOpener links, MurmurPaths paths)
     {
-        _webView = webView;
+        WebView = webView;
         _hotkeyCapture = hotkeyCapture;
         _micTest = micTest;
         _lifecycle = lifecycle;
@@ -48,11 +44,12 @@ public partial class MainViewModel : ObservableObject
         const string origin = "http://localhost:5223";
         var url = origin + "/";
 #else
-        const string origin = "https://murmur.localassets.invalid";
+        const string origin = "https://" + WebViewHandler.DefaultHostName;
         var url = origin + "/index.html";
 #endif
 
-        _handler = new WebViewHandler(WebView, url, paths.WebView2Directory)
+        // The control's Loaded event keeps the handler alive.
+        _ = new WebViewHandler(WebView, url, paths.WebView2Directory)
         {
             HostObject = bridge,
             HostObjectName = HostObjectName,
@@ -67,13 +64,15 @@ public partial class MainViewModel : ObservableObject
             EnableDevTools = false,
             // BaseDirectory, not CurrentDirectory: the working directory differs for "dotnet run" and autostart.
             HostWebRootFolder = Path.Combine(AppContext.BaseDirectory, "Assets"),
-            HostWebHostNameForFolder = "murmur.localassets.invalid",
 #endif
             // Both arrive on the UI thread. Dictation keeps working from the tray either way.
             InitializeFailed = _ => WebViewFailed = true,
             Unrecoverable = () => WebViewFailed = true,
         };
     }
+
+    /// <summary>The web UI, which the window shows unless <see cref="WebViewFailed"/>.</summary>
+    public WebViewControl WebView { get; }
 
     /// <summary>Where the logs are, for the failure panel.</summary>
     public string LogsDirectory { get; }

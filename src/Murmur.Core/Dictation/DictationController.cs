@@ -133,8 +133,10 @@ public sealed class DictationController : IDisposable
         _recorder.CaptureFailed += OnCaptureFailed;
     }
 
-    /// <summary>The in-flight stop/transcribe/insert, or <see cref="Task.CompletedTask"/>. It never faults.</summary>
-    public Task CurrentWork { get; private set; } = Task.CompletedTask;
+    /// <summary>
+    /// The in-flight stop/transcribe/insert, or <see cref="Task.CompletedTask"/>. It never faults. Tests wait for it.
+    /// </summary>
+    internal Task CurrentWork { get; private set; } = Task.CompletedTask;
 
     /// <summary>
     /// The microphone open in flight, or a completed task. It finishes on the UI thread and is not meant to fault. Tests

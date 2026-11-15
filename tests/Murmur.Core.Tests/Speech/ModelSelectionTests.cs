@@ -101,6 +101,5 @@ public sealed class ModelSelectionTests
 
         active.ShouldBe(SpeechModelId.SmallEn);
         _settings.DidNotReceiveWithAnyArgs().Update(default!);
-        _settings.DidNotReceiveWithAnyArgs().Save(default!);
     }
 }

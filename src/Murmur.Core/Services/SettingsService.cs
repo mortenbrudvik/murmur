@@ -25,16 +25,6 @@ public sealed class SettingsService(MurmurPaths paths, IKeyboardLayout layout) :
             return Normalize(Stored());
     }
 
-    public void Save(MurmurSettings settings)
-    {
-        // Shares Update's lock, so a plain save cannot slip in between an update's load and its save.
-        lock (_lock)
-        {
-            _store.Save(settings);
-            _stored = settings;
-        }
-    }
-
     public MurmurSettings Update(Func<MurmurSettings, MurmurSettings> change)
     {
         lock (_lock)

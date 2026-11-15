@@ -11,8 +11,8 @@ namespace Murmur.Core.Services;
 /// </summary>
 /// <remarks>
 /// The HKCU Run key cannot be used here and, worse, does not fail: MSIX copy-on-writes the value into a private
-/// per-package hive that Explorer never reads, then merges that hive on read, so the write succeeds,
-/// <see cref="StartupRegistration.IsRegistered"/> reads it straight back, and nothing runs at sign-in. This class is
+/// per-package hive that Explorer never reads, then merges that hive on read, so the write succeeds, reading the key
+/// back finds it, and nothing runs at sign-in. This class is
 /// the supported mechanism. It gives up one thing in exchange: once the user turns Murmur off in Task Manager or in
 /// Settings &gt; Apps &gt; Startup, the state is <see cref="StartupTaskState.DisabledByUser"/> and
 /// <see cref="StartupTask.RequestEnableAsync"/> will not override them. That is logged; the user has the final say.
@@ -32,14 +32,6 @@ public sealed class PackagedStartupRegistration : IStartupRegistration
 
     // Async waiters are released first in, first out, which is what keeps the calls in order.
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private volatile bool _isRegistered;
-
-    /// <summary>
-    /// Whether the task was enabled (by Murmur or by policy) when the last <see cref="Apply"/> finished; false until
-    /// one has. Not a live query: reading the task takes an asynchronous fetch, so a change made in Task Manager while
-    /// Murmur runs is only seen by the next Apply. Nothing in the app reads it today.
-    /// </summary>
-    public bool IsRegistered => _isRegistered;
 
     /// <summary>Starts enabling or disabling the startup task and returns at once. Never throws.</summary>
     public void Apply(bool enabled) => ApplyAsync(enabled).FireAndForget();
@@ -115,8 +107,6 @@ public sealed class PackagedStartupRegistration : IStartupRegistration
                         state, enabled);
                     break;
             }
-
-            _isRegistered = IsEnabled(task.State);
         }
         catch (Exception ex)
         {

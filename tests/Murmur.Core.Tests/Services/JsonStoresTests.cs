@@ -29,7 +29,7 @@ public sealed class JsonStoresTests : IDisposable
     }
 
     [Fact]
-    public void Settings_SaveThenLoad_RoundTrips()
+    public void Settings_UpdateThenLoad_RoundTrips()
     {
         var service = NewSettingsService();
         var settings = new MurmurSettings(
@@ -37,7 +37,7 @@ public sealed class JsonStoresTests : IDisposable
             MicrophoneId: "mic-1",
             KeepAudio: true);
 
-        service.Save(settings);
+        service.Update(_ => settings);
         var loaded = NewSettingsService().Load();
 
         loaded.Hotkey.VirtualKey.ShouldBe(0x20);
@@ -72,16 +72,16 @@ public sealed class JsonStoresTests : IDisposable
     [Fact]
     public void Settings_KeepMicrophoneReady_RoundTrips()
     {
-        NewSettingsService().Save(MurmurSettings.Default with { KeepMicrophoneReady = true });
+        NewSettingsService().Update(_ => MurmurSettings.Default with { KeepMicrophoneReady = true });
 
         NewSettingsService().Load().KeepMicrophoneReady.ShouldBeTrue();
     }
 
     [Fact]
-    public void SettingsService_SaveThenLoad_RoundTripsTheNewFields()
+    public void SettingsService_UpdateThenLoad_RoundTripsTheNewFields()
     {
         var service = NewSettingsService();
-        service.Save(MurmurSettings.Default with
+        service.Update(_ => MurmurSettings.Default with
         {
             SpeechModel = SpeechModelId.SmallEn,
             SetupStep = SetupStep.TryIt,
@@ -127,7 +127,7 @@ public sealed class JsonStoresTests : IDisposable
     public void SettingsService_UpdateOverAnInvalidStoredHotkey_HandsTheChangeTheRepairedHotkey()
     {
         var service = NewSettingsService();
-        service.Save(MurmurSettings.Default with { Hotkey = new HotkeyDefinition(0x41, HotkeyModifiers.None, "A") });
+        service.Update(_ => MurmurSettings.Default with { Hotkey = new HotkeyDefinition(0x41, HotkeyModifiers.None, "A") });
         HotkeyDefinition? seen = null;
 
         var returned = service.Update(s =>
@@ -145,7 +145,7 @@ public sealed class JsonStoresTests : IDisposable
     public void SettingsService_LoadOemHotkey_RecomputesTheDisplayName()
     {
         // Saved by a build that named symbol keys after the US layout: the key right of P is "å" here, not "]".
-        NewSettingsService().Save(MurmurSettings.Default with
+        NewSettingsService().Update(_ => MurmurSettings.Default with
         {
             Hotkey = new HotkeyDefinition(0xDD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+]"),
         });
@@ -159,7 +159,7 @@ public sealed class JsonStoresTests : IDisposable
     public void SettingsService_LoadHotkeyThatIsNotAnOemKey_KeepsTheSavedDisplayNameAndSkipsTheLayout()
     {
         var layout = new FakeKeyboardLayout();
-        NewSettingsService().Save(MurmurSettings.Default with
+        NewSettingsService().Update(_ => MurmurSettings.Default with
         {
             Hotkey = new HotkeyDefinition(0x20, HotkeyModifiers.Ctrl | HotkeyModifiers.Shift, "Ctrl+Shift+Space"),
         });
@@ -183,7 +183,7 @@ public sealed class JsonStoresTests : IDisposable
     public void Settings_InvalidHotkeyOnDisk_FallsBackToDefault()
     {
         var service = NewSettingsService();
-        service.Save(MurmurSettings.Default with
+        service.Update(_ => MurmurSettings.Default with
         {
             Hotkey = new HotkeyDefinition(0x41, HotkeyModifiers.None, "A"),
             MicrophoneId = "mic-2",
@@ -208,9 +208,9 @@ public sealed class JsonStoresTests : IDisposable
     }
 
     [Fact]
-    public void Settings_Save_WritesCamelCaseJsonThroughJsonUtils()
+    public void Settings_Update_WritesCamelCaseJsonThroughJsonUtils()
     {
-        NewSettingsService().Save(MurmurSettings.Default);
+        NewSettingsService().Update(_ => MurmurSettings.Default);
 
         var json = File.ReadAllText(_paths.SettingsFile);
 
@@ -274,7 +274,7 @@ public sealed class JsonStoresTests : IDisposable
     public void SettingsService_Load_KeepsTheFileItReadUntilASave()
     {
         var service = NewSettingsService();
-        service.Save(MurmurSettings.Default with { MicrophoneId = "mic-1" });
+        service.Update(_ => MurmurSettings.Default with { MicrophoneId = "mic-1" });
         service.Load();
 
         // Changed behind the service's back: it keeps what it had.
@@ -296,12 +296,12 @@ public sealed class JsonStoresTests : IDisposable
     }
 
     [Fact]
-    public void SettingsService_SaveAndUpdate_ReplaceTheKeptSettings()
+    public void SettingsService_Update_ReplacesTheKeptSettings()
     {
         var service = NewSettingsService();
         service.Load();
 
-        service.Save(MurmurSettings.Default with { MicrophoneId = "mic-1" });
+        service.Update(_ => MurmurSettings.Default with { MicrophoneId = "mic-1" });
         service.Load().MicrophoneId.ShouldBe("mic-1");
 
         service.Update(s => s with { KeepAudio = true });
@@ -325,14 +325,14 @@ public sealed class JsonStoresTests : IDisposable
     public void SettingsService_KeptSettings_StillRepairTheHotkeyAndNameItAfterTheLayout()
     {
         var service = NewSettingsService(FakeKeyboardLayout.Nordic);
-        service.Save(MurmurSettings.Default with
+        service.Update(_ => MurmurSettings.Default with
         {
             Hotkey = new HotkeyDefinition(0xDD, HotkeyModifiers.Ctrl | HotkeyModifiers.Alt, "Ctrl+Alt+]"),
         });
 
         service.Load().Hotkey.DisplayName.ShouldBe("Ctrl+Alt+Å");
 
-        service.Save(MurmurSettings.Default with { Hotkey = new HotkeyDefinition(0x41, HotkeyModifiers.None, "A") });
+        service.Update(_ => MurmurSettings.Default with { Hotkey = new HotkeyDefinition(0x41, HotkeyModifiers.None, "A") });
 
         service.Load().Hotkey.ShouldBe(HotkeyDefinition.Default);
     }

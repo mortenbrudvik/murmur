@@ -17,6 +17,13 @@ csharp_style_namespace_declarations = file_scoped:warning
 # The ":warning" above only shows in the editor; this makes the build report it (EnforceCodeStyleInBuild).
 dotnet_diagnostic.IDE0161.severity = warning
 
+# Unused code: private members never used (IDE0051) or written but never read (IDE0052), and unused parameters of
+# non-public methods (IDE0060). Public parameters stay: an interface or event signature fixes them.
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
+dotnet_diagnostic.IDE0060.severity = warning
+dotnet_code_quality_unused_parameters = non_public
+
 # var preferences
 csharp_style_var_for_built_in_types = true:suggestion
 csharp_style_var_when_type_is_apparent = true:suggestion

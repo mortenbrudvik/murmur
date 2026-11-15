@@ -27,6 +27,9 @@ public class WebViewHandler
     /// <summary>A renderer that has failed this many times is not reloaded again: it would likely only fail again.</summary>
     public const int MaxReloads = 3;
 
+    /// <summary>The host the bundled page is served from (<see cref="HostWebRootFolder"/>) unless another is given.</summary>
+    public const string DefaultHostName = "murmur.localassets.invalid";
+
     private readonly ILogger _logger = Log.ForContext<WebViewHandler>();
     private int _reloads;
 
@@ -48,7 +51,6 @@ public class WebViewHandler
     /// </summary>
     public Task StartAsync() => _start ??= InitializeAsync();
 
-    public Action? InitializeComplete { get; set; }
     public Action<Exception>? InitializeFailed { get; set; }
 
     /// <summary>
@@ -56,15 +58,14 @@ public class WebViewHandler
     /// <see cref="ProcessFailureResponse.GiveUp"/>). Only a new WebView2, in practice a restart of the app, brings it back.
     /// </summary>
     public Action? Unrecoverable { get; set; }
-    public WebView2 WebView { get; private set; }
+    public WebView2 WebView { get; }
     public string InitialUrl { get; }
-    public string? EnvironmentFolderPath { get; private set; }
-    public bool IsInitialized { get; private set; }
+    public string? EnvironmentFolderPath { get; }
     public string HostObjectName { get; init; } = "webview";
     public object? HostObject { get; init; }
     public bool EnableDevTools { get; init; }
     public string? HostWebRootFolder { get; init; }
-    public string HostWebHostNameForFolder { get; init; } = "murmur.localassets.invalid";
+    public string HostWebHostNameForFolder { get; init; } = DefaultHostName;
 
     /// <summary>
     /// The origins (scheme, host and port, such as <c>https://murmur.localassets.invalid</c>) the page may navigate to
@@ -77,12 +78,6 @@ public class WebViewHandler
     /// The colour the web area shows before the page paints, instead of white. Read once, as WebView2 is initialized.
     /// </summary>
     public System.Drawing.Color? DefaultBackgroundColor { get; init; }
-
-    public virtual void Navigate(string url, bool forceRefresh = false)
-    {
-        if (string.IsNullOrEmpty(url) || !IsInitialized) return;
-        WebView.Source = new Uri(url);
-    }
 
     /// <summary>
     /// Whether a right-click shows the browser's context menu when DevTools are off. Text fields (the
@@ -139,6 +134,9 @@ public class WebViewHandler
         settings.IsBuiltInErrorPageEnabled = EnableDevTools;
         settings.IsPasswordAutosaveEnabled = false;
         settings.IsGeneralAutofillEnabled = false;
+        // A touchpad swipe would go back to the about:blank the control starts on; NavigationStarting cancels that, but
+        // there is no history worth swiping through.
+        settings.IsSwipeNavigationEnabled = false;
     }
 
     private void OnProcessFailed(CoreWebView2ProcessFailedKind kind, CoreWebView2ProcessFailedReason reason, int exitCode)
@@ -167,7 +165,7 @@ public class WebViewHandler
         }
     }
 
-    protected async Task InitializeAsync()
+    private async Task InitializeAsync()
     {
         try
         {
@@ -277,11 +275,8 @@ public class WebViewHandler
                 args.Handled = true;
             };
 
-            IsInitialized = true;
-            InitializeComplete?.Invoke();
-
             if (!string.IsNullOrEmpty(InitialUrl))
-                Navigate(InitialUrl);
+                WebView.Source = new Uri(InitialUrl);
         }
         catch (Exception ex)
         {

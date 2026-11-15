@@ -154,6 +154,7 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", SetLastError = true)]
     internal static partial uint EnumClipboardFormats(uint format);
 
+    /// <summary>Only the clipboard tests call it, to check what a write left behind.</summary>
     [LibraryImport("user32.dll")]
     internal static partial int CountClipboardFormats();
 
@@ -164,6 +165,7 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", SetLastError = true)]
     internal static partial nint SetClipboardData(uint uFormat, nint hMem);
 
+    /// <summary>Only the clipboard tests call it, to check what a write left behind.</summary>
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool IsClipboardFormatAvailable(uint format);

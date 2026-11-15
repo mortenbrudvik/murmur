@@ -25,13 +25,10 @@ internal static class HumGeometry
     /// <summary>The splash's drawing: the tile 96 DIPs wide.</summary>
     internal static readonly HumFrame Splash = new(Width, TileX, TileY, TileSize);
 
-    internal static readonly double Scale = Splash.Scale;
-
     /// <summary>Where the splash's line has its flat ends.</summary>
     internal static readonly double Baseline = Splash.Baseline;
 
-    /// <summary>The splash's stroke width and its tile's corner radius, in DIPs.</summary>
-    internal static readonly double StrokeWidth = Splash.StrokeWidth;
+    /// <summary>The splash's tile's corner radius, in DIPs.</summary>
     internal static readonly double CornerRadius = Splash.CornerRadius;
 
     /// <summary>The splash's line at rest.</summary>

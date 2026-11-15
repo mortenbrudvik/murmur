@@ -13,7 +13,8 @@ public sealed class StartupRegistration(string exePath,
     private readonly ILogger _logger = Log.ForContext<StartupRegistration>();
     private readonly string _command = $"\"{exePath}\" --minimized";
 
-    public bool IsRegistered
+    /// <summary>True when the Run key entry exists and starts this executable. For tests.</summary>
+    internal bool IsRegistered
     {
         get
         {
@@ -56,8 +57,6 @@ public sealed class StartupRegistration(string exePath,
 public sealed class NoopStartupRegistration : IStartupRegistration
 {
     private readonly ILogger _logger = Log.ForContext<NoopStartupRegistration>();
-
-    public bool IsRegistered => false;
 
     public void Apply(bool enabled) =>
         _logger.Debug("Debug build: start with Windows ({Enabled}) is not applied", enabled);

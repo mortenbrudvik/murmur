@@ -15,7 +15,4 @@ public interface IStartupRegistration
     /// <exception cref="System.Security.SecurityException">The registry key cannot be written (for example by policy).</exception>
     /// <exception cref="IOException">The registry key cannot be written.</exception>
     void Apply(bool enabled);
-
-    /// <summary>True when the startup entry exists and starts this executable.</summary>
-    bool IsRegistered { get; }
 }

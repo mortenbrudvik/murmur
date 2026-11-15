@@ -43,7 +43,8 @@ public sealed class SplashGate(TimeProvider time, TimeSpan minimum, TimeSpan tim
     /// <summary>Raised exactly once, on whichever thread caused it: the caller of a method here, or a timer thread.</summary>
     public event Action<SplashCloseReason>? Closed;
 
-    public bool IsClosed
+    /// <summary>For tests.</summary>
+    internal bool IsClosed
     {
         get
         {

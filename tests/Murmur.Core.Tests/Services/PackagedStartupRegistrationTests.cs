@@ -59,9 +59,7 @@ public sealed class PackagedStartupRegistrationTests
     {
         var registration = new PackagedStartupRegistration();
 
-        await registration.ApplyAsync(true);
-
-        registration.IsRegistered.ShouldBeFalse();
+        await Should.NotThrowAsync(() => registration.ApplyAsync(true));
     }
 
     private static string FindRepoFile(params string[] parts)
