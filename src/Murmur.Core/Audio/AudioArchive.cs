@@ -7,22 +7,16 @@ namespace Murmur.Core.Audio;
 public sealed class AudioArchive(MurmurPaths paths) : IAudioArchive
 {
     private const string Extension = ".wav";
-    private const string TempExtension = ".tmp";
 
     private static readonly WaveFormat Format = new(16000, 16, 1);
 
-    public void Save(Guid id, float[] samples16kMono)
-    {
-        Directory.CreateDirectory(paths.AudioDirectory);
-
-        var path = PathFor(id);
-        var tempPath = path + TempExtension;
-        using (var writer = new WaveFileWriter(tempPath, Format))
+    /// <summary>Written whole or not at all, so a crash cannot leave a truncated .wav that looks like a real recording.</summary>
+    public void Save(Guid id, float[] samples16kMono) =>
+        AtomicFile.Write(PathFor(id), tempPath =>
+        {
+            using var writer = new WaveFileWriter(tempPath, Format);
             writer.Write(ToPcm16(samples16kMono));
-
-        // Renamed into place so a crash cannot leave a truncated .wav that looks like a real recording.
-        File.Move(tempPath, path, overwrite: true);
-    }
+        });
 
     public void Delete(Guid id)
     {
@@ -42,7 +36,7 @@ public sealed class AudioArchive(MurmurPaths paths) : IAudioArchive
             // ("*.wav" also matches "x.wavx"), so the extension is compared exactly instead.
             var name = Path.GetFileName(file);
             if (name.EndsWith(Extension, StringComparison.OrdinalIgnoreCase)
-                || name.EndsWith(Extension + TempExtension, StringComparison.OrdinalIgnoreCase))
+                || name.EndsWith(Extension + AtomicFile.TempSuffix, StringComparison.OrdinalIgnoreCase))
             {
                 File.Delete(file);
             }

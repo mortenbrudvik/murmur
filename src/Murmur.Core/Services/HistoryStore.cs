@@ -187,11 +187,7 @@ public sealed class HistoryStore(MurmurPaths paths, TimeProvider time) : IHistor
 
     private void Rewrite(IReadOnlyList<HistoryEntry> entries)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(paths.HistoryFile)!);
-
-        var tempPath = paths.HistoryFile + ".tmp";
-        File.WriteAllText(tempPath, string.Concat(entries.Select(e => JsonUtils.Serialize(e) + "\n")));
-        File.Move(tempPath, paths.HistoryFile, overwrite: true);
+        AtomicFile.WriteAllText(paths.HistoryFile, string.Concat(entries.Select(e => JsonUtils.Serialize(e) + "\n")));
         _fileEndsWithNewline = true;
     }
 }

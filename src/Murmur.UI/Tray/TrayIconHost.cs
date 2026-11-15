@@ -30,9 +30,6 @@ namespace Murmur.UI.Tray;
 /// </summary>
 public sealed class TrayIconHost : IDisposable
 {
-    /// <summary>The notification area's tooltip holds 128 characters, including the terminating null.</summary>
-    internal const int MaxToolTipLength = 127;
-
     /// <summary>The hotkey can change in Settings at any time; hovering the icon re-reads it at most this often.</summary>
     private static readonly TimeSpan HotkeyRefreshInterval = TimeSpan.FromSeconds(2);
 
@@ -316,44 +313,6 @@ public sealed class TrayIconHost : IDisposable
         _icon?.Dispose();
     }
 
-    /// <summary>
-    /// The tooltip for an engine state; long error messages are cut to fit. Ready stays Ready while a model switch
-    /// downloads the next model: the current one keeps dictating meanwhile, and the download shows in Settings. The
-    /// load of the next model is not "loading model…" either, for the same reason. Without the keyboard hook, whenever
-    /// the engine could dictate (Ready, or the load of a switch) the tooltip says the hotkey is not working instead.
-    /// </summary>
-    internal static string FormatToolTip(EngineStatus status, string hotkeyName, bool hookInstalled = true)
-    {
-        var text = status.State switch
-        {
-            _ when !hookInstalled && ShowsReadyIcon(status) => "Murmur — the hotkey isn't working",
-            _ when status.Switching => $"Murmur — switching to {status.ModelName}…",
-            EngineState.Ready => $"Murmur — hold {hotkeyName} to talk",
-            EngineState.Downloading when status.Download is { Reconnecting: true } => "Murmur — reconnecting to download the speech model…",
-            EngineState.Downloading => $"Murmur — downloading speech model {WholeFraction(status.Download):P0}",
-            EngineState.Error => $"Murmur — {status.Error ?? "the speech engine failed"}",
-            _ => "Murmur — loading model…",
-        };
-
-        return text.Length <= MaxToolTipLength ? text : string.Concat(text.AsSpan(0, MaxToolTipLength - 1), "…");
-    }
-
-    /// <summary>
-    /// The gradient dot: the engine can dictate, which includes the load of a switched-to model (its status is Loading,
-    /// but the previous model is still there to dictate with).
-    /// </summary>
-    internal static bool ShowsReadyIcon(EngineStatus status) => status.State == EngineState.Ready || status.Switching;
-
-    /// <summary>The share downloaded, cut to a whole percent so the tooltip never shows 100% before the end.</summary>
-    private static double WholeFraction(DownloadProgress? download)
-    {
-        if (download is not { TotalBytes: > 0 })
-            return 0;
-
-        // In whole numbers: 0.29 * 100 is 28.999… in floating point.
-        return Math.Clamp(download.BytesReceived, 0, download.TotalBytes) * 100 / download.TotalBytes / 100.0;
-    }
-
     /// <summary>Adds the icon to the notification area; on failure, schedules the next attempt while any are left.</summary>
     private void TryCreate()
     {
@@ -421,7 +380,7 @@ public sealed class TrayIconHost : IDisposable
             _hotkeyName = _settings.ReadHotkeyName(fallback: _hotkeyName); // unreadable settings keep the last name
         }
 
-        var ready = ShowsReadyIcon(status);
+        var ready = TrayStatusText.ShowsReadyIcon(status);
         if (_showingReadyIcon != ready)
         {
             // The TaskbarIcon owns the icon it is given and disposes it when it is replaced, so it gets a fresh one
@@ -430,7 +389,7 @@ public sealed class TrayIconHost : IDisposable
             _showingReadyIcon = ready;
         }
 
-        var toolTip = FormatToolTip(status, _hotkeyName, _input.HookInstalled);
+        var toolTip = TrayStatusText.ToolTip(status, _hotkeyName, _input.HookInstalled);
         if (toolTip != _icon.ToolTipText)
         {
             _icon.ToolTipText = toolTip;

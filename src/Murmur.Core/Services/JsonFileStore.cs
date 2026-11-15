@@ -37,11 +37,7 @@ public sealed class JsonFileStore<T>(string path, T defaults) where T : class
     {
         lock (_lock)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var json = JsonUtils.Serialize(value);
-            var tempPath = path + ".tmp";
-            File.WriteAllText(tempPath, json);
-            File.Move(tempPath, path, overwrite: true);
+            AtomicFile.WriteAllText(path, JsonUtils.Serialize(value));
         }
     }
 }

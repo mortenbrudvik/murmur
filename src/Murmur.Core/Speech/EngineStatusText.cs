@@ -46,7 +46,7 @@ public static class EngineStatusText
     };
 
     /// <summary>Whole bytes times 100, then divided, so 99.9 % reads 99 and never 100 before the last byte.</summary>
-    private static long Percent(DownloadProgress? download)
+    internal static long Percent(DownloadProgress? download)
     {
         if (download is null || download.TotalBytes <= 0)
             return 0;
