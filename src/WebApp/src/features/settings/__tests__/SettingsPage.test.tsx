@@ -534,9 +534,10 @@ describe("SettingsPage", () => {
       await screen.findByRole("radio", { name: FAST });
 
       expect(screen.getByText("Ready · CUDA")).toBeTruthy();
-      expect(screen.getByText("Downloading Whisper small (English)")).toBeTruthy();
+      // The same line as the banner's, which App leaves out on this page.
+      expect(screen.getByText("Downloading Whisper small (English)… 25%")).toBeTruthy();
       expect(screen.getByText("122 MB of 488 MB · 18 MB/s · less than a minute left")).toBeTruthy();
-      expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("25");
+      expect(screen.getByRole("progressbar", { name: "Model download" }).getAttribute("aria-valuenow")).toBe("25");
     });
 
     it("shows Reconnecting… in the switch progress line", async () => {
@@ -544,7 +545,8 @@ describe("SettingsPage", () => {
       await renderLoaded({ choice }, engine({ state: "ready", runtime: "Cuda", download }));
       await screen.findByRole("radio", { name: FAST });
 
-      expect(screen.getByText("122 MB of 488 MB · Reconnecting…")).toBeTruthy();
+      expect(screen.getByText("Reconnecting…")).toBeTruthy();
+      expect(screen.getByText("122 MB of 488 MB")).toBeTruthy();
     });
 
     it("shows no switch progress line when nothing is downloading", async () => {

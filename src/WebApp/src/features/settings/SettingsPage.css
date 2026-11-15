@@ -157,7 +157,7 @@
   font-size: 13px;
 }
 
-.settings-engine .engine-progress {
+.settings-engine .download-bar {
   flex: 1 1 100%;
 }
 
@@ -206,13 +206,8 @@
   margin-top: 8px;
 }
 
-.speech-model-download .engine-progress {
+.speech-model-download .download-bar {
   max-width: 280px;
-  margin-bottom: 6px;
-}
-
-.speech-model-download .settings-hint {
-  margin-top: 0;
 }
 
 .speech-model .page-error {

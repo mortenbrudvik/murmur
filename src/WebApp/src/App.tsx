@@ -57,7 +57,7 @@ function App() {
       <Sidebar page={page} onNavigate={setChosenPage} />
       <div className="main-column">
         <HotkeyUnavailableBanner status={inputStatus} />
-        <EngineStatusBanner status={engineStatus} />
+        <EngineStatusBanner status={engineStatus} hideDownload={page === "settings"} />
         <main className="content">
           {page === "history" && <HistoryPage />}
           {page === "vocabulary" && <VocabularyPage />}

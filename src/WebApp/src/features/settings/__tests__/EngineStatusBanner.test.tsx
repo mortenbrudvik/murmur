@@ -139,4 +139,28 @@ describe("EngineStatusBanner", () => {
     expect(alert.textContent).toBe("Model file is corrupt");
     expect(alert.className).toBe("engine-banner engine-banner-error");
   });
+
+  describe("with hideDownload (the Settings page, whose engine card shows the download)", () => {
+    it("shows nothing for a model switch's download", () => {
+      const { container } = render(<EngineStatusBanner status={{ ...ready, download: smallDownload }} hideDownload />);
+
+      expect(container.innerHTML).toBe("");
+    });
+
+    it("shows nothing for the first download", () => {
+      const { container } = render(
+        <EngineStatusBanner status={{ ...ready, state: "downloading", runtime: null, download: largeDownload }} hideDownload />,
+      );
+
+      expect(container.innerHTML).toBe("");
+    });
+
+    it("still shows loading and failures", () => {
+      const { rerender } = render(<EngineStatusBanner status={{ ...ready, state: "loading", runtime: null }} hideDownload />);
+      expect(screen.getByRole("status").textContent).toBe("Loading model…");
+
+      rerender(<EngineStatusBanner status={{ ...ready, state: "error", runtime: null, error: "Model file is corrupt" }} hideDownload />);
+      expect(screen.getByRole("alert").textContent).toBe("Model file is corrupt");
+    });
+  });
 });
