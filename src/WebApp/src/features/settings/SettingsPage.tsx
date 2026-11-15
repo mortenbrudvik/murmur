@@ -87,7 +87,15 @@ export default function SettingsPage({ engineStatus }: Props) {
               </div>
               <div className="settings-control">
                 <kbd className="settings-keycap">{settings.hotkey.displayName}</kbd>
-                <button type="button" className="settings-button" disabled={capturing} onClick={() => void changeHotkey()}>
+                {/* aria-disabled, not disabled, while waiting for the key: a disabled button would drop the focus to the page. */}
+                <button
+                  type="button"
+                  className="settings-button"
+                  aria-disabled={capturing}
+                  onClick={() => {
+                    if (!capturing) void changeHotkey();
+                  }}
+                >
                   {capturing ? CAPTURING_LABEL : "Change"}
                 </button>
               </div>

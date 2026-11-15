@@ -11,6 +11,12 @@ export default function HistoryPage() {
   // The first entry the last Show older loaded, which takes the focus from the button (it goes with the last page).
   const [focusEntryId, setFocusEntryId] = useState<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  const searchBox = useRef<HTMLInputElement>(null);
+  const clearButton = useRef<HTMLButtonElement>(null);
+  const noButton = useRef<HTMLButtonElement>(null);
+  // Where the focus goes when the confirmation closes, as the Yes or No that had it goes with it: back to Clear all
+  // after No, to the search box after Yes (Clear all goes too once the history is empty).
+  const focusAfterConfirm = useRef<"clear" | "search" | null>(null);
   const { entries, loading, loadingOlder, hasMore, error, loadOlder, remove, clearAll } = useHistory(search);
   const hotkeyName = useHotkeyName();
 
@@ -23,8 +29,25 @@ export default function HistoryPage() {
     list.current?.querySelector<HTMLElement>(`[data-entry-id="${focusEntryId}"]`)?.focus();
   }, [focusEntryId]);
 
-  function confirmClear() {
+  // Clear all is replaced by Yes and No: the focus moves to No, the answer that keeps everything.
+  useEffect(() => {
+    if (confirmingClear) {
+      noButton.current?.focus();
+      return;
+    }
+    const target = focusAfterConfirm.current;
+    focusAfterConfirm.current = null;
+    if (target === "clear") (clearButton.current ?? searchBox.current)?.focus();
+    else if (target === "search") searchBox.current?.focus();
+  }, [confirmingClear]);
+
+  function closeConfirm(focus: "clear" | "search") {
+    focusAfterConfirm.current = focus;
     setConfirmingClear(false);
+  }
+
+  function confirmClear() {
+    closeConfirm("search");
     void clearAll();
   }
 
@@ -39,6 +62,7 @@ export default function HistoryPage() {
         <h1>History</h1>
         <div className="history-tools">
           <input
+            ref={searchBox}
             type="search"
             className="history-search"
             placeholder="Search…"
@@ -53,12 +77,12 @@ export default function HistoryPage() {
                 <button type="button" className="history-confirm-yes" onClick={confirmClear}>
                   Yes
                 </button>
-                <button type="button" className="history-confirm-no" onClick={() => setConfirmingClear(false)}>
+                <button type="button" className="history-confirm-no" ref={noButton} onClick={() => closeConfirm("clear")}>
                   No
                 </button>
               </span>
             ) : (
-              <button type="button" className="history-clear" onClick={() => setConfirmingClear(true)}>
+              <button type="button" className="history-clear" ref={clearButton} onClick={() => setConfirmingClear(true)}>
                 Clear all
               </button>
             ))}

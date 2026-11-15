@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { isPlainEnter } from "./isPlainEnter";
 import type { ReplacementRule, Vocabulary } from "../../types/domain";
@@ -18,6 +18,20 @@ export default function RulesSection({ replacements, apply, error }: Props) {
   const [spokenDraft, setSpokenDraft] = useState("");
   const [writtenDraft, setWrittenDraft] = useState("");
   const spokenInput = useRef<HTMLInputElement>(null);
+  const rows = useRef<HTMLTableSectionElement>(null);
+  // The row being removed and how many rules there were. Its button had the focus and goes with the row, so the
+  // focus moves to the row that takes its place, or to the new rule's first box when it was the last one.
+  const removing = useRef<{ index: number; count: number } | null>(null);
+
+  useEffect(() => {
+    const removed = removing.current;
+    if (!removed || replacements.length >= removed.count) return;
+    removing.current = null;
+    // Only the focus the removed button took with it: not where the user has gone since.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const next = rows.current?.querySelectorAll<HTMLButtonElement>(".vocab-rule-remove")[removed.index];
+    (next ?? spokenInput.current)?.focus();
+  }, [replacements]);
 
   async function addRule() {
     const spokenText = spokenDraft;
@@ -32,11 +46,15 @@ export default function RulesSection({ replacements, apply, error }: Props) {
     spokenInput.current?.focus();
   }
 
-  function removeRule(rule: ReplacementRule) {
-    void apply((v) => {
-      const index = v.replacements.findIndex((r) => sameRule(r, rule));
-      return index < 0 ? v : { ...v, replacements: v.replacements.filter((_, i) => i !== index) };
+  async function removeRule(rule: ReplacementRule, index: number) {
+    const mine = { index, count: replacements.length };
+    removing.current = mine;
+    const removed = await apply((v) => {
+      const at = v.replacements.findIndex((r) => sameRule(r, rule));
+      return at < 0 ? v : { ...v, replacements: v.replacements.filter((_, i) => i !== at) };
     });
+    // A failed save leaves the row, and the focus on it.
+    if (!removed && removing.current === mine) removing.current = null;
   }
 
   function onDraftKeyDown(e: KeyboardEvent) {
@@ -59,7 +77,7 @@ export default function RulesSection({ replacements, apply, error }: Props) {
               </th>
             </tr>
           </thead>
-          <tbody>
+          <tbody ref={rows}>
             {replacements.map((rule, index) => (
               <tr key={index}>
                 <td>{rule.spoken}</td>
@@ -70,7 +88,7 @@ export default function RulesSection({ replacements, apply, error }: Props) {
                     className="vocab-rule-remove"
                     aria-label={`Remove rule for ${rule.spoken}`}
                     title="Remove"
-                    onClick={() => removeRule(rule)}
+                    onClick={() => void removeRule(rule, index)}
                   >
                     ×
                   </button>

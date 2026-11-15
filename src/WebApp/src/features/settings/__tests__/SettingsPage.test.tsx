@@ -146,10 +146,17 @@ describe("SettingsPage", () => {
       let press: (key: HotkeyDefinition | null) => void = () => {};
       await renderLoaded({ captureHotkey: () => new Promise((resolve) => { press = resolve; }) });
 
-      fireEvent.click(screen.getByRole("button", { name: "Change" }));
+      const button = screen.getByRole("button", { name: "Change" });
+      button.focus();
+      fireEvent.click(button);
 
       const waiting = (await screen.findByRole("button", { name: "Press the key you want… (Esc to cancel)" })) as HTMLButtonElement;
-      expect(waiting.disabled).toBe(true);
+      // aria-disabled, not disabled: the focus stays on it rather than dropping to the page.
+      expect(waiting.getAttribute("aria-disabled")).toBe("true");
+      expect(waiting.disabled).toBe(false);
+      expect(document.activeElement).toBe(waiting);
+      // Pressing it again while waiting starts no second capture.
+      fireEvent.click(waiting);
       expect(callsTo("settings.captureHotkey")).toHaveLength(1);
 
       await act(async () => { press(f9); });

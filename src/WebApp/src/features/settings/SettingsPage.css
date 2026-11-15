@@ -86,11 +86,12 @@
   border-radius: 5px;
 }
 
-.settings-button:hover:not(:disabled) {
+.settings-button:hover:not(:disabled, [aria-disabled="true"]) {
   background: rgba(143, 179, 255, 0.12);
 }
 
-.settings-button:disabled {
+.settings-button:disabled,
+.settings-button[aria-disabled="true"] {
   color: var(--muted);
   cursor: default;
   border-color: var(--border);

@@ -256,4 +256,69 @@ describe("VocabularyPage", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(/bridge down/);
     expect(screen.queryByLabelText("Add a hint word")).toBeNull();
   });
+
+  describe("focus after a removal, as the button that had it goes", () => {
+    /** Focuses the button, as a keyboard user would have, and presses it. */
+    function press(name: string) {
+      const button = screen.getByRole("button", { name });
+      button.focus();
+      fireEvent.click(button);
+      return button;
+    }
+
+    it("moves to the chip that takes the removed one's place", async () => {
+      await renderLoaded();
+
+      press("Remove Murmur");
+
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove Kubernetes" })));
+    });
+
+    it("moves to the box when the last chip goes", async () => {
+      await renderLoaded();
+
+      press("Remove Kubernetes");
+
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Add a hint word")));
+    });
+
+    it("moves to the rule that takes the removed one's place", async () => {
+      await renderLoaded();
+
+      press("Remove rule for btw");
+
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove rule for gonna" })));
+    });
+
+    it("moves to the new rule's first box when the last rule goes", async () => {
+      await renderLoaded();
+
+      press("Remove rule for gonna");
+
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("New rule: when I hear")));
+    });
+
+    it("stays on the button when the removal could not be saved", async () => {
+      await renderLoaded(stored, () => Promise.reject(new Error("disk full")));
+
+      const button = press("Remove Murmur");
+
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      expect(document.activeElement).toBe(button);
+    });
+
+    it("is left alone when the user has moved on before the removal is saved", async () => {
+      let finish: () => void = () => undefined;
+      await renderLoaded(stored, (doc) => new Promise<Vocabulary>((resolve) => { finish = () => resolve(doc); }));
+
+      press("Remove Murmur");
+      await waitFor(() => expect(updateCalls()).toHaveLength(1));
+      const input = screen.getByLabelText("Add a hint word") as HTMLInputElement;
+      input.focus();
+      finish();
+
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Remove Murmur" })).toBeNull());
+      expect(document.activeElement).toBe(input);
+    });
+  });
 });
