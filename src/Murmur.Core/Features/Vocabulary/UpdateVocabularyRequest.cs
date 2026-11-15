@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 
@@ -32,7 +32,7 @@ public record UpdateVocabularyRequest(IReadOnlyList<string> HintWords, IReadOnly
 public class UpdateVocabularyHandler(IVocabularyService vocabularyService)
     : IRequestHandler<UpdateVocabularyRequest, Murmur.Core.Models.Vocabulary>
 {
-    public Task<Murmur.Core.Models.Vocabulary> Handle(UpdateVocabularyRequest request, CancellationToken ct)
+    public ValueTask<Murmur.Core.Models.Vocabulary> Handle(UpdateVocabularyRequest request, CancellationToken ct)
     {
         var hintWords = (request.HintWords ?? [])
             .Select(w => w?.Trim() ?? "")
@@ -50,7 +50,7 @@ public class UpdateVocabularyHandler(IVocabularyService vocabularyService)
 
         var vocabulary = new Murmur.Core.Models.Vocabulary(hintWords, replacements);
         vocabularyService.Save(vocabulary);
-        return Task.FromResult(vocabulary);
+        return ValueTask.FromResult(vocabulary);
     }
 
     // The page shows the message as the reason in "Could not save the vocabulary (...)."

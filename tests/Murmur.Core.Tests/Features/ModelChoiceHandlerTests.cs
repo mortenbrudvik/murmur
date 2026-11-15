@@ -71,7 +71,7 @@ public sealed class ModelChoiceHandlerTests
 
         var choice = await new SetModelChoiceHandler(_engine, Selection())
             .Handle(new SetModelChoiceRequest(SpeechModelId.SmallEn), CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            .AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         choice.Selected.ShouldBe(SpeechModelId.SmallEn);
         switching.Task.IsCompleted.ShouldBeFalse();
@@ -85,7 +85,7 @@ public sealed class ModelChoiceHandlerTests
             .Returns(Task.FromException(new IOException("The settings file is locked.")));
 
         var ex = await Should.ThrowAsync<IOException>(() => new SetModelChoiceHandler(_engine, Selection())
-            .Handle(new SetModelChoiceRequest(SpeechModelId.SmallEn), CancellationToken.None));
+            .Handle(new SetModelChoiceRequest(SpeechModelId.SmallEn), CancellationToken.None).AsTask());
 
         ex.Message.ShouldBe("The settings file is locked.");
     }

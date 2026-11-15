@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Models;
 
@@ -8,8 +8,8 @@ public record GetMicrophonesRequest : IRequest<IReadOnlyList<MicrophoneInfo>>;
 
 public class GetMicrophonesHandler(IAudioRecorder recorder) : IRequestHandler<GetMicrophonesRequest, IReadOnlyList<MicrophoneInfo>>
 {
-    public Task<IReadOnlyList<MicrophoneInfo>> Handle(GetMicrophonesRequest request, CancellationToken ct)
+    public ValueTask<IReadOnlyList<MicrophoneInfo>> Handle(GetMicrophonesRequest request, CancellationToken ct)
     {
-        return Task.FromResult(recorder.ListMicrophones());
+        return ValueTask.FromResult(recorder.ListMicrophones());
     }
 }

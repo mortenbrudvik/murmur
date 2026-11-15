@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Speech;
 
@@ -9,6 +9,6 @@ public record GetModelChoiceRequest : IRequest<ModelChoice>;
 
 public class GetModelChoiceHandler(ModelSelection selection) : IRequestHandler<GetModelChoiceRequest, ModelChoice>
 {
-    public Task<ModelChoice> Handle(GetModelChoiceRequest request, CancellationToken ct) =>
-        Task.FromResult(new ModelChoice(selection.ResolveActive(), selection.Recommended, SpeechModelCatalog.Options));
+    public ValueTask<ModelChoice> Handle(GetModelChoiceRequest request, CancellationToken ct) =>
+        ValueTask.FromResult(new ModelChoice(selection.ResolveActive(), selection.Recommended, SpeechModelCatalog.Options));
 }

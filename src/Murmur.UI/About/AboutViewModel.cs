@@ -1,7 +1,7 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using MediatR;
+using Mediator;
 using Murmur.Core.Features.App;
 using Murmur.Core.Insertion;
 using Murmur.Core.Models;

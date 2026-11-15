@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Common;
 using Murmur.Core.Features.Setup;
 using Murmur.Core.Models;

@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Setup;
 
@@ -9,5 +9,6 @@ public record GetSetupStateRequest : IRequest<SetupState>;
 
 public class GetSetupStateHandler(SetupCoordinator coordinator) : IRequestHandler<GetSetupStateRequest, SetupState>
 {
-    public Task<SetupState> Handle(GetSetupStateRequest request, CancellationToken ct) => coordinator.GetStateAsync();
+    public ValueTask<SetupState> Handle(GetSetupStateRequest request, CancellationToken ct) =>
+        new(coordinator.GetStateAsync());
 }

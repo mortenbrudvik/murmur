@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Features.App;
 
 namespace Murmur.Interop.Handlers;
@@ -7,9 +7,9 @@ namespace Murmur.Interop.Handlers;
 public class ShowSettingsEventHandler(ApiEventAggregator eventAggregator)
     : INotificationHandler<ShowSettingsNotification>
 {
-    public Task Handle(ShowSettingsNotification notification, CancellationToken ct)
+    public ValueTask Handle(ShowSettingsNotification notification, CancellationToken ct)
     {
         eventAggregator.Publish("app.showSettings", new { });
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

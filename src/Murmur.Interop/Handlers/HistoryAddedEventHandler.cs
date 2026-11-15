@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Features.History;
 
 namespace Murmur.Interop.Handlers;
@@ -7,9 +7,9 @@ namespace Murmur.Interop.Handlers;
 public class HistoryAddedEventHandler(ApiEventAggregator eventAggregator)
     : INotificationHandler<HistoryEntryAddedNotification>
 {
-    public Task Handle(HistoryEntryAddedNotification notification, CancellationToken ct)
+    public ValueTask Handle(HistoryEntryAddedNotification notification, CancellationToken ct)
     {
         eventAggregator.Publish("history.added", notification.Entry);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

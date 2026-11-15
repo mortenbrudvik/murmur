@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Features.App;
 using Murmur.Core.Setup;
 using NSubstitute;

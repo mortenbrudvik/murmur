@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 
@@ -17,9 +17,9 @@ public record GetHistoryRequest(string? Search = null, int Limit = 200, Guid? Be
 
 public class GetHistoryHandler(IHistoryStore history) : IRequestHandler<GetHistoryRequest, HistoryPageResult>
 {
-    public Task<HistoryPageResult> Handle(GetHistoryRequest request, CancellationToken ct)
+    public ValueTask<HistoryPageResult> Handle(GetHistoryRequest request, CancellationToken ct)
     {
         var limit = Math.Clamp(request.Limit, 1, GetHistoryRequest.MaxLimit);
-        return Task.FromResult(history.Query(request.Search, limit, request.Before));
+        return ValueTask.FromResult(history.Query(request.Search, limit, request.Before));
     }
 }

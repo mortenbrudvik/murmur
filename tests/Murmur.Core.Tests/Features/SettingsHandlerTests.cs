@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Audio;
 using Murmur.Core.Features.Settings;
@@ -176,7 +176,7 @@ public sealed class SettingsHandlerTests
     {
         _settings.When(s => s.Update(Arg.Any<Func<MurmurSettings, MurmurSettings>>())).Throw(new IOException("disk full"));
 
-        await Should.ThrowAsync<IOException>(() => UpdateHandler().Handle(Update(), CancellationToken.None));
+        await Should.ThrowAsync<IOException>(() => UpdateHandler().Handle(Update(), CancellationToken.None).AsTask());
 
         await _mediator.DidNotReceiveWithAnyArgs().Publish(default(SettingsUpdatedNotification)!, CancellationToken.None);
     }

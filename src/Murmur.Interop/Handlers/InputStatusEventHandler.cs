@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Features.App;
 
 namespace Murmur.Interop.Handlers;
@@ -7,9 +7,9 @@ namespace Murmur.Interop.Handlers;
 public class InputStatusEventHandler(ApiEventAggregator eventAggregator)
     : INotificationHandler<InputStatusChangedNotification>
 {
-    public Task Handle(InputStatusChangedNotification notification, CancellationToken ct)
+    public ValueTask Handle(InputStatusChangedNotification notification, CancellationToken ct)
     {
         eventAggregator.Publish("app.inputStatusChanged", notification.Status);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

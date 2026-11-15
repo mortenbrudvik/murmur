@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using MediatR;
+using Mediator;
 
 namespace Murmur.Interop;
 

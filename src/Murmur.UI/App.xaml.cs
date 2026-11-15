@@ -2,7 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using Autofac;
-using MediatR;
+using Mediator;
 using Murmur.Common;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;

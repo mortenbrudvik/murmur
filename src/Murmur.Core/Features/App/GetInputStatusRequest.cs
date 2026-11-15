@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Input;
 
 namespace Murmur.Core.Features.App;
@@ -8,8 +8,8 @@ public record GetInputStatusRequest : IRequest<InputStatus>;
 
 public class GetInputStatusHandler(InputStatus status) : IRequestHandler<GetInputStatusRequest, InputStatus>
 {
-    public Task<InputStatus> Handle(GetInputStatusRequest request, CancellationToken ct)
+    public ValueTask<InputStatus> Handle(GetInputStatusRequest request, CancellationToken ct)
     {
-        return Task.FromResult(status);
+        return ValueTask.FromResult(status);
     }
 }

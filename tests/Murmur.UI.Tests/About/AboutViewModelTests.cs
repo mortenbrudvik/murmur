@@ -1,5 +1,5 @@
 using System.IO;
-using MediatR;
+using Mediator;
 using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Features.App;
 using Murmur.Core.Insertion;
@@ -150,7 +150,7 @@ public sealed class AboutViewModelTests
     {
         var model = NewModel();
         _mediator.Send(Arg.Any<OpenLinkRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new InvalidOperationException("no browser")), Task.CompletedTask);
+            .Returns(ValueTask.FromException<Unit>(new InvalidOperationException("no browser")), Unit.ValueTask);
 
         await model.OpenLinkCommand.ExecuteAsync(LinkTarget.Repository);
         model.LinkFailed.ShouldBeTrue();
@@ -197,7 +197,7 @@ public sealed class AboutViewModelTests
     {
         var model = NewModel();
         _mediator.Send(Arg.Any<OpenLinkRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new InvalidOperationException("no browser")));
+            .Returns(ValueTask.FromException<Unit>(new InvalidOperationException("no browser")));
         await model.OpenLinkCommand.ExecuteAsync(LinkTarget.Repository);
         await model.CopyDetailsCommand.ExecuteAsync(null);
 

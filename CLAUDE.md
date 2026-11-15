@@ -48,11 +48,11 @@ The version lives in `version.json` and `packaging/msix/AppxManifest.xml` (for e
 **Type:** Hybrid WPF + WebView2 + React
 
 - WPF shell/backend with React UI in WebView2
-- IPC: JS -> `ApiBridge` -> `ApiRegistry` -> MediatR handlers (one request + handler per call, registered in `App.xaml.cs`)
+- IPC: JS -> `ApiBridge` -> `ApiRegistry` -> Mediator handlers (source-generated `IMediator`; one request + handler per call, registered with `ApiRegistry` in `App.xaml.cs`)
 - Push events: C# -> `ApiEventAggregator` -> `PostWebMessageAsJson` -> React hooks (`useWebViewEvent`)
 - Dev mode: Vite HMR on localhost:5223
 - Production: virtual host mapping (`murmur.localassets.invalid`) to the local `Assets` folder
-- Autofac `ContainerBuilder` via `AutofacBootstrapper` (no `IHost`); the theme is fixed to dark
+- Autofac `ContainerBuilder` via `AutofacBootstrapper` (no `IHost`); Mediator's generated registrations come in through `Autofac.Extensions.DependencyInjection` (`Populate`), handlers transient; the theme is fixed to dark
 
 Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Murmur.Interop` -> `Murmur.WebView`, `Murmur.Core`, `Murmur.Common`; `Murmur.Core` -> `Murmur.Common`.
 
@@ -76,7 +76,7 @@ Projects: `Murmur.UI` -> `Murmur.WebView`, `Murmur.Interop`, `Murmur.Core`; `Mur
 
 - xUnit v3 + NSubstitute + Shouldly (+ `Microsoft.Extensions.TimeProvider.Testing` in `Murmur.Core.Tests`)
 - The test projects reference `xunit.v3.mtp-off`, not `xunit.v3`: from 4.0 plain `xunit.v3` runs on Microsoft.Testing.Platform v2, which the .NET 10 SDK refuses under `dotnet test`'s VSTest mode, and `--filter` and coverlet.collector are VSTest features
-- Held packages: MediatR stays on 12 (13 and later are RPL-1.5 or commercial, and the latest `MediatR.Extensions.Autofac.DependencyInjection` fails at startup with MediatR 14.3 and later). The `System.*` and `Microsoft.Extensions.*` packages float on `11.*`: their 11.0 releases ship `net10.0` builds
+- No commercial packages: MediatR was replaced by Mediator (MIT) because MediatR 13 and later are RPL-1.5 or commercial. The `System.*` and `Microsoft.Extensions.*` packages float on `11.*`: their 11.0 releases ship `net10.0` builds
 - Run: `dotnet test Murmur.sln`
 - Frontend: Vitest - run `npm run test:run` in `src/WebApp/`
 

@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Interop;
 using Shouldly;
 

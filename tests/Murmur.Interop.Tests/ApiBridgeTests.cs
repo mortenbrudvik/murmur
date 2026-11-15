@@ -1,5 +1,5 @@
 using System.Text.Json;
-using MediatR;
+using Mediator;
 using NSubstitute;
 using Murmur.Interop;
 using Shouldly;
@@ -20,11 +20,11 @@ public class ApiBridgeTests
     }
 
     [Fact]
-    public async Task InvokeMethod_DispatchesToMediatR_WhenRegistered()
+    public async Task InvokeMethod_DispatchesToMediator_WhenRegistered()
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<object?>("result"));
+            .Returns(ValueTask.FromResult<object?>("result"));
 
         var registry = new ApiRegistry();
         registry.Register<FakeRequest>("test", "get");
@@ -41,7 +41,7 @@ public class ApiBridgeTests
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<object?>("result"));
+            .Returns(ValueTask.FromResult<object?>("result"));
         var bridge = BridgeFor(mediator);
 
         var result = await bridge.InvokeMethod("test", "get", "{}");
@@ -55,7 +55,7 @@ public class ApiBridgeTests
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns(_ => LaterAsync());
+            .Returns(_ => new ValueTask<object?>(LaterAsync()));
         var bridge = BridgeFor(mediator);
 
         var result = await bridge.InvokeMethod("test", "get", "{}");
@@ -75,7 +75,7 @@ public class ApiBridgeTests
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<object?>(Unit.Value));
+            .Returns(ValueTask.FromResult<object?>(Unit.Value));
         var registry = new ApiRegistry();
         registry.Register<FakeVoidRequest>("test", "do");
         var bridge = new ApiBridge(mediator, registry);
@@ -93,7 +93,7 @@ public class ApiBridgeTests
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns<Task<object?>>(_ => throw new InvalidOperationException("thrown at once"));
+            .Returns<ValueTask<object?>>(_ => throw new InvalidOperationException("thrown at once"));
         var bridge = BridgeFor(mediator);
 
         var result = await bridge.InvokeMethod("test", "get", "{}");
@@ -106,7 +106,7 @@ public class ApiBridgeTests
     {
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<object>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<object?>(new InvalidOperationException("handler failed")));
+            .Returns(ValueTask.FromException<object?>(new InvalidOperationException("handler failed")));
         var bridge = BridgeFor(mediator);
 
         var result = await bridge.InvokeMethod("test", "get", "{}");

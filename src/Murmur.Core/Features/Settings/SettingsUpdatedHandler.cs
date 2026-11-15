@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Input;
 using Murmur.Core.Services;
@@ -17,7 +17,7 @@ public class SettingsUpdatedHandler(HotkeyMatcher matcher, IStartupRegistration 
 {
     private static readonly ILogger Logger = Log.ForContext<SettingsUpdatedHandler>();
 
-    public Task Handle(SettingsUpdatedNotification notification, CancellationToken ct)
+    public ValueTask Handle(SettingsUpdatedNotification notification, CancellationToken ct)
     {
         var settings = notification.Settings;
         matcher.Hotkey = settings.Hotkey;
@@ -35,6 +35,6 @@ public class SettingsUpdatedHandler(HotkeyMatcher matcher, IStartupRegistration 
             Logger.Warning(ex, "Could not update the start-with-Windows entry");
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

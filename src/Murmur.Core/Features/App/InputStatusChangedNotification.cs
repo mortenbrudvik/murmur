@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Input;
 
 namespace Murmur.Core.Features.App;

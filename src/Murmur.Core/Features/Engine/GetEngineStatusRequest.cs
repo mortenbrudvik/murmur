@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Speech;
 
@@ -8,8 +8,8 @@ public record GetEngineStatusRequest : IRequest<EngineStatus>;
 
 public class GetEngineStatusHandler(ISpeechEngine engine) : IRequestHandler<GetEngineStatusRequest, EngineStatus>
 {
-    public Task<EngineStatus> Handle(GetEngineStatusRequest request, CancellationToken ct)
+    public ValueTask<EngineStatus> Handle(GetEngineStatusRequest request, CancellationToken ct)
     {
-        return Task.FromResult(engine.Status);
+        return ValueTask.FromResult(engine.Status);
     }
 }

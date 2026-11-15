@@ -1,5 +1,5 @@
 using System.IO;
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Input;
 using Murmur.Core.Models;

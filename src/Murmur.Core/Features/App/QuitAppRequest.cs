@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Services;
 
 namespace Murmur.Core.Features.App;
@@ -11,9 +11,9 @@ public record QuitAppRequest : IRequest;
 
 public class QuitAppHandler(IAppLifecycle lifecycle) : IRequestHandler<QuitAppRequest>
 {
-    public Task Handle(QuitAppRequest request, CancellationToken ct)
+    public ValueTask<Unit> Handle(QuitAppRequest request, CancellationToken ct)
     {
         lifecycle.RequestQuit();
-        return Task.CompletedTask;
+        return Unit.ValueTask;
     }
 }

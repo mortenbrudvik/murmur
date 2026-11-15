@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
 
@@ -12,11 +12,11 @@ public class CaptureHotkeyHandler(HotkeyMatcher matcher, HotkeyCaptureCoordinato
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
-    public Task<HotkeyDefinition?> Handle(CaptureHotkeyRequest request, CancellationToken ct)
+    public ValueTask<HotkeyDefinition?> Handle(CaptureHotkeyRequest request, CancellationToken ct)
     {
         // The user just clicked a button, so a hotkey still marked as held is stale and would make the next press look
         // like auto-repeat.
         matcher.ResetHeld();
-        return coordinator.CaptureAsync(Timeout, ct);
+        return new ValueTask<HotkeyDefinition?>(coordinator.CaptureAsync(Timeout, ct));
     }
 }

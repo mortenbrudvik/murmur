@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Common;
 using Murmur.Core.Models;
 using Murmur.Core.Speech;
@@ -14,7 +14,7 @@ public record SetModelChoiceRequest(SpeechModelId Model) : IRequest<ModelChoice>
 public class SetModelChoiceHandler(ISpeechEngine engine, ModelSelection selection)
     : IRequestHandler<SetModelChoiceRequest, ModelChoice>
 {
-    public async Task<ModelChoice> Handle(SetModelChoiceRequest request, CancellationToken ct)
+    public async ValueTask<ModelChoice> Handle(SetModelChoiceRequest request, CancellationToken ct)
     {
         // The choice is saved before SwitchModelAsync returns, and a failure to save it has already failed the task:
         // awaiting it then fails this call. Otherwise the task only ends when the whole switch has, after the download

@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Features.History;
 using Murmur.Core.Insertion;

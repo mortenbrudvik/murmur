@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Services;
 
 namespace Murmur.Core.Features.Vocabulary;
@@ -9,8 +9,8 @@ public record GetVocabularyRequest : IRequest<Murmur.Core.Models.Vocabulary>;
 
 public class GetVocabularyHandler(IVocabularyService vocabulary) : IRequestHandler<GetVocabularyRequest, Murmur.Core.Models.Vocabulary>
 {
-    public Task<Murmur.Core.Models.Vocabulary> Handle(GetVocabularyRequest request, CancellationToken ct)
+    public ValueTask<Murmur.Core.Models.Vocabulary> Handle(GetVocabularyRequest request, CancellationToken ct)
     {
-        return Task.FromResult(vocabulary.Load());
+        return ValueTask.FromResult(vocabulary.Load());
     }
 }

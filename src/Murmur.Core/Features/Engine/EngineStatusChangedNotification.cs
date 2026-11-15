@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 
 namespace Murmur.Core.Features.Engine;

@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Services;
 
 namespace Murmur.Core.Features.App;
@@ -8,9 +8,9 @@ public record RestartAppRequest : IRequest;
 
 public class RestartAppHandler(IAppLifecycle lifecycle) : IRequestHandler<RestartAppRequest>
 {
-    public Task Handle(RestartAppRequest request, CancellationToken ct)
+    public ValueTask<Unit> Handle(RestartAppRequest request, CancellationToken ct)
     {
         lifecycle.RequestRestart();
-        return Task.CompletedTask;
+        return Unit.ValueTask;
     }
 }

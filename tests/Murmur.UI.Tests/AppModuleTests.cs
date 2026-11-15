@@ -1,6 +1,6 @@
 using Autofac;
 using Autofac.Core;
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
 using Murmur.Core.Features.App;
@@ -67,17 +67,17 @@ public sealed class AppModuleTests
         container.Resolve<IRequestHandler<UpdateSetupStateRequest, SetupState>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<GetModelChoiceRequest, ModelChoice>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<SetModelChoiceRequest, ModelChoice>>().ShouldNotBeNull();
-        container.Resolve<IRequestHandler<OpenLinkRequest>>().ShouldNotBeNull();
-        container.Resolve<IRequestHandler<RestartAppRequest>>().ShouldNotBeNull();
-        container.Resolve<IRequestHandler<QuitAppRequest>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<OpenLinkRequest, Unit>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<RestartAppRequest, Unit>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<QuitAppRequest, Unit>>().ShouldNotBeNull();
         container.Resolve<IRequestHandler<GetInputStatusRequest, InputStatus>>().ShouldNotBeNull();
-        container.Resolve<IRequestHandler<UiReadyRequest>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<UiReadyRequest, Unit>>().ShouldNotBeNull();
         // App resolves it at start, for the tray menu's Settings.
         container.Resolve<UiLauncher>().ShouldNotBeNull();
         // The tray menu's About: one view model for every About window that is opened.
         container.Resolve<AboutViewModel>().ShouldBeSameAs(container.Resolve<AboutViewModel>());
         container.Resolve<IRequestHandler<StartMicTestRequest, MicTestResult>>().ShouldNotBeNull();
-        container.Resolve<IRequestHandler<StopMicTestRequest>>().ShouldNotBeNull();
+        container.Resolve<IRequestHandler<StopMicTestRequest, Unit>>().ShouldNotBeNull();
     }
 
     /// <summary>

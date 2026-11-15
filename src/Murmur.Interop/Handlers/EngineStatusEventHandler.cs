@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Features.Engine;
 
 namespace Murmur.Interop.Handlers;
@@ -7,9 +7,9 @@ namespace Murmur.Interop.Handlers;
 public class EngineStatusEventHandler(ApiEventAggregator eventAggregator)
     : INotificationHandler<EngineStatusChangedNotification>
 {
-    public Task Handle(EngineStatusChangedNotification notification, CancellationToken ct)
+    public ValueTask Handle(EngineStatusChangedNotification notification, CancellationToken ct)
     {
         eventAggregator.Publish("engine.statusChanged", notification.Status);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

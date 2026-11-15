@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 
@@ -12,7 +12,7 @@ public record OpenLinkRequest(LinkTarget Target) : IRequest;
 
 public class OpenLinkHandler(ILinkOpener opener, MurmurPaths paths) : IRequestHandler<OpenLinkRequest>
 {
-    public Task Handle(OpenLinkRequest request, CancellationToken ct)
+    public ValueTask<Unit> Handle(OpenLinkRequest request, CancellationToken ct)
     {
         if (request.Target == LinkTarget.DataFolder)
         {
@@ -25,6 +25,6 @@ public class OpenLinkHandler(ILinkOpener opener, MurmurPaths paths) : IRequestHa
             opener.Open(AppLinks.For(request.Target));
         }
 
-        return Task.CompletedTask;
+        return Unit.ValueTask;
     }
 }

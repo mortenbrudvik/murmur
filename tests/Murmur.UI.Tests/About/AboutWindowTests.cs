@@ -1,6 +1,6 @@
 using System.Windows.Input;
 using System.Windows.Interop;
-using MediatR;
+using Mediator;
 using Murmur.Core.Insertion;
 using Murmur.Core.Models;
 using Murmur.Core.Services;

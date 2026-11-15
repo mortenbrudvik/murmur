@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Insertion;
 using Murmur.Core.Services;
 
@@ -14,6 +14,6 @@ public record CopyHistoryEntryRequest(Guid Id) : IRequest<bool>;
 public class CopyHistoryEntryHandler(IHistoryStore history, ITextInserter inserter)
     : IRequestHandler<CopyHistoryEntryRequest, bool>
 {
-    public Task<bool> Handle(CopyHistoryEntryRequest request, CancellationToken ct) =>
-        Task.FromResult(history.Find(request.Id) is { } entry && inserter.TryCopy(entry.Text));
+    public ValueTask<bool> Handle(CopyHistoryEntryRequest request, CancellationToken ct) =>
+        ValueTask.FromResult(history.Find(request.Id) is { } entry && inserter.TryCopy(entry.Text));
 }

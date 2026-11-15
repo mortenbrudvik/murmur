@@ -1,6 +1,6 @@
 using System.Net.Http;
 using Autofac;
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
 using Murmur.Core.Hardware;

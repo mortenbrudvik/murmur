@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Services;
 
@@ -9,10 +9,10 @@ public record ClearHistoryRequest : IRequest<bool>;
 
 public class ClearHistoryHandler(IHistoryStore history, IAudioArchive audioArchive) : IRequestHandler<ClearHistoryRequest, bool>
 {
-    public Task<bool> Handle(ClearHistoryRequest request, CancellationToken ct)
+    public ValueTask<bool> Handle(ClearHistoryRequest request, CancellationToken ct)
     {
         history.Clear();
         audioArchive.Clear();
-        return Task.FromResult(true);
+        return ValueTask.FromResult(true);
     }
 }

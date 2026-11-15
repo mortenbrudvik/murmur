@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Setup;
 
 namespace Murmur.Core.Features.App;
@@ -8,9 +8,9 @@ public record UiReadyRequest : IRequest;
 
 public class UiReadyHandler(UiReadiness ui) : IRequestHandler<UiReadyRequest>
 {
-    public Task Handle(UiReadyRequest request, CancellationToken ct)
+    public ValueTask<Unit> Handle(UiReadyRequest request, CancellationToken ct)
     {
         ui.MarkReady();
-        return Task.CompletedTask;
+        return Unit.ValueTask;
     }
 }

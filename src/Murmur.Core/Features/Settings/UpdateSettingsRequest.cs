@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Input;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
@@ -29,7 +29,7 @@ public sealed class SettingsUpdatedNotification(MurmurSettings settings) : INoti
 public class UpdateSettingsHandler(ISettingsService settingsService, IMediator mediator, IKeyboardLayout layout)
     : IRequestHandler<UpdateSettingsRequest, MurmurSettings>
 {
-    public async Task<MurmurSettings> Handle(UpdateSettingsRequest request, CancellationToken ct)
+    public async ValueTask<MurmurSettings> Handle(UpdateSettingsRequest request, CancellationToken ct)
     {
         var microphoneId = string.IsNullOrWhiteSpace(request.MicrophoneId) ? null : request.MicrophoneId;
         var hotkey = request.Hotkey is { IsValid: true } requested

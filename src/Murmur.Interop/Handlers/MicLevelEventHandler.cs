@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Features.Setup;
 
 namespace Murmur.Interop.Handlers;
@@ -7,9 +7,9 @@ namespace Murmur.Interop.Handlers;
 public class MicLevelEventHandler(ApiEventAggregator eventAggregator)
     : INotificationHandler<MicLevelNotification>
 {
-    public Task Handle(MicLevelNotification notification, CancellationToken ct)
+    public ValueTask Handle(MicLevelNotification notification, CancellationToken ct)
     {
         eventAggregator.Publish("setup.micLevel", new { level = notification.Level, ended = notification.Ended });
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

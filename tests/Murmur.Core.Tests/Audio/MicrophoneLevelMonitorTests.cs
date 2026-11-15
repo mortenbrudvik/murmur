@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using MediatR;
+using Mediator;
 using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Audio;
 using Murmur.Core.Features.Setup;
@@ -28,7 +28,7 @@ public sealed class MicrophoneLevelMonitorTests
         {
             _levels.Add(n.Level);
             _published.Add(n);
-        }), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        }), Arg.Any<CancellationToken>()).Returns(ValueTask.CompletedTask);
         _monitor = new MicrophoneLevelMonitor(CreateRecorder, _mediator, _time);
     }
 
@@ -185,7 +185,7 @@ public sealed class MicrophoneLevelMonitorTests
     public void Start_PublishNeverCompletes_DoesNotBlockTheCaptureThread()
     {
         _mediator.Publish(Arg.Any<MicLevelNotification>(), Arg.Any<CancellationToken>())
-            .Returns(new TaskCompletionSource().Task);
+            .Returns(new ValueTask(new TaskCompletionSource().Task));
         _monitor.Start(null);
 
         Should.CompleteIn(() => Emit(Recorder(), Chunk(0.1f)), TimeSpan.FromSeconds(5));

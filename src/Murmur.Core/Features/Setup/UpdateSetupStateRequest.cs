@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Setup;
 
@@ -9,6 +9,6 @@ public record UpdateSetupStateRequest(SetupStep? Step, bool? CudaTipDismissed, b
 
 public class UpdateSetupStateHandler(SetupCoordinator coordinator) : IRequestHandler<UpdateSetupStateRequest, SetupState>
 {
-    public Task<SetupState> Handle(UpdateSetupStateRequest request, CancellationToken ct) =>
-        Task.FromResult(coordinator.Update(request.Step, request.CudaTipDismissed, request.Completed));
+    public ValueTask<SetupState> Handle(UpdateSetupStateRequest request, CancellationToken ct) =>
+        ValueTask.FromResult(coordinator.Update(request.Step, request.CudaTipDismissed, request.Completed));
 }

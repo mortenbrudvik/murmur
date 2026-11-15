@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using MediatR;
+using Mediator;
 using Murmur.Common;
 using Serilog;
 
@@ -24,7 +24,9 @@ public class ApiBridge(IMediator mediator, ApiRegistry apiRegistry)
             if (request == null)
                 return JsonUtils.Serialize(new { success = false, error = $"Invalid params for {serviceName}.{methodName}" });
 
-            var result = await Task.Run(() => mediator.Send(request)).ConfigureAwait(false);
+            // AsTask: Task.Run has no ValueTask overload, so without it the await would yield the ValueTask itself and
+            // the web app would get that, not the response.
+            var result = await Task.Run(() => mediator.Send(request).AsTask()).ConfigureAwait(false);
             var json = JsonUtils.Serialize(new { success = true, data = result });
             IpcLogger.LogResponse(serviceName, methodName, json);
             return json;

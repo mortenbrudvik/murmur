@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
-using MediatR;
+using Mediator;
 using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
@@ -1524,7 +1524,7 @@ public sealed class DictationControllerTests : IDisposable
     public async Task HandsFreeTimeLimit_AnnouncementThrows_StillCountsAsSaved()
     {
         _mediator.Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new InvalidOperationException("no window")));
+            .Returns(ValueTask.FromException(new InvalidOperationException("no window")));
 
         Tap();
         _time.Advance(TimeSpan.FromMinutes(10));
@@ -2098,7 +2098,7 @@ public sealed class DictationControllerTests : IDisposable
         _mediator.Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>()).Returns(_ =>
         {
             started.TrySetResult();
-            return pending.Task;
+            return new ValueTask(pending.Task);
         });
         publish = pending;
         return started.Task;

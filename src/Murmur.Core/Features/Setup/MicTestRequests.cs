@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Audio;
 using Murmur.Core.Models;
 
@@ -12,8 +12,8 @@ public record StartMicTestRequest(string? MicrophoneId) : IRequest<MicTestResult
 
 public class StartMicTestHandler(MicrophoneLevelMonitor monitor) : IRequestHandler<StartMicTestRequest, MicTestResult>
 {
-    public Task<MicTestResult> Handle(StartMicTestRequest request, CancellationToken ct) =>
-        Task.FromResult(monitor.Start(request.MicrophoneId));
+    public ValueTask<MicTestResult> Handle(StartMicTestRequest request, CancellationToken ct) =>
+        ValueTask.FromResult(monitor.Start(request.MicrophoneId));
 }
 
 /// <summary>Ends the microphone test and releases the microphone. Harmless when no test is running.</summary>
@@ -21,10 +21,10 @@ public record StopMicTestRequest : IRequest;
 
 public class StopMicTestHandler(MicrophoneLevelMonitor monitor) : IRequestHandler<StopMicTestRequest>
 {
-    public Task Handle(StopMicTestRequest request, CancellationToken ct)
+    public ValueTask<Unit> Handle(StopMicTestRequest request, CancellationToken ct)
     {
         monitor.Stop();
-        return Task.CompletedTask;
+        return Unit.ValueTask;
     }
 }
 

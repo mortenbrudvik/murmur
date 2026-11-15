@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Murmur.Core.Models;
 using Murmur.Core.Services;
 
@@ -8,8 +8,8 @@ public record GetSettingsRequest : IRequest<MurmurSettings>;
 
 public class GetSettingsHandler(ISettingsService settingsService) : IRequestHandler<GetSettingsRequest, MurmurSettings>
 {
-    public Task<MurmurSettings> Handle(GetSettingsRequest request, CancellationToken ct)
+    public ValueTask<MurmurSettings> Handle(GetSettingsRequest request, CancellationToken ct)
     {
-        return Task.FromResult(settingsService.Load());
+        return ValueTask.FromResult(settingsService.Load());
     }
 }

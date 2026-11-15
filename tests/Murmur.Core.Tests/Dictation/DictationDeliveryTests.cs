@@ -1,4 +1,4 @@
-using MediatR;
+using Mediator;
 using Microsoft.Extensions.Time.Testing;
 using Murmur.Core.Audio;
 using Murmur.Core.Dictation;
@@ -196,7 +196,7 @@ public sealed class DictationDeliveryTests
     {
         _audioArchive.When(a => a.Save(Arg.Any<Guid>(), Arg.Any<float[]>())).Do(_ => throw new IOException("disk full"));
         _mediator.Publish(Arg.Any<HistoryEntryAddedNotification>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new InvalidOperationException("no window")));
+            .Returns(ValueTask.FromException(new InvalidOperationException("no window")));
 
         var outcome = await Create().KeepUnpastedAsync(Text, Samples, keepAudio: true, IsCurrent);
 

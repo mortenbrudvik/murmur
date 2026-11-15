@@ -59,7 +59,7 @@ public sealed class AppHandlerTests
         var opener = Substitute.For<ILinkOpener>();
 
         await Should.ThrowAsync<ArgumentOutOfRangeException>(
-            () => new OpenLinkHandler(opener, new MurmurPaths(@"C:\x")).Handle(new OpenLinkRequest((LinkTarget)99), CancellationToken.None));
+            () => new OpenLinkHandler(opener, new MurmurPaths(@"C:\x")).Handle(new OpenLinkRequest((LinkTarget)99), CancellationToken.None).AsTask());
 
         opener.DidNotReceiveWithAnyArgs().Open(default!);
     }
@@ -72,7 +72,7 @@ public sealed class AppHandlerTests
         opener.When(o => o.Open(Arg.Any<string>())).Throw(new InvalidOperationException("no browser"));
 
         await Should.ThrowAsync<InvalidOperationException>(
-            () => new OpenLinkHandler(opener, new MurmurPaths(@"C:\x")).Handle(new OpenLinkRequest(LinkTarget.CudaDownload), CancellationToken.None));
+            () => new OpenLinkHandler(opener, new MurmurPaths(@"C:\x")).Handle(new OpenLinkRequest(LinkTarget.CudaDownload), CancellationToken.None).AsTask());
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public sealed class AppHandlerTests
         lifecycle.When(l => l.RequestRestart()).Throw(new InvalidOperationException("cannot start"));
 
         await Should.ThrowAsync<InvalidOperationException>(
-            () => new RestartAppHandler(lifecycle).Handle(new RestartAppRequest(), CancellationToken.None));
+            () => new RestartAppHandler(lifecycle).Handle(new RestartAppRequest(), CancellationToken.None).AsTask());
     }
 
     [Fact]

@@ -108,7 +108,7 @@ public sealed class VocabularyHandlerTests
     public async Task UpdateVocabulary_OverALimit_ThrowsAndDoesNotSave(string reason, UpdateVocabularyRequest request)
     {
         var ex = await Should.ThrowAsync<ArgumentException>(
-            () => new UpdateVocabularyHandler(_vocabulary).Handle(request, CancellationToken.None));
+            () => new UpdateVocabularyHandler(_vocabulary).Handle(request, CancellationToken.None).AsTask());
 
         ex.Message.ShouldContain(reason);
         _vocabulary.DidNotReceiveWithAnyArgs().Save(default!);
